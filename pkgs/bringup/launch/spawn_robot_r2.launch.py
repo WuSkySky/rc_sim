@@ -21,16 +21,16 @@ def generate_launch_description():
         )
     )
 
-    simple_box_sdf = os.path.join(
-        robot_pkg, 'models', 'SimpleBox', 'model.sdf'
+    robot_r2_sdf = os.path.join(
+        robot_pkg, 'models', 'robot_r2', 'model.sdf'
     )
 
-    spawn_simple_box = Node(
+    spawn_robot_r2 = Node(
         package='gazebo_ros',
         executable='spawn_entity.py',
         arguments=[
-            '-entity', 'simple_box',
-            '-file', simple_box_sdf,
+            '-entity', 'robot_r2',
+            '-file', robot_r2_sdf,
             '-x', '0.0',
             '-y', '0.0',
             '-z', '2.0',
@@ -41,5 +41,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         field_launch,
-        spawn_simple_box,
+        spawn_robot_r2,
     ])
