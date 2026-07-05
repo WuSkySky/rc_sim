@@ -21,6 +21,17 @@
       <max_yaw_velocity>15.7</max_yaw_velocity>
     </plugin>
 
+    <plugin name="robot_r2_localizer" filename="librobot_r2_localizer.so">
+      <ros>
+        <namespace>/</namespace>
+      </ros>
+      <position_topic>/simulation/r2/position_feedback</position_topic>
+      <link_name>base_link</link_name>
+      <pose_offset>0 0 0 0 0 0</pose_offset>
+      <frame_id>world</frame_id>
+      <publish_rate>50.0</publish_rate>
+    </plugin>
+
     <link name="base_link">
       <pose>0 0 0.25 0 0 0</pose>
       <inertial>

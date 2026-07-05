@@ -11,7 +11,15 @@ add_library(robot_r2_planar_move SHARED
   src/robot_r2_planar_move.cpp
 )
 
+add_library(robot_r2_localizer SHARED
+  src/robot_r2_localizer.cpp
+)
+
 target_include_directories(robot_r2_planar_move PUBLIC
+  ${GAZEBO_INCLUDE_DIRS}
+)
+
+target_include_directories(robot_r2_localizer PUBLIC
   ${GAZEBO_INCLUDE_DIRS}
 )
 
@@ -22,7 +30,18 @@ ament_target_dependencies(robot_r2_planar_move
   rclcpp
 )
 
+ament_target_dependencies(robot_r2_localizer
+  gazebo_dev
+  gazebo_ros
+  geometry_msgs
+  rclcpp
+)
+
 target_link_libraries(robot_r2_planar_move
+  ${GAZEBO_LIBRARIES}
+)
+
+target_link_libraries(robot_r2_localizer
   ${GAZEBO_LIBRARIES}
 )
 
@@ -32,7 +51,7 @@ install(
 )
 
 install(
-  TARGETS robot_r2_planar_move
+  TARGETS robot_r2_planar_move robot_r2_localizer
   LIBRARY DESTINATION lib
 )
 
