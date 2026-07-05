@@ -7,7 +7,8 @@
       <ros>
         <namespace>/</namespace>
       </ros>
-      <command_topic>cmd_vel</command_topic>
+      <command_topic>/simulation/r2/cmd_vel</command_topic>
+      <velocity_feedback_topic>/simulation/r2/velocity_feedback</velocity_feedback_topic>
       <cmd_vel_timeout>0.25</cmd_vel_timeout>
       <x_velocity_p_gain>80.0</x_velocity_p_gain>
       <y_velocity_p_gain>80.0</y_velocity_p_gain>

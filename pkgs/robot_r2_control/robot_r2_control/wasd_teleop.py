@@ -24,7 +24,7 @@ class WasdTeleop(Node):
     def __init__(self):
         super().__init__('robot_r2_wasd_teleop')
 
-        self.declare_parameter('cmd_vel_topic', 'cmd_vel')
+        self.declare_parameter('cmd_vel_topic', '/simulation/r2/cmd_vel')
         self.declare_parameter('linear_speed', 1.5)
         self.declare_parameter('angular_speed', 1.57)
         self.declare_parameter('publish_rate', 20.0)

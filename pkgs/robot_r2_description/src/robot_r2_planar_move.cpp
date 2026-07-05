@@ -24,7 +24,10 @@ public:
     model_ = model;
     node_ = gazebo_ros::Node::Get(sdf);
 
-    command_topic_ = sdf->Get<std::string>("command_topic", "cmd_vel").first;
+    command_topic_ = sdf->Get<std::string>(
+      "command_topic", "/simulation/r2/cmd_vel").first;
+    velocity_feedback_topic_ = sdf->Get<std::string>(
+      "velocity_feedback_topic", "/simulation/r2/velocity_feedback").first;
     cmd_vel_timeout_ = sdf->Get<double>("cmd_vel_timeout", 0.25).first;
 
     x_velocity_p_gain_ = sdf->Get<double>("x_velocity_p_gain", 15.0).first;
@@ -54,6 +57,10 @@ public:
         last_cmd_time_ = model_->GetWorld()->SimTime();
         has_cmd_ = true;
       });
+
+    velocity_feedback_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>(
+      velocity_feedback_topic_,
+      rclcpp::QoS(10));
 
     update_connection_ =
       gazebo::event::Events::ConnectWorldUpdateBegin(
@@ -124,6 +131,13 @@ private:
 
     base_link_->AddRelativeForce(force);
     base_link_->AddTorque(torque);
+
+    geometry_msgs::msg::Twist feedback;
+    feedback.linear.x = v.X();
+    feedback.linear.y = v.Y();
+    feedback.linear.z = v.Z();
+    feedback.angular.z = w.Z();
+    velocity_feedback_pub_->publish(feedback);
   }
 
   static double Clamp(double v, double mn, double mx)
@@ -137,6 +151,7 @@ private:
   gazebo_ros::Node::SharedPtr node_;
   gazebo::event::ConnectionPtr update_connection_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr velocity_feedback_pub_;
 
   std::mutex mutex_;
   geometry_msgs::msg::Twist target_cmd_;
@@ -144,7 +159,8 @@ private:
   gazebo::common::Time last_update_time_{0};
   bool has_cmd_{false};
 
-  std::string command_topic_{"cmd_vel"};
+  std::string command_topic_{"/simulation/r2/cmd_vel"};
+  std::string velocity_feedback_topic_{"/simulation/r2/velocity_feedback"};
   double cmd_vel_timeout_{0.25};
 
   double max_x_velocity_{0.6};
