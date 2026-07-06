@@ -35,10 +35,12 @@ def generate_launch_description():
         arguments=[
             '-entity', 'robot_r2',
             '-file', robot_r2_sdf,
-            '-x', '0.0',
-            '-y', '0.0',
-            '-z', '0.01',
-            '-Y', '0.0',
+            '-x', '3.73',
+            '-y', '-3.0',
+            '-z', '0.3',
+            '-R', '0.0',
+            '-P', '0.0',
+            '-Y', '3.14',
         ],
         output='screen',
     )

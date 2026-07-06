@@ -1,19 +1,18 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>robot_r2_description</name>
+  <name>robot_r2_interfaces</name>
   <version>0.0.0</version>
-  <description>Robot model descriptions for RC2026.</description>
+  <description>ROS 2 interfaces for robot_r2 simulation control.</description>
   <maintainer email="skysky@example.com">skysky</maintainer>
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
-  <depend>gazebo_dev</depend>
-  <depend>gazebo_ros</depend>
-  <depend>geometry_msgs</depend>
-  <depend>rclcpp</depend>
-  <depend>robot_r2_interfaces</depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <member_of_group>rosidl_interface_packages</member_of_group>
 
   <export>
     <build_type>ament_cmake</build_type>
