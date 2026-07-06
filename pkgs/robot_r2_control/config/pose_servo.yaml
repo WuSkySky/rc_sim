@@ -1,27 +1,28 @@
 robot_r2_pose_servo:
   ros__parameters:
     current_pose_topic: /r2/pose_feedback
-    target_pose_topic: /r2/target_pose
     cmd_vel_topic: /r2/cmd_vel
+    move_to_pose_service: /r2/move_to_pose
 
     publish_rate: 50.0
     position_tolerance: 0.02
     yaw_tolerance: 0.03
+    default_timeout_sec: 20.0
 
-    x_kp: 30.0
+    x_kp: 10.0
     x_ki: 0.0
-    x_kd: 2.0
+    x_kd: 0.5
     x_integral_limit: 0.5
     x_output_limit: 5.0
 
-    y_kp: 30.0
+    y_kp: 10.0
     y_ki: 0.0
-    y_kd: 2.0
+    y_kd: 0.5
     y_integral_limit: 0.5
     y_output_limit: 5.0
 
     yaw_kp: 30.0
     yaw_ki: 0.0
-    yaw_kd: 0.5
+    yaw_kd: 0.8
     yaw_integral_limit: 0.5
     yaw_output_limit: 6.28

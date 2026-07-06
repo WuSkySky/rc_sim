@@ -1,0 +1,11 @@
+float64 front_lift
+float64 rear_lift
+float64 tolerance
+float64 timeout_sec
+---
+bool success
+string message
+float64 final_front_lift
+float64 final_rear_lift
+float64 front_error
+float64 rear_error

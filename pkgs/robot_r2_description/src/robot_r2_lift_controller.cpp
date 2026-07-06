@@ -35,7 +35,7 @@ public:
     max_lift_ = sdf->Get<double>("max_lift", 0.3).first;
     position_p_gain_ = sdf->Get<double>("position_p_gain", 300.0).first;
     position_i_gain_ = sdf->Get<double>("position_i_gain", 0.0).first;
-    position_d_gain_ = sdf->Get<double>("position_d_gain", 80.0).first;
+    position_d_gain_ = sdf->Get<double>("position_d_gain", 100.0).first;
     position_i_max_ = sdf->Get<double>("position_i_max", 0.0).first;
     position_i_min_ = sdf->Get<double>("position_i_min", 0.0).first;
     max_actuation_force_ = sdf->Get<double>("max_actuation_force", 400.0).first;

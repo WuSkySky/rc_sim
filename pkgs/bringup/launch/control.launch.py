@@ -26,7 +26,21 @@ def generate_launch_description():
         output='screen',
     )
 
+    lift_service_controller = Node(
+        package='robot_r2_control',
+        executable='lift_service_controller',
+        output='screen',
+    )
+
+    step_traverse_service = Node(
+        package='robot_r2_control',
+        executable='step_traverse_service',
+        output='screen',
+    )
+
     return LaunchDescription([
         wasd_teleop,
         pose_servo,
+        lift_service_controller,
+        step_traverse_service,
     ])

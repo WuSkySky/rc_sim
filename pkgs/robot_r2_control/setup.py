@@ -26,6 +26,8 @@ setup(
         'console_scripts': [
             'wasd_teleop = robot_r2_control.wasd_teleop:main',
             'pose_servo = robot_r2_control.pose_servo:main',
+            'lift_service_controller = robot_r2_control.lift_service_controller:main',
+            'step_traverse_service = robot_r2_control.step_traverse_service:main',
         ],
     },
 )

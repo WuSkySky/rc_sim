@@ -1,0 +1,14 @@
+float64 x
+float64 y
+float64 yaw
+float64 position_tolerance
+float64 yaw_tolerance
+float64 timeout_sec
+---
+bool success
+string message
+float64 final_x
+float64 final_y
+float64 final_yaw
+float64 position_error
+float64 yaw_error
