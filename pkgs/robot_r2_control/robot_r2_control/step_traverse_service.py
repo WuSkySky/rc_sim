@@ -17,13 +17,14 @@ GRID = [
     [None, None, (3.4, -3.0, 0), None, None],
 ]
 
+MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+SET_LIFT_SERVICE = '/r2/lift/set'
+TRAVERSE_SERVICE = '/r2/traverse_adjacent_step'
+
 DEFAULT_NEAR_EDGE_OFFSET = 0.4
 DEFAULT_FAR_EDGE_OFFSET = 0.5
-DEFAULT_POSITION_TOLERANCE = 0.03
-DEFAULT_YAW_TOLERANCE = 0.05
-DEFAULT_MOVE_TIMEOUT_SEC = 20.0
-DEFAULT_LIFT_TOLERANCE = 0.01
-DEFAULT_LIFT_TIMEOUT_SEC = 10.0
+MOVE_TO_POSE_WAIT_TIMEOUT_SEC = 35.0
+SET_LIFT_WAIT_TIMEOUT_SEC = 15.0
 
 LIFT_PRESETS = {
     1: (0.2, 0.0),
@@ -91,107 +92,43 @@ class StepTraverseService(Node):
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
 
-        self.declare_parameter('move_to_pose_service', '/r2/move_to_pose')
-        self.declare_parameter('set_lift_service', '/r2/lift/set')
-        self.declare_parameter('traverse_service', '/r2/traverse_adjacent_step')
         self.declare_parameter('near_edge_offset', DEFAULT_NEAR_EDGE_OFFSET)
         self.declare_parameter('far_edge_offset', DEFAULT_FAR_EDGE_OFFSET)
-        self.declare_parameter('position_tolerance', DEFAULT_POSITION_TOLERANCE)
-        self.declare_parameter('yaw_tolerance', DEFAULT_YAW_TOLERANCE)
-        self.declare_parameter('move_timeout_sec', DEFAULT_MOVE_TIMEOUT_SEC)
-        self.declare_parameter('lift_tolerance', DEFAULT_LIFT_TOLERANCE)
-        self.declare_parameter('lift_timeout_sec', DEFAULT_LIFT_TIMEOUT_SEC)
 
-        move_to_pose_service = self.get_parameter('move_to_pose_service').value
-        set_lift_service = self.get_parameter('set_lift_service').value
-        traverse_service = self.get_parameter('traverse_service').value
-
-        self.default_near_edge_offset = self.get_parameter(
-            'near_edge_offset').value
-        self.default_far_edge_offset = self.get_parameter(
-            'far_edge_offset').value
-        self.default_position_tolerance = self.get_parameter(
-            'position_tolerance').value
-        self.default_yaw_tolerance = self.get_parameter('yaw_tolerance').value
-        self.default_move_timeout_sec = self.get_parameter(
-            'move_timeout_sec').value
-        self.default_lift_tolerance = self.get_parameter(
-            'lift_tolerance').value
-        self.default_lift_timeout_sec = self.get_parameter(
-            'lift_timeout_sec').value
+        self.near_edge_offset = self.get_parameter('near_edge_offset').value
+        self.far_edge_offset = self.get_parameter('far_edge_offset').value
 
         self.move_to_pose_client = self.create_client(
             MoveToPose,
-            move_to_pose_service,
+            MOVE_TO_POSE_SERVICE,
             callback_group=self.callback_group,
         )
         self.set_lift_client = self.create_client(
             SetLift,
-            set_lift_service,
+            SET_LIFT_SERVICE,
             callback_group=self.callback_group,
         )
         self.traverse_service = self.create_service(
             TraverseAdjacentStep,
-            traverse_service,
+            TRAVERSE_SERVICE,
             self.handle_traverse_request,
             callback_group=self.callback_group,
         )
 
         self.get_logger().info(
-            f'Step traverse service active: service={traverse_service}, '
-            f'move={move_to_pose_service}, lift={set_lift_service}')
+            f'Step traverse service active: service={TRAVERSE_SERVICE}, '
+            f'move={MOVE_TO_POSE_SERVICE}, lift={SET_LIFT_SERVICE}')
 
     def handle_traverse_request(self, request, response):
         with self.service_lock:
             try:
                 self.wait_for_dependencies()
                 path = self.build_path(request.rows, request.cols)
-                near_edge_offset = (
-                    request.near_edge_offset
-                    if request.near_edge_offset > 0.0
-                    else self.default_near_edge_offset
-                )
-                far_edge_offset = (
-                    request.far_edge_offset
-                    if request.far_edge_offset > 0.0
-                    else self.default_far_edge_offset
-                )
-                position_tolerance = (
-                    request.position_tolerance
-                    if request.position_tolerance > 0.0
-                    else self.default_position_tolerance
-                )
-                yaw_tolerance = (
-                    request.yaw_tolerance
-                    if request.yaw_tolerance > 0.0
-                    else self.default_yaw_tolerance
-                )
-                move_timeout_sec = (
-                    request.move_timeout_sec
-                    if request.move_timeout_sec > 0.0
-                    else self.default_move_timeout_sec
-                )
-                lift_tolerance = (
-                    request.lift_tolerance
-                    if request.lift_tolerance > 0.0
-                    else self.default_lift_tolerance
-                )
-                lift_timeout_sec = (
-                    request.lift_timeout_sec
-                    if request.lift_timeout_sec > 0.0
-                    else self.default_lift_timeout_sec
-                )
-
                 self.follow_path(
                     GRID,
                     path,
-                    near_edge_offset=near_edge_offset,
-                    far_edge_offset=far_edge_offset,
-                    position_tolerance=position_tolerance,
-                    yaw_tolerance=yaw_tolerance,
-                    move_timeout_sec=move_timeout_sec,
-                    lift_tolerance=lift_tolerance,
-                    lift_timeout_sec=lift_timeout_sec,
+                    near_edge_offset=self.near_edge_offset,
+                    far_edge_offset=self.far_edge_offset,
                 )
                 response.success = True
                 response.message = (
@@ -211,9 +148,9 @@ class StepTraverseService(Node):
 
     def wait_for_dependencies(self, timeout_sec=2.0):
         if not self.move_to_pose_client.wait_for_service(timeout_sec=timeout_sec):
-            raise RuntimeError('/r2/move_to_pose service unavailable')
+            raise RuntimeError(f'{MOVE_TO_POSE_SERVICE} service unavailable')
         if not self.set_lift_client.wait_for_service(timeout_sec=timeout_sec):
-            raise RuntimeError('/r2/lift/set service unavailable')
+            raise RuntimeError(f'{SET_LIFT_SERVICE} service unavailable')
 
     def wait_for_future(self, future, timeout_sec, description):
         done_event = threading.Event()
@@ -232,20 +169,21 @@ class StepTraverseService(Node):
         x,
         y,
         yaw,
-        position_tolerance,
-        yaw_tolerance,
-        timeout_sec,
     ):
         request = MoveToPose.Request()
         request.x = float(x)
         request.y = float(y)
         request.yaw = float(yaw)
-        request.position_tolerance = float(position_tolerance)
-        request.yaw_tolerance = float(yaw_tolerance)
-        request.timeout_sec = float(timeout_sec)
+        request.position_tolerance = 0.0
+        request.yaw_tolerance = 0.0
+        request.timeout_sec = 0.0
 
         future = self.move_to_pose_client.call_async(request)
-        response = self.wait_for_future(future, timeout_sec, 'MoveToPose')
+        response = self.wait_for_future(
+            future,
+            MOVE_TO_POSE_WAIT_TIMEOUT_SEC,
+            'MoveToPose',
+        )
         if not response.success:
             raise RuntimeError(
                 f'MoveToPose failed: {response.message} '
@@ -257,17 +195,19 @@ class StepTraverseService(Node):
         self,
         front_lift,
         rear_lift,
-        tolerance,
-        timeout_sec,
     ):
         request = SetLift.Request()
         request.front_lift = float(front_lift)
         request.rear_lift = float(rear_lift)
-        request.tolerance = float(tolerance)
-        request.timeout_sec = float(timeout_sec)
+        request.tolerance = 0.0
+        request.timeout_sec = 0.0
 
         future = self.set_lift_client.call_async(request)
-        response = self.wait_for_future(future, timeout_sec, 'SetLift')
+        response = self.wait_for_future(
+            future,
+            SET_LIFT_WAIT_TIMEOUT_SEC,
+            'SetLift',
+        )
         if not response.success:
             raise RuntimeError(
                 f'SetLift failed: {response.message} '
@@ -282,12 +222,7 @@ class StepTraverseService(Node):
         target_index,
         near_edge_offset,
         far_edge_offset,
-        position_tolerance,
-        yaw_tolerance,
-        move_timeout_sec,
-        lift_tolerance,
-        lift_timeout_sec,
-        ):
+    ):
         current_center = get_cell_center(grid_data, current_index)
         target_center = get_cell_center(grid_data, target_index)
 
@@ -304,9 +239,6 @@ class StepTraverseService(Node):
             current_center[0],
             current_center[1],
             direction_yaw,
-            position_tolerance,
-            yaw_tolerance,
-            move_timeout_sec,
         )
 
         if target_height > current_height:
@@ -319,42 +251,27 @@ class StepTraverseService(Node):
             )
             self.call_set_lift(
                 *LIFT_PRESETS[1],
-                tolerance=lift_tolerance,
-                timeout_sec=lift_timeout_sec,
             )
             self.call_move_to_pose(
                 current_edge[0],
                 current_edge[1],
                 direction_yaw,
-                position_tolerance,
-                yaw_tolerance,
-                move_timeout_sec,
             )
             self.call_set_lift(
                 *LIFT_PRESETS[4],
-                tolerance=lift_tolerance,
-                timeout_sec=lift_timeout_sec,
             )
             self.call_move_to_pose(
                 target_edge[0],
                 target_edge[1],
                 direction_yaw,
-                position_tolerance,
-                yaw_tolerance,
-                move_timeout_sec,
             )
             self.call_set_lift(
                 *LIFT_PRESETS[5],
-                tolerance=lift_tolerance,
-                timeout_sec=lift_timeout_sec,
             )
             self.call_move_to_pose(
                 target_center[0],
                 target_center[1],
                 direction_yaw,
-                position_tolerance,
-                yaw_tolerance,
-                move_timeout_sec,
             )
             return
 
@@ -370,57 +287,32 @@ class StepTraverseService(Node):
                 current_edge[0],
                 current_edge[1],
                 direction_yaw,
-                position_tolerance,
-                yaw_tolerance,
-                move_timeout_sec,
             )
             self.call_set_lift(
                 *LIFT_PRESETS[2],
-                tolerance=lift_tolerance,
-                timeout_sec=lift_timeout_sec,
             )
             self.call_move_to_pose(
                 target_edge[0],
                 target_edge[1],
                 direction_yaw,
-                position_tolerance,
-                yaw_tolerance,
-                move_timeout_sec,
             )
             self.call_set_lift(
                 *LIFT_PRESETS[3],
-                tolerance=lift_tolerance,
-                timeout_sec=lift_timeout_sec,
             )
             self.call_move_to_pose(
                 target_center[0],
                 target_center[1],
                 direction_yaw,
-                position_tolerance,
-                yaw_tolerance,
-                move_timeout_sec,
             )
             self.call_set_lift(
                 *LIFT_PRESETS[5],
-                tolerance=lift_tolerance,
-                timeout_sec=lift_timeout_sec,
             )
             return
 
-        current_edge = get_edge_point(
-            current_center, direction, near_edge_offset)
-        target_edge = get_edge_point(
-            target_center,
-            (-direction[0], -direction[1]),
-            far_edge_offset,
-        )
         self.call_move_to_pose(
             target_center[0],
             target_center[1],
             direction_yaw,
-            position_tolerance,
-            yaw_tolerance,
-            move_timeout_sec,
         )
 
     def follow_path(
@@ -429,11 +321,6 @@ class StepTraverseService(Node):
         path,
         near_edge_offset,
         far_edge_offset,
-        position_tolerance,
-        yaw_tolerance,
-        move_timeout_sec,
-        lift_tolerance,
-        lift_timeout_sec,
     ):
         for current_index, target_index in zip(path[:-1], path[1:]):
             self.move_between_adjacent_steps(
@@ -442,11 +329,6 @@ class StepTraverseService(Node):
                 target_index,
                 near_edge_offset=near_edge_offset,
                 far_edge_offset=far_edge_offset,
-                position_tolerance=position_tolerance,
-                yaw_tolerance=yaw_tolerance,
-                move_timeout_sec=move_timeout_sec,
-                lift_tolerance=lift_tolerance,
-                lift_timeout_sec=lift_timeout_sec,
             )
 
 

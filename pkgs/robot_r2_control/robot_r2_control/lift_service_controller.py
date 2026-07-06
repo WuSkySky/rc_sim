@@ -19,7 +19,7 @@ class LiftServiceController(Node):
         self.declare_parameter(
             'position_feedback_topic', '/r2/lift/position_feedback')
         self.declare_parameter('set_lift_service', '/r2/lift/set')
-        self.declare_parameter('default_tolerance', 0.001)
+        self.declare_parameter('default_tolerance', 0.008)
         self.declare_parameter('default_timeout_sec', 10.0)
 
         command_topic = self.get_parameter('command_topic').value

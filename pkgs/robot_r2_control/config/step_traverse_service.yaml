@@ -1,0 +1,4 @@
+/**:
+  ros__parameters:
+    near_edge_offset: 0.4
+    far_edge_offset: 0.5

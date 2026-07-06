@@ -1,12 +1,5 @@
 int32[] rows
 int32[] cols
-float64 near_edge_offset
-float64 far_edge_offset
-float64 position_tolerance
-float64 yaw_tolerance
-float64 move_timeout_sec
-float64 lift_tolerance
-float64 lift_timeout_sec
 ---
 bool success
 string message

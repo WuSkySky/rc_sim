@@ -13,7 +13,10 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'config'),
-            ['config/pose_servo.yaml']),
+            [
+                'config/pose_servo.yaml',
+                'config/step_traverse_service.yaml',
+            ]),
     ],
     install_requires=['setuptools', 'pynput'],
     zip_safe=True,

@@ -12,6 +12,11 @@ def generate_launch_description():
         'config',
         'pose_servo.yaml',
     )
+    step_traverse_config = os.path.join(
+        control_pkg,
+        'config',
+        'step_traverse_service.yaml',
+    )
 
     wasd_teleop = Node(
         package='robot_r2_control',
@@ -35,6 +40,7 @@ def generate_launch_description():
     step_traverse_service = Node(
         package='robot_r2_control',
         executable='step_traverse_service',
+        parameters=[step_traverse_config],
         output='screen',
     )
 
