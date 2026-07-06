@@ -25,9 +25,9 @@ public:
     node_ = gazebo_ros::Node::Get(sdf);
 
     command_topic_ = sdf->Get<std::string>(
-      "command_topic", "/simulation/r2/cmd_vel").first;
+      "command_topic", "/r2/cmd_vel").first;
     velocity_feedback_topic_ = sdf->Get<std::string>(
-      "velocity_feedback_topic", "/simulation/r2/velocity_feedback").first;
+      "velocity_feedback_topic", "/r2/velocity_feedback").first;
     cmd_vel_timeout_ = sdf->Get<double>("cmd_vel_timeout", 0.25).first;
 
     x_velocity_p_gain_ = sdf->Get<double>("x_velocity_p_gain", 15.0).first;
@@ -159,8 +159,8 @@ private:
   gazebo::common::Time last_update_time_{0};
   bool has_cmd_{false};
 
-  std::string command_topic_{"/simulation/r2/cmd_vel"};
-  std::string velocity_feedback_topic_{"/simulation/r2/velocity_feedback"};
+  std::string command_topic_{"/r2/cmd_vel"};
+  std::string velocity_feedback_topic_{"/r2/velocity_feedback"};
   double cmd_vel_timeout_{0.25};
 
   double max_x_velocity_{0.6};

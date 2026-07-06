@@ -7,8 +7,8 @@
       <ros>
         <namespace>/</namespace>
       </ros>
-      <command_topic>/simulation/r2/cmd_vel</command_topic>
-      <velocity_feedback_topic>/simulation/r2/velocity_feedback</velocity_feedback_topic>
+      <command_topic>/r2/cmd_vel</command_topic>
+      <velocity_feedback_topic>/r2/velocity_feedback</velocity_feedback_topic>
       <cmd_vel_timeout>0.25</cmd_vel_timeout>
       <x_velocity_p_gain>150.0</x_velocity_p_gain>
       <y_velocity_p_gain>150.0</y_velocity_p_gain>
@@ -25,7 +25,7 @@
       <ros>
         <namespace>/</namespace>
       </ros>
-      <position_topic>/simulation/r2/position_feedback</position_topic>
+      <pose_topic>/r2/pose_feedback</pose_topic>
       <link_name>base_link</link_name>
       <pose_offset>0 0 0 0 0 0</pose_offset>
       <frame_id>world</frame_id>
@@ -36,8 +36,8 @@
       <ros>
         <namespace>/</namespace>
       </ros>
-      <command_topic>/simulation/r2/lift/cmd_lift</command_topic>
-      <position_feedback_topic>/simulation/r2/lift/position_feedback</position_feedback_topic>
+      <command_topic>/r2/lift/cmd_lift</command_topic>
+      <position_feedback_topic>/r2/lift/position_feedback</position_feedback_topic>
       <front_joint_name>front_lift_joint</front_joint_name>
       <rear_joint_name>rear_lift_joint</rear_joint_name>
       <min_lift>-0.30</min_lift>

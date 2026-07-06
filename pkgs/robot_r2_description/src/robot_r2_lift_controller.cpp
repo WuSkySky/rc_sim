@@ -24,9 +24,9 @@ public:
     node_ = gazebo_ros::Node::Get(sdf);
 
     command_topic_ = sdf->Get<std::string>(
-      "command_topic", "/simulation/r2/lift/cmd_lift").first;
+      "command_topic", "/r2/lift/cmd_lift").first;
     position_feedback_topic_ = sdf->Get<std::string>(
-      "position_feedback_topic", "/simulation/r2/lift/position_feedback").first;
+      "position_feedback_topic", "/r2/lift/position_feedback").first;
     front_joint_name_ = sdf->Get<std::string>(
       "front_joint_name", "front_lift_joint").first;
     rear_joint_name_ = sdf->Get<std::string>(
@@ -148,8 +148,8 @@ private:
   rclcpp::Publisher<robot_r2_interfaces::msg::LiftFeedback>::SharedPtr position_feedback_pub_;
 
   std::mutex mutex_;
-  std::string command_topic_{"/simulation/r2/lift/cmd_lift"};
-  std::string position_feedback_topic_{"/simulation/r2/lift/position_feedback"};
+  std::string command_topic_{"/r2/lift/cmd_lift"};
+  std::string position_feedback_topic_{"/r2/lift/position_feedback"};
   std::string front_joint_name_{"front_lift_joint"};
   std::string rear_joint_name_{"rear_lift_joint"};
   double min_lift_{-0.3};

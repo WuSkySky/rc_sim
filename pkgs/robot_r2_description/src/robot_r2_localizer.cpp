@@ -20,8 +20,8 @@ public:
     model_ = model;
     node_ = gazebo_ros::Node::Get(sdf);
 
-    position_topic_ = sdf->Get<std::string>(
-      "position_topic", "/simulation/r2/position_feedback").first;
+    pose_topic_ = sdf->Get<std::string>(
+      "pose_topic", "/r2/pose_feedback").first;
     link_name_ = sdf->Get<std::string>("link_name", "base_link").first;
     pose_offset_ = sdf->Get<ignition::math::Pose3d>(
       "pose_offset", ignition::math::Pose3d::Zero).first;
@@ -38,7 +38,7 @@ public:
     }
 
     pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
-      position_topic_,
+      pose_topic_,
       rclcpp::QoS(10));
 
     update_connection_ = gazebo::event::Events::ConnectWorldUpdateBegin(
@@ -47,7 +47,7 @@ public:
     RCLCPP_INFO(
       node_->get_logger(),
       "Robot R2 localizer publishing [%s]",
-      position_topic_.c_str());
+      pose_topic_.c_str());
   }
 
 private:
@@ -86,7 +86,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
 
   gazebo::common::Time last_publish_time_{0};
-  std::string position_topic_{"/simulation/r2/position_feedback"};
+  std::string pose_topic_{"/r2/pose_feedback"};
   std::string link_name_{"base_link"};
   ignition::math::Pose3d pose_offset_{ignition::math::Pose3d::Zero};
   std::string frame_id_{"world"};

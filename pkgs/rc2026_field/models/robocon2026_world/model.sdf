@@ -34,5 +34,29 @@
       <enable_wind>0</enable_wind>
       <kinematic>0</kinematic>
     </link>
+    <link name="test_ground_link">
+      <pose>0 0 3.05 0 0 0</pose>
+      <collision name="test_ground_collision">
+        <geometry>
+          <box>
+            <size>30 30 0.1</size>
+          </box>
+        </geometry>
+        <surface>
+          <contact>
+            <ode/>
+          </contact>
+          <friction>
+            <torsional>
+              <ode/>
+            </torsional>
+            <ode/>
+          </friction>
+        </surface>
+      </collision>
+      <self_collide>0</self_collide>
+      <enable_wind>0</enable_wind>
+      <kinematic>0</kinematic>
+    </link>
   </model>
 </sdf>

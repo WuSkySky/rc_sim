@@ -9,7 +9,9 @@
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <exec_depend>rc2026_field</exec_depend>
+  <exec_depend>robot_r2_control</exec_depend>
   <exec_depend>robot_r2_description</exec_depend>
 
   <export>

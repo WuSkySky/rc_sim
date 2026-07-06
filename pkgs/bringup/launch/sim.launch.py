@@ -25,6 +25,15 @@ def generate_launch_description():
         )
     )
 
+    control_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                os.path.dirname(__file__),
+                'control.launch.py',
+            )
+        )
+    )
+
     robot_r2_sdf = os.path.join(
         robot_pkg, 'models', 'robot_r2', 'model.sdf'
     )
@@ -52,4 +61,5 @@ def generate_launch_description():
         ),
         field_launch,
         spawn_robot_r2,
+        control_launch,
     ])
