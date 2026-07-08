@@ -1,2 +1,4 @@
-float64 front_lift
-float64 rear_lift
+float64 front_left_lift
+float64 front_right_lift
+float64 rear_left_lift
+float64 rear_right_lift

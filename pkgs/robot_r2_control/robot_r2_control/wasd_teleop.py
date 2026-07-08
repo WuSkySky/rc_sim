@@ -13,9 +13,10 @@ Robot R2 WASD teleop
 W/S : forward / backward
 A/D : left / right strafe
 Q/E : rotate left / right
-1/2 : front lift to +0.20 / -0.20 m, rear lift to 0
-3/4 : rear lift to +0.20 / -0.20 m, front lift to 0
-5   : front and rear lift to 0
+1   : front lift to +0.20 m
+2   : rear lift to +0.20 m
+3   : both front and rear lift to +0.20 m
+4   : both front and rear lift to 0
 X or Space : stop
 
 CTRL-C to quit
@@ -24,10 +25,9 @@ CTRL-C to quit
 MOTION_KEYS = {'w', 'a', 's', 'd', 'q', 'e'}
 LIFT_PRESETS = {
     '1': (0.20, 0.0),
-    '2': (-0.20, 0.0),
-    '3': (0.0, 0.20),
-    '4': (0.0, -0.20),
-    '5': (0.0, 0.0),
+    '2': (0.0, 0.20),
+    '3': (0.20, 0.20),
+    '4': (0.0, 0.0),
 }
 
 
@@ -40,7 +40,6 @@ class WasdTeleop(Node):
         self.declare_parameter('linear_speed', 1.5)
         self.declare_parameter('angular_speed', 1.57)
         self.declare_parameter('publish_rate', 20.0)
-        self.declare_parameter('lift_tolerance', 0.02)
         self.declare_parameter('lift_timeout_sec', 10.0)
 
         cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
@@ -48,7 +47,6 @@ class WasdTeleop(Node):
         self.linear_speed = self.get_parameter('linear_speed').value
         self.angular_speed = self.get_parameter('angular_speed').value
         publish_rate = self.get_parameter('publish_rate').value
-        self.lift_tolerance = self.get_parameter('lift_tolerance').value
         self.lift_timeout_sec = self.get_parameter('lift_timeout_sec').value
 
         self.cmd_vel_publisher = self.create_publisher(Twist, cmd_vel_topic, 10)
@@ -137,7 +135,6 @@ class WasdTeleop(Node):
         request = SetLift.Request()
         request.front_lift = float(front_lift)
         request.rear_lift = float(rear_lift)
-        request.tolerance = float(self.lift_tolerance)
         request.timeout_sec = float(self.lift_timeout_sec)
 
         future = self.set_lift_client.call_async(request)

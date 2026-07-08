@@ -66,7 +66,7 @@ target_link_libraries(robot_r2_lift_controller
 )
 
 install(
-  DIRECTORY models
+  DIRECTORY urdf config
   DESTINATION share/${PROJECT_NAME}
 )
 

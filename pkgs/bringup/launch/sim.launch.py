@@ -34,8 +34,8 @@ def generate_launch_description():
         )
     )
 
-    robot_r2_sdf = os.path.join(
-        robot_pkg, 'models', 'robot_r2', 'model.sdf'
+    robot_r2_urdf = os.path.join(
+        robot_pkg, 'urdf', 'robot_r2.urdf'
     )
 
     spawn_robot_r2 = Node(
@@ -43,9 +43,9 @@ def generate_launch_description():
         executable='spawn_entity.py',
         arguments=[
             '-entity', 'robot_r2',
-            '-file', robot_r2_sdf,
-            '-x', '3.73',
-            '-y', '-3.0',
+            '-file', robot_r2_urdf,
+            '-x', '5.56',
+            '-y', '-1.4',
             '-z', '0.3',
             '-R', '0.0',
             '-P', '0.0',

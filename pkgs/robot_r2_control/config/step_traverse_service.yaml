@@ -1,4 +1,9 @@
 /**:
   ros__parameters:
-    near_edge_offset: 0.4
-    far_edge_offset: 0.5
+    # Computed from current URDF geometry:
+    # base half length = 0.350
+    # guide wheel radius = 0.019
+    # guide wheel extra protrusion beyond base edge = 0.009
+    #
+    near_edge_offset: 0.3
+    far_edge_offset: 0.487

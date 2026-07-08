@@ -19,7 +19,7 @@ class LiftServiceController(Node):
         self.declare_parameter(
             'position_feedback_topic', '/r2/lift/position_feedback')
         self.declare_parameter('set_lift_service', '/r2/lift/set')
-        self.declare_parameter('default_tolerance', 0.008)
+        self.declare_parameter('default_tolerance', 0.01)
         self.declare_parameter('default_timeout_sec', 10.0)
 
         command_topic = self.get_parameter('command_topic').value
@@ -30,8 +30,10 @@ class LiftServiceController(Node):
         self.default_timeout_sec = self.get_parameter(
             'default_timeout_sec').value
 
-        self.current_front_lift = None
-        self.current_rear_lift = None
+        self.current_front_left_lift = None
+        self.current_front_right_lift = None
+        self.current_rear_left_lift = None
+        self.current_rear_right_lift = None
         self.command_publisher = self.create_publisher(
             LiftCommand,
             command_topic,
@@ -57,17 +59,15 @@ class LiftServiceController(Node):
 
     def on_feedback(self, msg):
         with self.state_condition:
-            self.current_front_lift = msg.front_lift
-            self.current_rear_lift = msg.rear_lift
+            self.current_front_left_lift = msg.front_left_lift
+            self.current_front_right_lift = msg.front_right_lift
+            self.current_rear_left_lift = msg.rear_left_lift
+            self.current_rear_right_lift = msg.rear_right_lift
             self.state_condition.notify_all()
 
     def handle_set_lift(self, request, response):
         with self.service_lock:
-            tolerance = (
-                request.tolerance
-                if request.tolerance > 0.0
-                else self.default_tolerance
-            )
+            tolerance = self.default_tolerance
             timeout_sec = (
                 request.timeout_sec
                 if request.timeout_sec > 0.0
@@ -84,45 +84,71 @@ class LiftServiceController(Node):
                 should_wait = False
                 with self.state_condition:
                     if (
-                        self.current_front_lift is None or
-                        self.current_rear_lift is None
+                        self.current_front_left_lift is None or
+                        self.current_front_right_lift is None or
+                        self.current_rear_left_lift is None or
+                        self.current_rear_right_lift is None
                     ):
                         should_wait = True
                     else:
-                        front_error = request.front_lift - self.current_front_lift
-                        rear_error = request.rear_lift - self.current_rear_lift
+                        front_left_error = (
+                            request.front_lift - self.current_front_left_lift)
+                        front_right_error = (
+                            request.front_lift - self.current_front_right_lift)
+                        rear_left_error = (
+                            request.rear_lift - self.current_rear_left_lift)
+                        rear_right_error = (
+                            request.rear_lift - self.current_rear_right_lift)
                         if (
-                            abs(front_error) <= tolerance and
-                            abs(rear_error) <= tolerance
+                            abs(front_left_error) <= tolerance and
+                            abs(front_right_error) <= tolerance and
+                            abs(rear_left_error) <= tolerance and
+                            abs(rear_right_error) <= tolerance
                         ):
                             response.success = True
                             response.message = 'Lift target reached'
-                            response.final_front_lift = self.current_front_lift
-                            response.final_rear_lift = self.current_rear_lift
-                            response.front_error = front_error
-                            response.rear_error = rear_error
+                            response.final_front_lift = (
+                                (self.current_front_left_lift +
+                                 self.current_front_right_lift) / 2.0)
+                            response.final_rear_lift = (
+                                (self.current_rear_left_lift +
+                                 self.current_rear_right_lift) / 2.0)
+                            response.front_error = (
+                                request.front_lift - response.final_front_lift)
+                            response.rear_error = (
+                                request.rear_lift - response.final_rear_lift)
                             return response
                         should_wait = True
 
-                    remaining = deadline - (self.get_clock().now().nanoseconds / 1e9)
+                    remaining = deadline - (
+                        self.get_clock().now().nanoseconds / 1e9)
                     if remaining <= 0.0:
                         break
                     if should_wait:
                         self.state_condition.wait(timeout=remaining)
 
             with self.state_condition:
+                fl = (
+                    self.current_front_left_lift
+                    if self.current_front_left_lift is not None else 0.0)
+                fr = (
+                    self.current_front_right_lift
+                    if self.current_front_right_lift is not None else 0.0)
+                rl = (
+                    self.current_rear_left_lift
+                    if self.current_rear_left_lift is not None else 0.0)
+                rr = (
+                    self.current_rear_right_lift
+                    if self.current_rear_right_lift is not None else 0.0)
+                final_front = (fl + fr) / 2.0
+                final_rear = (rl + rr) / 2.0
+
                 response.success = False
                 response.message = 'SetLift timeout'
-                response.final_front_lift = (
-                    self.current_front_lift if self.current_front_lift is not None
-                    else 0.0
-                )
-                response.final_rear_lift = (
-                    self.current_rear_lift if self.current_rear_lift is not None
-                    else 0.0
-                )
-                response.front_error = request.front_lift - response.final_front_lift
-                response.rear_error = request.rear_lift - response.final_rear_lift
+                response.final_front_lift = final_front
+                response.final_rear_lift = final_rear
+                response.front_error = request.front_lift - final_front
+                response.rear_error = request.rear_lift - final_rear
                 return response
 
 

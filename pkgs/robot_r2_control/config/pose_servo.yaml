@@ -5,7 +5,7 @@ robot_r2_pose_servo:
     move_to_pose_service: /r2/move_to_pose
 
     publish_rate: 50.0
-    position_tolerance: 0.02
+    position_tolerance: 0.01
     yaw_tolerance: 0.03
     default_timeout_sec: 20.0
 

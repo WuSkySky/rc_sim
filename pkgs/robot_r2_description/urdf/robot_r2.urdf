@@ -1,0 +1,839 @@
+<?xml version="1.0"?>
+<robot name="simple_chassis_robot">
+
+  <!-- ================= Materials ================= -->
+
+  <material name="gray">
+    <color rgba="0.45 0.45 0.45 1.0"/>
+  </material>
+
+  <material name="dark_gray">
+    <color rgba="0.15 0.15 0.15 1.0"/>
+  </material>
+
+  <material name="blue">
+    <color rgba="0.1 0.3 0.9 1.0"/>
+  </material>
+
+  <material name="black">
+    <color rgba="0.02 0.02 0.02 1.0"/>
+  </material>
+
+
+  <!-- ================= Base Chassis ================= -->
+  <!-- 700mm x 468mm x 20mm -->
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.700 0.468 0.020"/>
+      </geometry>
+      <material name="Gazebo/Grey"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.700 0.468 0.020"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="4.0"/>
+      <inertia
+        ixx="0.1463" ixy="0" ixz="0"
+        iyy="0.3269" iyz="0"
+        izz="0.4727"/>
+    </inertial>
+  </link>
+
+  <!-- ================= Direction Arrow ================= -->
+
+  <link name="direction_arrow">
+    <visual>
+      <origin xyz="0.265 0.0 0.014" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.110 0.022 0.003"/>
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.318 0.017 0.014" rpy="0 0 -0.78539816339"/>
+      <geometry>
+        <box size="0.067 0.020 0.003"/>
+      </geometry>
+    </visual>
+    <visual>
+      <origin xyz="0.318 -0.017 0.014" rpy="0 0 0.78539816339"/>
+      <geometry>
+        <box size="0.067 0.020 0.003"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <joint name="direction_arrow_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="direction_arrow"/>
+    <origin xyz="-0.05 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========================================================= -->
+  <!-- Guide Wheel Supports: 6 x box, 20mm x 20mm x 170mm        -->
+  <!-- Position: 4 corners + middle of two long sides            -->
+  <!-- Base bottom z = -0.01, support center z = -0.095          -->
+  <!-- ========================================================= -->
+
+  <!-- front left corner guide support -->
+  <link name="guide_support_fl">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_fl_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_fl"/>
+    <origin xyz="0.340 0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- front right corner guide support -->
+  <link name="guide_support_fr">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_fr_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_fr"/>
+    <origin xyz="0.340 -0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- rear left corner guide support -->
+  <link name="guide_support_rl">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_rl_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_rl"/>
+    <origin xyz="-0.340 0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- rear right corner guide support -->
+  <link name="guide_support_rr">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_rr_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_rr"/>
+    <origin xyz="-0.340 -0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- middle left long-side guide support -->
+  <link name="guide_support_ml">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_ml_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_ml"/>
+    <origin xyz="-0.080 0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- middle right long-side guide support -->
+  <link name="guide_support_mr">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_mr_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_mr"/>
+    <origin xyz="-0.080 -0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========================================================= -->
+  <!-- Guide Wheels: 6 x cylinder, radius = 19mm, length = 17mm -->
+  <!-- Wheel center at bottom end of each guide support          -->
+  <!-- ========================================================= -->
+
+  <link name="guide_wheel_fl">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_fl_joint" type="fixed">
+    <parent link="guide_support_fl"/>
+    <child link="guide_wheel_fl"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="guide_wheel_fr">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_fr_joint" type="fixed">
+    <parent link="guide_support_fr"/>
+    <child link="guide_wheel_fr"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="guide_wheel_rl">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_rl_joint" type="fixed">
+    <parent link="guide_support_rl"/>
+    <child link="guide_wheel_rl"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="guide_wheel_rr">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_rr_joint" type="fixed">
+    <parent link="guide_support_rr"/>
+    <child link="guide_wheel_rr"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="guide_wheel_ml">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_ml_joint" type="fixed">
+    <parent link="guide_support_ml"/>
+    <child link="guide_wheel_ml"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="guide_wheel_mr">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_mr_joint" type="fixed">
+    <parent link="guide_support_mr"/>
+    <child link="guide_wheel_mr"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Drive Lift Rods: 4 x box, 15mm x 15mm x 520mm             -->
+  <!-- Connected to base using prismatic joints                  -->
+  <!-- Initial state: rod top protrudes above chassis            -->
+  <!-- Stroke end: rod top becomes flush with chassis top        -->
+  <!-- ========================================================= -->
+
+
+  <!-- drive lift rod front left -->
+  <link name="drive_lift_fl">
+    <visual>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.00338" ixy="0" ixz="0"
+               iyy="0.00338" iyz="0"
+               izz="0.00000563"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_lift_fl_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child link="drive_lift_fl"/>
+    <origin xyz="0.210 0.2415 0.396" rpy="0 0 0"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="0.0" upper="0.376" effort="1000" velocity="0.2"/>
+    <dynamics damping="5.0" friction="1.0"/>
+  </joint>
+
+
+  <!-- drive lift rod front right -->
+  <link name="drive_lift_fr">
+    <visual>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.00338" ixy="0" ixz="0"
+               iyy="0.00338" iyz="0"
+               izz="0.00000563"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_lift_fr_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child link="drive_lift_fr"/>
+    <origin xyz="0.210 -0.2415 0.396" rpy="0 0 0"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="0.0" upper="0.376" effort="1000" velocity="0.2"/>
+    <dynamics damping="5.0" friction="1.0"/>
+  </joint>
+
+
+  <!-- drive lift rod rear left -->
+  <link name="drive_lift_rl">
+    <visual>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.00338" ixy="0" ixz="0"
+               iyy="0.00338" iyz="0"
+               izz="0.00000563"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_lift_rl_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child link="drive_lift_rl"/>
+    <origin xyz="-0.210 0.2415 0.396" rpy="0 0 0"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="0.0" upper="0.376" effort="1000" velocity="0.2"/>
+    <dynamics damping="5.0" friction="1.0"/>
+  </joint>
+
+
+  <!-- drive lift rod rear right -->
+  <link name="drive_lift_rr">
+    <visual>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+      <material name="dark_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.520"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 -0.260" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.00338" ixy="0" ixz="0"
+               iyy="0.00338" iyz="0"
+               izz="0.00000563"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_lift_rr_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child link="drive_lift_rr"/>
+    <origin xyz="-0.210 -0.2415 0.396" rpy="0 0 0"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="0.0" upper="0.376" effort="1000" velocity="0.2"/>
+    <dynamics damping="5.0" friction="1.0"/>
+  </joint>
+
+
+  <!-- ========================================================= -->
+  <!-- Drive Wheels: 4 x cylinder, radius = 75mm, length = 80mm  -->
+  <!-- Fixed to bottom end of each drive lift rod                -->
+  <!-- ========================================================= -->
+
+  <link name="drive_wheel_fl">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.20"/>
+      <inertia ixx="0.000649" ixy="0" ixz="0"
+               iyy="0.000563" iyz="0"
+               izz="0.000649"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_wheel_fl_joint" type="fixed">
+    <parent link="drive_lift_fl"/>
+    <child link="drive_wheel_fl"/>
+    <origin xyz="0 0 -0.520" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="drive_wheel_fr">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.20"/>
+      <inertia ixx="0.000649" ixy="0" ixz="0"
+               iyy="0.000563" iyz="0"
+               izz="0.000649"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_wheel_fr_joint" type="fixed">
+    <parent link="drive_lift_fr"/>
+    <child link="drive_wheel_fr"/>
+    <origin xyz="0 0 -0.520" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="drive_wheel_rl">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.20"/>
+      <inertia ixx="0.000649" ixy="0" ixz="0"
+               iyy="0.000563" iyz="0"
+               izz="0.000649"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_wheel_rl_joint" type="fixed">
+    <parent link="drive_lift_rl"/>
+    <child link="drive_wheel_rl"/>
+    <origin xyz="0 0 -0.520" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="drive_wheel_rr">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.075" length="0.080"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.20"/>
+      <inertia ixx="0.000649" ixy="0" ixz="0"
+               iyy="0.000563" iyz="0"
+               izz="0.000649"/>
+    </inertial>
+  </link>
+
+  <joint name="drive_wheel_rr_joint" type="fixed">
+    <parent link="drive_lift_rr"/>
+    <child link="drive_wheel_rr"/>
+    <origin xyz="0 0 -0.520" rpy="0 0 0"/>
+  </joint>
+
+
+  <!-- ================= Gazebo Settings ================= -->
+
+  <gazebo reference="base_link">
+    <self_collide>false</self_collide>
+    <material>Gazebo/Grey</material>
+  </gazebo>
+
+  <gazebo reference="direction_arrow">
+    <material>Gazebo/Black</material>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_fl">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_fr">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_rl">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_rr">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_ml">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_mr">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="drive_wheel_fl">
+    <material>Gazebo/Black</material>
+    <mu1>0.3</mu1>
+    <mu2>0.3</mu2>
+  </gazebo>
+
+  <gazebo reference="drive_wheel_fr">
+    <material>Gazebo/Black</material>
+    <mu1>0.3</mu1>
+    <mu2>0.3</mu2>
+  </gazebo>
+
+  <gazebo reference="drive_wheel_rl">
+    <material>Gazebo/Black</material>
+    <mu1>0.3</mu1>
+    <mu2>0.3</mu2>
+  </gazebo>
+
+  <gazebo reference="drive_wheel_rr">
+    <material>Gazebo/Black</material>
+    <mu1>0.3</mu1>
+    <mu2>0.3</mu2>
+  </gazebo>
+
+  <!-- ================= Gazebo Plugins ================= -->
+
+  <gazebo>
+    <plugin name="robot_r2_planar_move" filename="librobot_r2_planar_move.so">
+      <ros>
+        <namespace>/</namespace>
+      </ros>
+      <command_topic>/r2/cmd_vel</command_topic>
+      <velocity_feedback_topic>/r2/velocity_feedback</velocity_feedback_topic>
+      <cmd_vel_timeout>0.25</cmd_vel_timeout>
+      <x_velocity_p_gain>150.0</x_velocity_p_gain>
+      <y_velocity_p_gain>150.0</y_velocity_p_gain>
+      <x_velocity_i_gain>80.0</x_velocity_i_gain>
+      <y_velocity_i_gain>80.0</y_velocity_i_gain>
+      <max_integral_force>120.0</max_integral_force>
+      <yaw_velocity_p_gain>20.0</yaw_velocity_p_gain>
+      <max_x_velocity>10.0</max_x_velocity>
+      <max_y_velocity>10.0</max_y_velocity>
+      <max_yaw_velocity>15.7</max_yaw_velocity>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="robot_r2_localizer" filename="librobot_r2_localizer.so">
+      <ros>
+        <namespace>/</namespace>
+      </ros>
+      <pose_topic>/r2/pose_feedback</pose_topic>
+      <link_name>base_link</link_name>
+      <pose_offset>0 0 0 0 0 0</pose_offset>
+      <frame_id>world</frame_id>
+      <publish_rate>50.0</publish_rate>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="robot_r2_lift_controller" filename="librobot_r2_lift_controller.so">
+      <ros>
+        <namespace>/</namespace>
+      </ros>
+      <command_topic>/r2/lift/cmd_lift</command_topic>
+      <position_feedback_topic>/r2/lift/position_feedback</position_feedback_topic>
+      <drive_fl_joint_name>drive_lift_fl_joint</drive_fl_joint_name>
+      <drive_fr_joint_name>drive_lift_fr_joint</drive_fr_joint_name>
+      <drive_rl_joint_name>drive_lift_rl_joint</drive_rl_joint_name>
+      <drive_rr_joint_name>drive_lift_rr_joint</drive_rr_joint_name>
+      <min_lift>0.0</min_lift>
+      <max_lift>0.376</max_lift>
+    </plugin>
+  </gazebo>
+
+</robot>

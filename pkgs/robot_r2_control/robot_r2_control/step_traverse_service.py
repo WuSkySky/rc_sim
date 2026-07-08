@@ -21,18 +21,15 @@ MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
 SET_LIFT_SERVICE = '/r2/lift/set'
 TRAVERSE_SERVICE = '/r2/traverse_adjacent_step'
 
-DEFAULT_NEAR_EDGE_OFFSET = 0.4
-DEFAULT_FAR_EDGE_OFFSET = 0.5
+DEFAULT_NEAR_EDGE_OFFSET = 0.3
+DEFAULT_FAR_EDGE_OFFSET = 0.487
 MOVE_TO_POSE_WAIT_TIMEOUT_SEC = 35.0
 SET_LIFT_WAIT_TIMEOUT_SEC = 15.0
 
-LIFT_PRESETS = {
-    1: (0.2, 0.0),
-    2: (-0.2, 0.0),
-    3: (0.0, 0.2),
-    4: (0.0, -0.2),
-    5: (0.0, 0.0),
-}
+LIFT_FRONT_UP = (0.2, 0.0)
+LIFT_REAR_UP = (0.0, 0.2)
+LIFT_BOTH_UP = (0.2, 0.2)
+LIFT_ALL_DOWN = (0.0, 0.0)
 
 
 def validate_cell(grid_data, index):
@@ -84,6 +81,10 @@ def get_edge_point(center, direction, edge_offset):
 
 def get_direction_yaw(direction):
     return math.atan2(direction[1], direction[0])
+
+
+def normalize_yaw(yaw):
+    return math.atan2(math.sin(yaw), math.cos(yaw))
 
 
 class StepTraverseService(Node):
@@ -199,7 +200,6 @@ class StepTraverseService(Node):
         request = SetLift.Request()
         request.front_lift = float(front_lift)
         request.rear_lift = float(rear_lift)
-        request.tolerance = 0.0
         request.timeout_sec = 0.0
 
         future = self.set_lift_client.call_async(request)
@@ -232,16 +232,16 @@ class StepTraverseService(Node):
 
         direction = get_direction(current_index, target_index)
         direction_yaw = get_direction_yaw(direction)
+        reverse_yaw = normalize_yaw(direction_yaw + math.pi)
         current_height = current_center[2]
         target_height = target_center[2]
 
-        self.call_move_to_pose(
-            current_center[0],
-            current_center[1],
-            direction_yaw,
-        )
-
         if target_height > current_height:
+            self.call_move_to_pose(
+                current_center[0],
+                current_center[1],
+                direction_yaw,
+            )
             current_edge = get_edge_point(
                 current_center, direction, near_edge_offset)
             target_edge = get_edge_point(
@@ -250,7 +250,7 @@ class StepTraverseService(Node):
                 far_edge_offset,
             )
             self.call_set_lift(
-                *LIFT_PRESETS[1],
+                *LIFT_BOTH_UP,
             )
             self.call_move_to_pose(
                 current_edge[0],
@@ -258,7 +258,7 @@ class StepTraverseService(Node):
                 direction_yaw,
             )
             self.call_set_lift(
-                *LIFT_PRESETS[4],
+                *LIFT_REAR_UP,
             )
             self.call_move_to_pose(
                 target_edge[0],
@@ -266,7 +266,7 @@ class StepTraverseService(Node):
                 direction_yaw,
             )
             self.call_set_lift(
-                *LIFT_PRESETS[5],
+                *LIFT_ALL_DOWN,
             )
             self.call_move_to_pose(
                 target_center[0],
@@ -276,6 +276,11 @@ class StepTraverseService(Node):
             return
 
         if target_height < current_height:
+            self.call_move_to_pose(
+                current_center[0],
+                current_center[1],
+                reverse_yaw,
+            )
             current_edge = get_edge_point(
                 current_center, direction, far_edge_offset)
             target_edge = get_edge_point(
@@ -286,29 +291,34 @@ class StepTraverseService(Node):
             self.call_move_to_pose(
                 current_edge[0],
                 current_edge[1],
-                direction_yaw,
+                reverse_yaw,
             )
             self.call_set_lift(
-                *LIFT_PRESETS[2],
+                *LIFT_REAR_UP,
             )
             self.call_move_to_pose(
                 target_edge[0],
                 target_edge[1],
-                direction_yaw,
+                reverse_yaw,
             )
             self.call_set_lift(
-                *LIFT_PRESETS[3],
+                *LIFT_BOTH_UP,
             )
             self.call_move_to_pose(
                 target_center[0],
                 target_center[1],
-                direction_yaw,
+                reverse_yaw,
             )
             self.call_set_lift(
-                *LIFT_PRESETS[5],
+                *LIFT_ALL_DOWN,
             )
             return
 
+        self.call_move_to_pose(
+            current_center[0],
+            current_center[1],
+            direction_yaw,
+        )
         self.call_move_to_pose(
             target_center[0],
             target_center[1],
