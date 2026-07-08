@@ -79,7 +79,7 @@
   </joint>
 
   <!-- ========================================================= -->
-  <!-- Guide Wheel Supports: 6 x box, 20mm x 20mm x 170mm        -->
+  <!-- Guide Wheel Supports: 8 x box, 20mm x 20mm x 170mm        -->
   <!-- Position: 4 corners + middle of two long sides            -->
   <!-- Base bottom z = -0.01, support center z = -0.095          -->
   <!-- ========================================================= -->
@@ -234,6 +234,66 @@
     <origin xyz="-0.080 0.224 -0.095" rpy="0 0 0"/>
   </joint>
 
+  <!-- middle front left long-side guide support -->
+  <link name="guide_support_ml2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_ml2_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_ml2"/>
+    <origin xyz="0.080 0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- middle front right long-side guide support -->
+  <link name="guide_support_mr2">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_mr2_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_mr2"/>
+    <origin xyz="0.080 -0.224 -0.095" rpy="0 0 0"/>
+  </joint>
+
   <!-- middle right long-side guide support -->
   <link name="guide_support_mr">
     <visual>
@@ -265,7 +325,7 @@
   </joint>
 
   <!-- ========================================================= -->
-  <!-- Guide Wheels: 6 x cylinder, radius = 19mm, length = 17mm -->
+  <!-- Guide Wheels: 8 x cylinder, radius = 19mm, length = 17mm -->
   <!-- Wheel center at bottom end of each guide support          -->
   <!-- ========================================================= -->
 
@@ -445,6 +505,66 @@
   <joint name="guide_wheel_mr_joint" type="fixed">
     <parent link="guide_support_mr"/>
     <child link="guide_wheel_mr"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="guide_wheel_ml2">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_ml2_joint" type="fixed">
+    <parent link="guide_support_ml2"/>
+    <child link="guide_wheel_ml2"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+
+  <link name="guide_wheel_mr2">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.019" length="0.017"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <mass value="0.02"/>
+      <inertia ixx="0.00000229" ixy="0" ixz="0"
+               iyy="0.00000361" iyz="0"
+               izz="0.00000229"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_wheel_mr2_joint" type="fixed">
+    <parent link="guide_support_mr2"/>
+    <child link="guide_wheel_mr2"/>
     <origin xyz="0 0 -0.085" rpy="0 0 0"/>
   </joint>
 
@@ -756,6 +876,18 @@
   </gazebo>
 
   <gazebo reference="guide_wheel_mr">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_ml2">
+    <material>Gazebo/Black</material>
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+  <gazebo reference="guide_wheel_mr2">
     <material>Gazebo/Black</material>
     <mu1>0.1</mu1>
     <mu2>0.1</mu2>
