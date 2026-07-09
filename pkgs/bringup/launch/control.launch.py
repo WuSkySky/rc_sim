@@ -44,9 +44,24 @@ def generate_launch_description():
         output='screen',
     )
 
+    kfs_detect = Node(
+        package='robot_r2_detect',
+        executable='kfs_detect',
+        name='kfs_detect',
+        output='screen',
+        parameters=[
+            {
+                'model_path': 'best.pt',
+                'color_topic': '/r2/front_camera/image_raw',
+                'conf': 0.75,
+            }
+        ],
+    )
+
     return LaunchDescription([
         wasd_teleop,
         pose_servo,
         lift_service_controller,
         step_traverse_service,
+        kfs_detect,
     ])
