@@ -14,7 +14,6 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'config'),
             [
-                'config/pose_servo.yaml',
                 'config/step_traverse_service.yaml',
             ]),
     ],
@@ -22,15 +21,13 @@ setup(
     zip_safe=True,
     maintainer='skysky',
     maintainer_email='skysky@example.com',
-    description='Control utilities for Robot R2.',
+    description='High-level control utilities for Robot R2.',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'wasd_teleop = robot_r2_control.wasd_teleop:main',
-            'pose_servo = robot_r2_control.pose_servo:main',
-            'lift_service_controller = robot_r2_control.lift_service_controller:main',
-            'step_traverse_service = robot_r2_control.step_traverse_service:main',
+            'teleop_controller = robot_r2_control.teleop_controller:main',
+            'step_traverse_controller = robot_r2_control.step_traverse_controller:main',
         ],
     },
 )

@@ -10,7 +10,7 @@ from robot_r2_interfaces.srv import SetLift
 
 class LiftServiceController(Node):
     def __init__(self):
-        super().__init__('robot_r2_lift_service_controller')
+        super().__init__('chassis_lift')
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
         self.state_condition = threading.Condition()
@@ -53,10 +53,6 @@ class LiftServiceController(Node):
             callback_group=self.callback_group,
         )
 
-        self.get_logger().info(
-            f'Lift service controller active: service={service_name}, '
-            f'command={command_topic}, feedback={position_feedback_topic}')
-
     def on_feedback(self, msg):
         with self.state_condition:
             self.current_front_left_lift = msg.front_left_lift
@@ -81,51 +77,46 @@ class LiftServiceController(Node):
 
             deadline = self.get_clock().now().nanoseconds / 1e9 + timeout_sec
             while rclpy.ok():
-                should_wait = False
                 with self.state_condition:
+                    remaining = deadline - (self.get_clock().now().nanoseconds / 1e9)
+                    if remaining <= 0.0:
+                        break
+
                     if (
                         self.current_front_left_lift is None or
                         self.current_front_right_lift is None or
                         self.current_rear_left_lift is None or
                         self.current_rear_right_lift is None
                     ):
-                        should_wait = True
-                    else:
-                        front_left_error = (
-                            request.front_lift - self.current_front_left_lift)
-                        front_right_error = (
-                            request.front_lift - self.current_front_right_lift)
-                        rear_left_error = (
-                            request.rear_lift - self.current_rear_left_lift)
-                        rear_right_error = (
-                            request.rear_lift - self.current_rear_right_lift)
-                        if (
-                            abs(front_left_error) <= tolerance and
-                            abs(front_right_error) <= tolerance and
-                            abs(rear_left_error) <= tolerance and
-                            abs(rear_right_error) <= tolerance
-                        ):
-                            response.success = True
-                            response.message = 'Lift target reached'
-                            response.final_front_lift = (
-                                (self.current_front_left_lift +
-                                 self.current_front_right_lift) / 2.0)
-                            response.final_rear_lift = (
-                                (self.current_rear_left_lift +
-                                 self.current_rear_right_lift) / 2.0)
-                            response.front_error = (
-                                request.front_lift - response.final_front_lift)
-                            response.rear_error = (
-                                request.rear_lift - response.final_rear_lift)
-                            return response
-                        should_wait = True
+                        self.state_condition.wait(timeout=min(remaining, 0.5))
+                        continue
 
-                    remaining = deadline - (
-                        self.get_clock().now().nanoseconds / 1e9)
-                    if remaining <= 0.0:
-                        break
-                    if should_wait:
-                        self.state_condition.wait(timeout=remaining)
+                    fe_l = request.front_lift - self.current_front_left_lift
+                    fe_r = request.front_lift - self.current_front_right_lift
+                    re_l = request.rear_lift - self.current_rear_left_lift
+                    re_r = request.rear_lift - self.current_rear_right_lift
+
+                    if (
+                        abs(fe_l) <= tolerance and
+                        abs(fe_r) <= tolerance and
+                        abs(re_l) <= tolerance and
+                        abs(re_r) <= tolerance
+                    ):
+                        response.success = True
+                        response.message = 'Lift target reached'
+                        response.final_front_lift = (
+                            (self.current_front_left_lift +
+                             self.current_front_right_lift) / 2.0)
+                        response.final_rear_lift = (
+                            (self.current_rear_left_lift +
+                             self.current_rear_right_lift) / 2.0)
+                        response.front_error = (
+                            request.front_lift - response.final_front_lift)
+                        response.rear_error = (
+                            request.rear_lift - response.final_rear_lift)
+                        return response
+
+                    self.state_condition.wait(timeout=min(remaining, 0.05))
 
             with self.state_condition:
                 fl = (

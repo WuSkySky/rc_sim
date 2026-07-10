@@ -57,11 +57,6 @@ def main(args: list[str] | None = None) -> None:
                 KfsProcessedDetection, "/r2/detection/processed", 10
             )
 
-            self.get_logger().info(
-                f"kfs_detect started: model={self._model_path}, "
-                f"conf={self._conf}, topic={self._color_topic}"
-            )
-
         # ---- parameters ----
 
         def _declare_parameters(self) -> None:

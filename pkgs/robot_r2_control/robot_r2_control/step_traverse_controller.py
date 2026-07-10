@@ -85,7 +85,7 @@ def get_direction_yaw(direction):
 
 class StepTraverseService(Node):
     def __init__(self):
-        super().__init__('robot_r2_step_traverse_service')
+        super().__init__('step_traverse_controller')
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
 
@@ -111,10 +111,6 @@ class StepTraverseService(Node):
             self.handle_traverse_request,
             callback_group=self.callback_group,
         )
-
-        self.get_logger().info(
-            f'Step traverse service active: service={TRAVERSE_SERVICE}, '
-            f'move={MOVE_TO_POSE_SERVICE}, lift={SET_LIFT_SERVICE}')
 
     def handle_traverse_request(self, request, response):
         with self.service_lock:

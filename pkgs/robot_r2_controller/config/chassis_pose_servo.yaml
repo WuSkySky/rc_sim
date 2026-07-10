@@ -1,4 +1,4 @@
-robot_r2_pose_servo:
+chassis_pose_servo:
   ros__parameters:
     current_pose_topic: /r2/pose_feedback
     cmd_vel_topic: /r2/cmd_vel

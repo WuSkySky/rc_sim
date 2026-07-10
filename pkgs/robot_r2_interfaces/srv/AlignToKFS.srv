@@ -1,0 +1,6 @@
+float32 pixel_tolerance  # pixel tolerance for alignment (0 = use default)
+float32 timeout_sec      # max wait time in seconds (0 = use default)
+---
+bool success
+string message
+int32 final_offset_x     # final pixel offset in x after alignment

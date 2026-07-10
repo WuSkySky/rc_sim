@@ -1,0 +1,7 @@
+chassis_lift:
+  ros__parameters:
+    command_topic: /r2/lift/cmd_lift
+    position_feedback_topic: /r2/lift/position_feedback
+    set_lift_service: /r2/lift/set
+    default_tolerance: 0.01
+    default_timeout_sec: 10.0

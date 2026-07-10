@@ -30,10 +30,6 @@ public:
 
     link_ = model_->GetLink(link_name_);
     if (!link_) {
-      RCLCPP_ERROR(
-        node_->get_logger(),
-        "Robot R2 localizer cannot find link [%s]",
-        link_name_.c_str());
       return;
     }
 
@@ -44,10 +40,6 @@ public:
     update_connection_ = gazebo::event::Events::ConnectWorldUpdateBegin(
       std::bind(&RobotR2Localizer::OnUpdate, this));
 
-    RCLCPP_INFO(
-      node_->get_logger(),
-      "Robot R2 localizer publishing [%s]",
-      pose_topic_.c_str());
   }
 
 private:

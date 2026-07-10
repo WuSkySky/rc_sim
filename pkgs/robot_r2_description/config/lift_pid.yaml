@@ -1,17 +1,9 @@
-# Robot R2 lift controller PID parameters.
-# Load this file onto the Gazebo plugin node, for example:
-#   ros2 param load /robot_r2 \
-#     /path/to/install/robot_r2_description/share/robot_r2_description/config/lift_pid.yaml
-# Or set individually:
-#   ros2 param set /robot_r2 lift.position_p_gain 3000.0
-#
-# These values belong to the lift Gazebo plugin, so the file lives in
-# robot_r2_description instead of robot_r2_control.
-
-/robot_r2:
-  lift.position_p_gain: 1200.0
-  lift.position_i_gain: 300.0
-  lift.position_d_gain: 120.0
-  lift.position_i_max: 200.0
-  lift.position_i_min: -200.0
-  lift.max_actuation_force: 300.0
+/robot_r2_lift_controller:
+  ros__parameters:
+    lift:
+      position_p_gain: 1500.0
+      position_i_gain: 300.0
+      position_d_gain: 120.0
+      position_i_max: 200.0
+      position_i_min: -200.0
+      max_actuation_force: 300.0

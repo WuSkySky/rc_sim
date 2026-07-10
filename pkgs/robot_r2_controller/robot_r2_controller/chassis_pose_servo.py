@@ -66,7 +66,7 @@ class PidAxis:
 
 class PoseServo(Node):
     def __init__(self):
-        super().__init__('robot_r2_pose_servo')
+        super().__init__('chassis_pose_servo')
 
         self.callback_group = ReentrantCallbackGroup()
 
@@ -158,10 +158,6 @@ class PoseServo(Node):
             callback_group=self.callback_group,
         )
         self.add_on_set_parameters_callback(self.on_parameters_changed)
-
-        self.get_logger().info(
-            f'Pose servo active: current={current_pose_topic}, '
-            f'cmd={cmd_vel_topic}, service={move_to_pose_service}')
 
     def on_current_pose(self, msg):
         with self.state_condition:

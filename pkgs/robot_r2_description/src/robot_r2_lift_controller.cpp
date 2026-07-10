@@ -51,12 +51,12 @@ public:
 
     // --- PID parameters: SDF default, overridable via ROS params ---
 
-    const double sdf_p_gain = sdf->Get<double>("position_p_gain", 1200.0).first;
-    const double sdf_i_gain = sdf->Get<double>("position_i_gain", 300.0).first;
-    const double sdf_d_gain = sdf->Get<double>("position_d_gain", 120.0).first;
-    const double sdf_i_max  = sdf->Get<double>("position_i_max", 200.0).first;
-    const double sdf_i_min  = sdf->Get<double>("position_i_min", -200.0).first;
-    const double sdf_force  = sdf->Get<double>("max_actuation_force", 300.0).first;
+    const double sdf_p_gain = sdf->Get<double>("position_p_gain", 6000.0).first;
+    const double sdf_i_gain = sdf->Get<double>("position_i_gain", 1000.0).first;
+    const double sdf_d_gain = sdf->Get<double>("position_d_gain", 20.0).first;
+    const double sdf_i_max  = sdf->Get<double>("position_i_max", 1000.0).first;
+    const double sdf_i_min  = sdf->Get<double>("position_i_min", -1000.0).first;
+    const double sdf_force  = sdf->Get<double>("max_actuation_force", 10000.0).first;
 
     node_->declare_parameter("lift.position_p_gain", sdf_p_gain);
     node_->declare_parameter("lift.position_i_gain", sdf_i_gain);
@@ -72,10 +72,6 @@ public:
     for (int i = 0; i < 4; ++i) {
       joints_[i] = model_->GetJoint(joint_names_[i]);
       if (!joints_[i]) {
-        RCLCPP_ERROR(
-          node_->get_logger(),
-          "Cannot find lift joint: %s",
-          joint_names_[i].c_str());
         return;
       }
     }
@@ -110,16 +106,6 @@ public:
       gazebo::event::Events::ConnectWorldUpdateBegin(
       std::bind(&RobotR2LiftController::OnUpdate, this));
 
-    RCLCPP_INFO(
-      node_->get_logger(),
-      "Robot R2 lift controller started on %s "
-      "(joints: %s, %s, %s, %s) "
-      "PID P=%.1f I=%.1f D=%.1f Imax=%.1f Imin=%.1f Fmax=%.1f",
-      command_topic_.c_str(),
-      joint_names_[0].c_str(), joint_names_[1].c_str(),
-      joint_names_[2].c_str(), joint_names_[3].c_str(),
-      position_p_gain_, position_i_gain_, position_d_gain_,
-      position_i_max_, position_i_min_, max_actuation_force_);
   }
 
 private:
@@ -213,11 +199,6 @@ private:
         }
       }
       derivative_state_reset_requested_ = true;
-      RCLCPP_INFO(
-        node_->get_logger(),
-        "Robot R2 lift PID updated: P=%.3f I=%.3f D=%.3f Imax=%.3f Imin=%.3f Fmax=%.3f",
-        position_p_gain_, position_i_gain_, position_d_gain_,
-        position_i_max_, position_i_min_, max_actuation_force_);
     }
 
     return SuccessResult();
@@ -354,12 +335,12 @@ private:
   double max_lift_{0.376};
 
   // PID gains — updated via ROS parameter callback
-  double position_p_gain_{1200.0};
-  double position_i_gain_{300.0};
-  double position_d_gain_{120.0};
-  double position_i_max_{200.0};
-  double position_i_min_{-200.0};
-  double max_actuation_force_{300.0};
+  double position_p_gain_{6000.0};
+  double position_i_gain_{1000.0};
+  double position_d_gain_{20.0};
+  double position_i_max_{1000.0};
+  double position_i_min_{-1000.0};
+  double max_actuation_force_{10000.0};
 
   // PID state — integral stored directly in output(force) units for live tuning
   std::array<double, 4> integral_term_{};

@@ -42,8 +42,6 @@ public:
 
     base_link_ = model_->GetLink("base_link");
     if (!base_link_) {
-      RCLCPP_ERROR(node_->get_logger(),
-        "Cannot find base_link");
       return;
     }
 
@@ -66,8 +64,6 @@ public:
       gazebo::event::Events::ConnectWorldUpdateBegin(
         std::bind(&RobotR2PlanarMove::OnUpdate, this));
 
-    RCLCPP_INFO(node_->get_logger(),
-      "Robot R2 planar move plugin started");
   }
 
 private:
