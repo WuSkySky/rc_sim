@@ -142,15 +142,10 @@ class KfsLoaderController(Node):
     def handle_load_kfs(self, request, response):
         del request
         with self.operation_lock:
-            if self.loaded_kfs >= self.max_loaded_kfs:
-                response.success = False
-                response.message = 'KFS storage is full'
-                response.loaded_count = self.loaded_kfs
-                return response
-
+            load_index = min(self.loaded_kfs, self.max_loaded_kfs - 1)
             target_lift = (
                 self.lift_base_position +
-                self.loaded_kfs * self.lift_stack_increment
+                load_index * self.lift_stack_increment
             )
 
             try:
@@ -168,9 +163,10 @@ class KfsLoaderController(Node):
                 response.loaded_count = self.loaded_kfs
                 return response
 
-            self.loaded_kfs += 1
+            if self.loaded_kfs < self.max_loaded_kfs:
+                self.loaded_kfs += 1
             response.success = True
-            response.message = 'KFS loaded successfully'
+            response.message = 'KFS loaded at tier {}'.format(min(self.loaded_kfs, self.max_loaded_kfs - 1) + 1)
             response.loaded_count = self.loaded_kfs
             return response
 
