@@ -15,6 +15,7 @@ setup(
         (os.path.join('share', package_name, 'config'),
             [
                 'config/step_traverse_service.yaml',
+                'config/kfs_loader.yaml',
             ]),
     ],
     install_requires=['setuptools', 'pynput'],
@@ -28,6 +29,7 @@ setup(
         'console_scripts': [
             'teleop_controller = robot_r2_control.teleop_controller:main',
             'step_traverse_controller = robot_r2_control.step_traverse_controller:main',
+            'kfs_loader_controller = robot_r2_control.kfs_loader:main',
         ],
     },
 )

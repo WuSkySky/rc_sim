@@ -2,6 +2,8 @@ kfs_gripper_grip:
   ros__parameters:
     command_topic: /r2/gripper/grip_cmd
     feedback_topic: /r2/gripper/grip_feedback
+    gap_feedback_topic: /r2/gripper/grip_gap_feedback
     service_name: /r2/gripper/set_grip
     default_tolerance: 0.005
     default_timeout_sec: 10.0
+    closed_gap_threshold: 0.38

@@ -72,7 +72,7 @@ class WasdTeleop(Node):
         self.preset_keys_down = set()
         self.key_lock = threading.Lock()
 
-        self.lift_target = 0.0
+        self.lift_target = -0.180
         self.rotate_target = 0.0
         self.grip_target = 0.0
 
@@ -109,9 +109,9 @@ class WasdTeleop(Node):
             self.lift_target = max(-0.180, min(0.240, self.lift_target))
 
             if 'i' in active:
-                self.rotate_target += self.bar_rotate_speed * dt
-            if 'k' in active:
                 self.rotate_target -= self.bar_rotate_speed * dt
+            if 'k' in active:
+                self.rotate_target += self.bar_rotate_speed * dt
             self.rotate_target = max(-3.14159, min(0.0, self.rotate_target))
 
             if 'o' in active:
@@ -169,7 +169,7 @@ class WasdTeleop(Node):
 
     def publish_zero_all(self):
         self.publish_zero_twist()
-        self.lift_target = 0.0
+        self.lift_target = -0.180
         self.rotate_target = 0.0
         self.grip_target = 0.0
         self.bar_lift_pub.publish(Float64(data=0.0))

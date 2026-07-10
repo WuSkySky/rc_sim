@@ -183,7 +183,7 @@
   <joint name="gripper_left_joint" type="prismatic">
     <parent link="long_bar"/>
     <child link="gripper_left"/>
-    <origin xyz="0.1175 0.209 0" rpy="0 0 0"/>
+    <origin xyz="0.1175 0.209 -0.030" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-0.209" upper="0" effort="50" velocity="0.3"/>
     <dynamics damping="10.0" friction="2.0"/>
@@ -216,7 +216,7 @@
   <joint name="gripper_right_joint" type="prismatic">
     <parent link="long_bar"/>
     <child link="gripper_right"/>
-    <origin xyz="0.1175 -0.209 0" rpy="0 0 0"/>
+    <origin xyz="0.1175 -0.209 -0.030" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="0" upper="0.209" effort="50" velocity="0.3"/>
     <dynamics damping="10.0" friction="2.0"/>
@@ -1207,6 +1207,7 @@
       </ros>
       <command_topic>/r2/gripper/grip_cmd</command_topic>
       <feedback_topic>/r2/gripper/grip_feedback</feedback_topic>
+      <gap_feedback_topic>/r2/gripper/grip_gap_feedback</gap_feedback_topic>
       <left_joint_name>gripper_left_joint</left_joint_name>
       <right_joint_name>gripper_right_joint</right_joint_name>
       <stroke>0.209</stroke>

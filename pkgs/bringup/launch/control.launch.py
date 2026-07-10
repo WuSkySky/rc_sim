@@ -14,6 +14,11 @@ def generate_launch_description():
         'config',
         'step_traverse_service.yaml',
     )
+    kfs_loader_config = os.path.join(
+        control_pkg,
+        'config',
+        'kfs_loader.yaml',
+    )
 
     chassis_pose_servo_config = os.path.join(
         controller_pkg,
@@ -56,6 +61,13 @@ def generate_launch_description():
         package='robot_r2_control',
         executable='step_traverse_controller',
         parameters=[step_traverse_config],
+        output='screen',
+    )
+
+    kfs_loader_controller = Node(
+        package='robot_r2_control',
+        executable='kfs_loader_controller',
+        parameters=[kfs_loader_config],
         output='screen',
     )
 
@@ -118,6 +130,7 @@ def generate_launch_description():
     return LaunchDescription([
         teleop_controller,
         step_traverse_controller,
+        kfs_loader_controller,
         chassis_pose_servo,
         chassis_lift,
         kfs_alignment,

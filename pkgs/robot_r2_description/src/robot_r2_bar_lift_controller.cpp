@@ -49,6 +49,8 @@ public:
       return;
     }
 
+    target_ = min_pos_;  // start at lowest position
+
     command_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       command_topic_, rclcpp::QoS(10),
       [this](std_msgs::msg::Float64::SharedPtr msg) {

@@ -1,0 +1,17 @@
+kfs_loader_controller:
+  ros__parameters:
+    service_name: /r2/kfs/load
+    grip_service: /r2/gripper/set_grip
+    lift_service: /r2/gripper/set_lift
+    rotate_service: /r2/gripper/set_rotate
+    service_timeout_sec: 10.0
+    # Clear open gap is 0.408 m after subtracting both 0.005 m plate halves.
+    # Command 0.064 m gives approximately 0.280 m clear gap.
+    kfs_grip_position: 0.064
+    grip_open_position: 0.0
+    rotate_forward_position: -3.141592653589793
+    rotate_home_position: 0.0
+    lift_base_position: -0.180
+    lift_stack_increment: 0.35
+    max_loaded_kfs: 2
+    initial_loaded_kfs: 0
