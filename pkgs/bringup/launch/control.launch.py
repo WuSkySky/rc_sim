@@ -9,10 +9,10 @@ def generate_launch_description():
     control_pkg = get_package_share_directory('robot_r2_control')
     controller_pkg = get_package_share_directory('robot_r2_controller')
 
-    step_traverse_config = os.path.join(
+    stage_two_config = os.path.join(
         control_pkg,
         'config',
-        'step_traverse_service.yaml',
+        'stage_two.yaml',
     )
     kfs_loader_config = os.path.join(
         control_pkg,
@@ -57,10 +57,10 @@ def generate_launch_description():
         output='screen',
     )
 
-    step_traverse_controller = Node(
+    stage_two_controller = Node(
         package='robot_r2_control',
-        executable='step_traverse_controller',
-        parameters=[step_traverse_config],
+        executable='stage_two_controller',
+        parameters=[stage_two_config],
         output='screen',
     )
 
@@ -129,7 +129,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         teleop_controller,
-        step_traverse_controller,
+        stage_two_controller,
         kfs_loader_controller,
         chassis_pose_servo,
         chassis_lift,

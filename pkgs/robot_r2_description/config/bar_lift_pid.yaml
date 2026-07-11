@@ -1,9 +1,0 @@
-/robot_r2_bar_lift:
-  ros__parameters:
-    bar_lift:
-      max_actuation_force: 10000.0
-      position_d_gain: 20.0
-      position_i_gain: 1000.0
-      position_i_max: 1000.0
-      position_i_min: -1000.0
-      position_p_gain: 6000.0

@@ -17,7 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetGripperRotate.srv"
   "srv/SetGripperGrip.srv"
   "srv/LoadKfs.srv"
-  "srv/TraverseAdjacentStep.srv"
+  "srv/StageTwo.srv"
   "srv/AlignToKFS.srv"
   DEPENDENCIES std_msgs
 )

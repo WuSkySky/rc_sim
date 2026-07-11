@@ -14,7 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'config'),
             [
-                'config/step_traverse_service.yaml',
+                'config/stage_two.yaml',
                 'config/kfs_loader.yaml',
             ]),
     ],
@@ -28,7 +28,7 @@ setup(
     entry_points={
         'console_scripts': [
             'teleop_controller = robot_r2_control.teleop_controller:main',
-            'step_traverse_controller = robot_r2_control.step_traverse_controller:main',
+            'stage_two_controller = robot_r2_control.stage_two_controller:main',
             'kfs_loader_controller = robot_r2_control.kfs_loader:main',
         ],
     },

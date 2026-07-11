@@ -36,7 +36,7 @@ public:
     stroke_ = sdf->Get<double>("stroke", 0.209).first;
 
     const double sdf_p = sdf->Get<double>("position_p_gain", 1000.0).first;
-    const double sdf_i = sdf->Get<double>("position_i_gain", 200.0).first;
+    const double sdf_i = sdf->Get<double>("position_i_gain", 0.0).first;
     const double sdf_d = sdf->Get<double>("position_d_gain", 3.0).first;
     const double sdf_imax = sdf->Get<double>("position_i_max", 2000.0).first;
     const double sdf_imin = sdf->Get<double>("position_i_min", -2000.0).first;

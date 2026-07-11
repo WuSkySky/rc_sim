@@ -1,0 +1,30 @@
+stage_two_controller:
+  ros__parameters:
+    service_name: /r2/stage_two
+    move_to_pose_service: /r2/move_to_pose
+    set_lift_service: /r2/lift/set
+    align_kfs_service: /r2/align_to_kfs
+    load_kfs_service: /r2/kfs/load
+    dependency_timeout_sec: 2.0
+    move_wait_timeout_sec: 35.0
+    lift_wait_timeout_sec: 15.0
+    align_wait_timeout_sec: 15.0
+    load_wait_timeout_sec: 70.0
+
+    # Fixed route: (5, 2) -> (4, 2).
+    source_x: 3.4
+    source_y: -3.0
+    target_x: 2.2
+    target_y: -3.0
+    travel_yaw: 3.141592653589793
+    near_edge_offset: 0.3
+    kfs_align_edge_offset: 0.72
+    kfs_pickup_edge_offset: 0.55
+    target_far_edge_offset: 0.487
+
+    lift_up_front: 0.2
+    lift_up_rear: 0.2
+    lift_at_near_edge_front: 0.0
+    lift_at_near_edge_rear: 0.2
+    lift_final_front: 0.0
+    lift_final_rear: 0.0

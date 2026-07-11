@@ -1,9 +1,0 @@
-/robot_r2_lift_controller:
-  ros__parameters:
-    lift:
-      position_p_gain: 1500.0
-      position_i_gain: 300.0
-      position_d_gain: 120.0
-      position_i_max: 200.0
-      position_i_min: -200.0
-      max_actuation_force: 300.0

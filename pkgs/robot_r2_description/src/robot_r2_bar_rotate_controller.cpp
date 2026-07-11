@@ -30,9 +30,9 @@ public:
     max_pos_ = sdf->Get<double>("max_position",  0.0).first;
     if (min_pos_ > max_pos_) std::swap(min_pos_, max_pos_);
 
-    const double sdf_p = sdf->Get<double>("position_p_gain", 60.0).first;
-    const double sdf_i = sdf->Get<double>("position_i_gain", 40.0).first;
-    const double sdf_d = sdf->Get<double>("position_d_gain", 0.0).first;
+    const double sdf_p = sdf->Get<double>("position_p_gain", 8.0).first;
+    const double sdf_i = sdf->Get<double>("position_i_gain", 3.0).first;
+    const double sdf_d = sdf->Get<double>("position_d_gain", 0.03).first;
     const double sdf_imax = sdf->Get<double>("position_i_max", 500.0).first;
     const double sdf_imin = sdf->Get<double>("position_i_min", -500.0).first;
     const double sdf_force = sdf->Get<double>("max_actuation_force", 80.0).first;
@@ -155,7 +155,7 @@ private:
   std::string feedback_topic_{"/r2/gripper/rotate_feedback"};
   std::string joint_name_{"long_bar_revolute_joint"};
   double min_pos_{-3.14159}, max_pos_{0.0};
-  double p_gain_{60.0}, i_gain_{40.0}, d_gain_{0.0};
+  double p_gain_{8.0}, i_gain_{3.0}, d_gain_{0.0};
   double i_max_{500.0}, i_min_{-500.0}, force_limit_{80.0};
   double target_{0.0}, integral_{0.0}, prev_err_{0.0};
   bool deriv_reset_{false};

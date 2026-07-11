@@ -124,7 +124,7 @@ target_link_libraries(robot_r2_gripper
 )
 
 install(
-  DIRECTORY urdf config
+  DIRECTORY urdf
   DESTINATION share/${PROJECT_NAME}
 )
 

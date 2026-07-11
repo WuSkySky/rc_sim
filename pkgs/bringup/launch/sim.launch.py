@@ -7,7 +7,6 @@ from ament_index_python.packages import (
 from launch import LaunchDescription
 from launch.actions import (
     AppendEnvironmentVariable,
-    ExecuteProcess,
     IncludeLaunchDescription,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -58,19 +57,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    # Load lift PID YAML after robot spawns (plugins need time to init)
-    load_lift_pid = ExecuteProcess(
-        cmd=[
-            'bash', '-c',
-            'for i in $(seq 1 15); do '
-            + f'ros2 param load /robot_r2_lift_controller {robot_pkg}/config/lift_pid.yaml 2>/dev/null && exit 0; '
-            + 'sleep 2; '
-            + 'done; '
-            + 'echo "WARNING: lift PID load failed after 30s"'
-        ],
-        output='screen',
-    )
-
     return LaunchDescription([
         AppendEnvironmentVariable(
             'GAZEBO_PLUGIN_PATH',
@@ -79,5 +65,4 @@ def generate_launch_description():
         field_launch,
         spawn_robot_r2,
         control_launch,
-        load_lift_pid,
     ])

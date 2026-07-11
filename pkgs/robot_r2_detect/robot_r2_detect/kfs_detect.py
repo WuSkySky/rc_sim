@@ -56,6 +56,9 @@ def main(args: list[str] | None = None) -> None:
             self._pub_processed = self.create_publisher(
                 KfsProcessedDetection, "/r2/detection/processed", 10
             )
+            self._pub_viz = self.create_publisher(
+                Image, "/r2/detection/viz", 10
+            )
 
         # ---- parameters ----
 
@@ -63,6 +66,7 @@ def main(args: list[str] | None = None) -> None:
             self.declare_parameter("model_path", "")
             self.declare_parameter("color_topic", "/r2/front_camera/image_raw")
             self.declare_parameter("conf", 0.75)
+            self.declare_parameter("viz_topic", "/r2/detection/viz")
 
         def _load_parameters(self) -> None:
             from ament_index_python.packages import get_package_share_directory
@@ -182,6 +186,37 @@ def main(args: list[str] | None = None) -> None:
                 processed_msg.center_offset_y = 0
 
             self._pub_processed.publish(processed_msg)
+
+            # ------- Topic 3: visualization -------
+            import cv2
+            viz = image.copy()
+
+            proc_x1 = processed_msg.x1 if processed_msg.class_name else -1
+
+            for box in result.boxes:
+                x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+                cls_id = int(box.cls[0])
+                cls_name = result.names.get(cls_id, "unknown")
+                conf = float(box.conf[0])
+
+                is_processed = (x1 == proc_x1)
+                color = (0, 255, 0) if is_processed else (0, 0, 0)
+                thickness = 2 if is_processed else 1
+
+                cv2.rectangle(viz, (x1, y1), (x2, y2), color, thickness)
+                label = f"{cls_name} {conf:.2f}"
+                cv2.putText(viz, label, (x1, max(y1 - 5, 15)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+            viz_msg = Image()
+            viz_msg.header = msg.header
+            viz_msg.height = viz.shape[0]
+            viz_msg.width = viz.shape[1]
+            viz_msg.encoding = "bgr8"
+            viz_msg.is_bigendian = 0
+            viz_msg.step = viz.shape[1] * 3
+            viz_msg.data = viz.tobytes()
+            self._pub_viz.publish(viz_msg)
 
     # ----------------------------------------------------------------
     rclpy.init(args=args)
