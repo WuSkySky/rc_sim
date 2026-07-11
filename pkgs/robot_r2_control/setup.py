@@ -27,9 +27,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'teleop_controller = robot_r2_control.teleop_controller:main',
-            'stage_two_controller = robot_r2_control.stage_two_controller:main',
-            'kfs_loader_controller = robot_r2_control.kfs_loader:main',
+            'teleop_control = robot_r2_control.teleop_control:main',
+            'stage_two_control = robot_r2_control.stage_two_control:main',
+            'kfs_loader_control = robot_r2_control.kfs_loader:main',
         ],
     },
 )

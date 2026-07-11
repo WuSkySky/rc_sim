@@ -39,7 +39,7 @@ LIFT_PRESETS = {
 
 class WasdTeleop(Node):
     def __init__(self):
-        super().__init__('teleop_controller')
+        super().__init__('teleop_control')
 
         self.declare_parameter('cmd_vel_topic', '/r2/cmd_vel')
         self.declare_parameter('set_lift_service', '/r2/lift/set')

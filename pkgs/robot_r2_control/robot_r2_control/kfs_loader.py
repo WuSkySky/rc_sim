@@ -12,7 +12,7 @@ from robot_r2_interfaces.srv import SetGripperRotate
 
 class KfsLoaderController(Node):
     def __init__(self):
-        super().__init__('kfs_loader_controller')
+        super().__init__('kfs_loader_control')
         self.callback_group = ReentrantCallbackGroup()
         self.operation_lock = threading.Lock()
 

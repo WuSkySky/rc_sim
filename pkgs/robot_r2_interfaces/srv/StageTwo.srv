@@ -1,3 +1,5 @@
+int32[] rows
+int32[] cols
 ---
 bool success
 string message

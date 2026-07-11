@@ -51,22 +51,22 @@ def generate_launch_description():
         'kfs_gripper_grip.yaml',
     )
 
-    teleop_controller = Node(
+    teleop_control = Node(
         package='robot_r2_control',
-        executable='teleop_controller',
+        executable='teleop_control',
         output='screen',
     )
 
-    stage_two_controller = Node(
+    stage_two_control = Node(
         package='robot_r2_control',
-        executable='stage_two_controller',
+        executable='stage_two_control',
         parameters=[stage_two_config],
         output='screen',
     )
 
-    kfs_loader_controller = Node(
+    kfs_loader_control = Node(
         package='robot_r2_control',
-        executable='kfs_loader_controller',
+        executable='kfs_loader_control',
         parameters=[kfs_loader_config],
         output='screen',
     )
@@ -128,9 +128,9 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        teleop_controller,
-        stage_two_controller,
-        kfs_loader_controller,
+        teleop_control,
+        stage_two_control,
+        kfs_loader_control,
         chassis_pose_servo,
         chassis_lift,
         kfs_alignment,

@@ -381,6 +381,36 @@
     <origin xyz="0.340 -0.224 -0.095" rpy="0 0 0"/>
   </joint>
 
+  <!-- front center guide support -->
+  <link name="guide_support_fc">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.020 0.170"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="0.000122" ixy="0" ixz="0"
+               iyy="0.000122" iyz="0"
+               izz="0.00000333"/>
+    </inertial>
+  </link>
+
+  <joint name="guide_support_fc_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="guide_support_fc"/>
+    <origin xyz="0.340 0 -0.095" rpy="0 0 0"/>
+  </joint>
+
   <!-- rear left corner guide support -->
   <link name="guide_support_rl">
     <visual>

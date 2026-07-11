@@ -1,4 +1,4 @@
-kfs_loader_controller:
+kfs_loader_control:
   ros__parameters:
     service_name: /r2/kfs/load
     grip_service: /r2/gripper/set_grip
