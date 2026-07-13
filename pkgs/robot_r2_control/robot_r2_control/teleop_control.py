@@ -14,8 +14,9 @@ Robot R2 WASD teleop
 W/S : forward / backward
 A/D : left / right strafe
 Q/E : rotate left / right
-U/J : bar lift up / down (hold)
-I/K : bar rotate forward / back (hold)
+Y/H : bar lift up / down (hold)
+U/J : root rotate forward / back (hold)
+I/K : tip rotate forward / back (hold)
 O/L : gripper open / close (hold)
 1   : front lift to +0.20 m
 2   : rear lift to +0.20 m
@@ -27,7 +28,7 @@ CTRL-C to quit
 """
 
 MOTION_KEYS = {'w', 'a', 's', 'd', 'q', 'e'}
-GRIPPER_KEYS = {'u', 'j', 'i', 'k', 'o', 'l'}
+GRIPPER_KEYS = {'y', 'h', 'u', 'j', 'i', 'k', 'o', 'l'}
 
 LIFT_PRESETS = {
     '1': (0.20, 0.0),
@@ -63,7 +64,8 @@ class WasdTeleop(Node):
 
         self.cmd_vel_publisher = self.create_publisher(Twist, cmd_vel_topic, 10)
         self.bar_lift_pub = self.create_publisher(Float64, '/r2/gripper/lift_cmd', 10)
-        self.bar_rotate_pub = self.create_publisher(Float64, '/r2/gripper/rotate_cmd', 10)
+        self.root_rotate_pub = self.create_publisher(Float64, '/r2/gripper/rotate_cmd', 10)
+        self.tip_rotate_pub = self.create_publisher(Float64, '/r2/gripper/tip_rotate_cmd', 10)
         self.gripper_pub = self.create_publisher(Float64, '/r2/gripper/grip_cmd', 10)
 
         self.set_lift_client = self.create_client(SetLift, set_lift_service)
@@ -73,7 +75,8 @@ class WasdTeleop(Node):
         self.key_lock = threading.Lock()
 
         self.lift_target = -0.180
-        self.rotate_target = 0.0
+        self.rotate_target = -1.5708
+        self.tip_rotate_target = 1.5708
         self.grip_target = 0.0
 
         self.timer = self.create_timer(1.0 / publish_rate, self.publish_commands)
@@ -102,17 +105,23 @@ class WasdTeleop(Node):
 
         # Gripper controls (hold to move, release = stop at current position)
         if any(k in active for k in GRIPPER_KEYS):
-            if 'u' in active:
+            if 'y' in active:
                 self.lift_target += self.bar_lift_speed * dt
-            if 'j' in active:
+            if 'h' in active:
                 self.lift_target -= self.bar_lift_speed * dt
             self.lift_target = max(-0.180, min(0.240, self.lift_target))
 
-            if 'i' in active:
+            if 'u' in active:
                 self.rotate_target -= self.bar_rotate_speed * dt
-            if 'k' in active:
+            if 'j' in active:
                 self.rotate_target += self.bar_rotate_speed * dt
-            self.rotate_target = max(-3.14159, min(0.0, self.rotate_target))
+            self.rotate_target = max(-1.5708, min(0.0, self.rotate_target))
+
+            if 'i' in active:
+                self.tip_rotate_target -= self.bar_rotate_speed * dt
+            if 'k' in active:
+                self.tip_rotate_target += self.bar_rotate_speed * dt
+            self.tip_rotate_target = max(-1.5708, min(1.5708, self.tip_rotate_target))
 
             if 'o' in active:
                 self.grip_target -= self.gripper_speed * dt
@@ -121,7 +130,8 @@ class WasdTeleop(Node):
             self.grip_target = max(0.0, min(0.209, self.grip_target))
 
             self.bar_lift_pub.publish(Float64(data=self.lift_target))
-            self.bar_rotate_pub.publish(Float64(data=self.rotate_target))
+            self.root_rotate_pub.publish(Float64(data=self.rotate_target))
+            self.tip_rotate_pub.publish(Float64(data=self.tip_rotate_target))
             self.gripper_pub.publish(Float64(data=self.grip_target))
 
     def on_press(self, key):
@@ -170,10 +180,12 @@ class WasdTeleop(Node):
     def publish_zero_all(self):
         self.publish_zero_twist()
         self.lift_target = -0.180
-        self.rotate_target = 0.0
+        self.rotate_target = -1.5708
+        self.tip_rotate_target = 1.5708
         self.grip_target = 0.0
         self.bar_lift_pub.publish(Float64(data=0.0))
-        self.bar_rotate_pub.publish(Float64(data=0.0))
+        self.root_rotate_pub.publish(Float64(data=0.0))
+        self.tip_rotate_pub.publish(Float64(data=0.0))
         self.gripper_pub.publish(Float64(data=0.0))
 
     def publish_zero_twist(self):

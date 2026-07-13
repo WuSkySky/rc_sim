@@ -33,6 +33,10 @@ add_library(robot_r2_gripper SHARED
   src/robot_r2_gripper_controller.cpp
 )
 
+add_library(robot_r2_tip_rotate SHARED
+  src/robot_r2_tip_rotate_controller.cpp
+)
+
 target_include_directories(robot_r2_planar_move PUBLIC
   ${GAZEBO_INCLUDE_DIRS}
 )
@@ -54,6 +58,10 @@ target_include_directories(robot_r2_bar_rotate PUBLIC
 )
 
 target_include_directories(robot_r2_gripper PUBLIC
+  ${GAZEBO_INCLUDE_DIRS}
+)
+
+target_include_directories(robot_r2_tip_rotate PUBLIC
   ${GAZEBO_INCLUDE_DIRS}
 )
 
@@ -99,6 +107,13 @@ ament_target_dependencies(robot_r2_gripper
   std_msgs
 )
 
+ament_target_dependencies(robot_r2_tip_rotate
+  gazebo_dev
+  gazebo_ros
+  rclcpp
+  std_msgs
+)
+
 target_link_libraries(robot_r2_planar_move
   ${GAZEBO_LIBRARIES}
 )
@@ -123,6 +138,10 @@ target_link_libraries(robot_r2_gripper
   ${GAZEBO_LIBRARIES}
 )
 
+target_link_libraries(robot_r2_tip_rotate
+  ${GAZEBO_LIBRARIES}
+)
+
 install(
   DIRECTORY urdf
   DESTINATION share/${PROJECT_NAME}
@@ -130,7 +149,7 @@ install(
 
 install(
   TARGETS robot_r2_planar_move robot_r2_localizer robot_r2_lift_controller
-    robot_r2_bar_lift robot_r2_bar_rotate robot_r2_gripper
+    robot_r2_bar_lift robot_r2_bar_rotate robot_r2_gripper robot_r2_tip_rotate
   LIBRARY DESTINATION lib
 )
 

@@ -45,6 +45,11 @@ def generate_launch_description():
         'config',
         'kfs_gripper_rotate.yaml',
     )
+    kfs_gripper_tip_rotate_config = os.path.join(
+        controller_pkg,
+        'config',
+        'kfs_gripper_tip_rotate.yaml',
+    )
     kfs_gripper_grip_config = os.path.join(
         controller_pkg,
         'config',
@@ -106,6 +111,13 @@ def generate_launch_description():
         output='screen',
     )
 
+    kfs_gripper_tip_rotate = Node(
+        package='robot_r2_controller',
+        executable='kfs_gripper_tip_rotate',
+        parameters=[kfs_gripper_tip_rotate_config],
+        output='screen',
+    )
+
     kfs_gripper_grip = Node(
         package='robot_r2_controller',
         executable='kfs_gripper_grip',
@@ -136,6 +148,7 @@ def generate_launch_description():
         kfs_alignment,
         kfs_gripper_lift,
         kfs_gripper_rotate,
+        kfs_gripper_tip_rotate,
         kfs_gripper_grip,
         kfs_detect,
     ])

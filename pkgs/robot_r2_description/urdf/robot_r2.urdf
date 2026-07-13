@@ -174,7 +174,7 @@
   <!-- Bar Mount: tiny invisible link, base→mount(prismatic z)   -->
   <!-- ========================================================= -->
 
-  <link name="bar_mount">
+  <link name="gripper_lift">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
@@ -197,9 +197,9 @@
     </inertial>
   </link>
 
-  <joint name="bar_mount_prismatic_joint" type="prismatic">
+  <joint name="gripper_lift_joint" type="prismatic">
     <parent link="base_link"/>
-    <child link="bar_mount"/>
+    <child link="gripper_lift"/>
     <origin xyz="0.2925 0 0.260" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="-0.180" upper="0.240" effort="100" velocity="0.2"/>
@@ -208,10 +208,10 @@
 
   <!-- ========================================================= -->
   <!-- Long Bar: 20x20x428mm, center at y=0 (chassis centerline) -->
-  <!-- Revolute on bar_mount (y-axis), ±90° rotation             -->
+  <!-- Revolute on gripper_lift (y-axis), ±90° rotation             -->
   <!-- ========================================================= -->
 
-  <link name="long_bar">
+  <link name="gripper_root">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
@@ -234,12 +234,76 @@
     </inertial>
   </link>
 
-  <joint name="long_bar_revolute_joint" type="revolute">
-    <parent link="bar_mount"/>
-    <child link="long_bar"/>
+  <joint name="gripper_root_joint" type="revolute">
+    <parent link="gripper_lift"/>
+    <child link="gripper_root"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-3.14159" upper="0" effort="100" velocity="3.0"/>
+    <limit lower="-1.5708" upper="0" effort="100" velocity="3.0"/>
+    <dynamics damping="5.0" friction="0.5"/>
+  </joint>
+
+  <!-- ========================================================= -->
+  <!-- Gripper Extension Rod: 600mm forward from rotation axis   -->
+  <!-- Visual only, no collision                                  -->
+  <!-- ========================================================= -->
+
+  <link name="gripper_extension">
+    <visual>
+      <origin xyz="0.300 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.600 0.020 0.020"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.300 0 0" rpy="0 0 0"/>
+      <mass value="0.08"/>
+      <inertia ixx="0.00033" ixy="0" ixz="0"
+               iyy="0.00240" iyz="0"
+               izz="0.00240"/>
+    </inertial>
+  </link>
+
+  <joint name="gripper_extension_joint" type="fixed">
+    <parent link="gripper_root"/>
+    <child link="gripper_extension"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========================================================= -->
+  <!-- Gripper Cross Bar: at tip of extension rod, slide rail    -->
+  <!-- ========================================================= -->
+
+  <link name="gripper_tip">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.428 0.020"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.020 0.428 0.020"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.16"/>
+      <inertia ixx="0.00245" ixy="0" ixz="0"
+               iyy="0.001" iyz="0"
+               izz="0.00245"/>
+    </inertial>
+  </link>
+
+  <joint name="gripper_tip_joint" type="revolute">
+    <parent link="gripper_extension"/>
+    <child link="gripper_tip"/>
+    <origin xyz="0.600 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.5708" upper="1.5708" effort="100" velocity="3.0"/>
     <dynamics damping="5.0" friction="0.5"/>
   </joint>
 
@@ -273,9 +337,9 @@
   </link>
 
   <joint name="gripper_left_joint" type="prismatic">
-    <parent link="long_bar"/>
+    <parent link="gripper_tip"/>
     <child link="gripper_left"/>
-    <origin xyz="0.1175 0.209 -0.030" rpy="0 0 0"/>
+    <origin xyz="0.060 0.209 -0.030" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-0.209" upper="0" effort="50" velocity="0.3"/>
     <dynamics damping="10.0" friction="2.0"/>
@@ -306,9 +370,9 @@
   </link>
 
   <joint name="gripper_right_joint" type="prismatic">
-    <parent link="long_bar"/>
+    <parent link="gripper_tip"/>
     <child link="gripper_right"/>
-    <origin xyz="0.1175 -0.209 -0.030" rpy="0 0 0"/>
+    <origin xyz="0.060 -0.209 -0.030" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="0" upper="0.209" effort="50" velocity="0.3"/>
     <dynamics damping="10.0" friction="2.0"/>
@@ -1293,7 +1357,7 @@
       </ros>
       <command_topic>/r2/gripper/lift_cmd</command_topic>
       <feedback_topic>/r2/gripper/lift_feedback</feedback_topic>
-      <joint_name>bar_mount_prismatic_joint</joint_name>
+      <joint_name>gripper_lift_joint</joint_name>
       <min_position>-0.180</min_position>
       <max_position>0.240</max_position>
     </plugin>
@@ -1307,9 +1371,23 @@
       </ros>
       <command_topic>/r2/gripper/rotate_cmd</command_topic>
       <feedback_topic>/r2/gripper/rotate_feedback</feedback_topic>
-      <joint_name>long_bar_revolute_joint</joint_name>
-      <min_position>-3.14159</min_position>
+      <joint_name>gripper_root_joint</joint_name>
+      <min_position>-1.5708</min_position>
       <max_position>0.0</max_position>
+    </plugin>
+  </gazebo>
+
+  <!-- ================= Tip Rotate Controller ================= -->
+  <gazebo>
+    <plugin name="robot_r2_tip_rotate" filename="librobot_r2_tip_rotate.so">
+      <ros>
+        <namespace>/</namespace>
+      </ros>
+      <command_topic>/r2/gripper/tip_rotate_cmd</command_topic>
+      <feedback_topic>/r2/gripper/tip_rotate_feedback</feedback_topic>
+      <joint_name>gripper_tip_joint</joint_name>
+      <min_position>-1.5708</min_position>
+      <max_position>1.5708</max_position>
     </plugin>
   </gazebo>
 

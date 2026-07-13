@@ -9,8 +9,8 @@ kfs_loader_control:
     # Command 0.064 m gives approximately 0.280 m clear gap.
     kfs_grip_position: 0.064
     grip_open_position: 0.0
-    rotate_forward_position: -3.141592653589793
-    rotate_home_position: 0.0
+    rotate_forward_position: 0.0
+    rotate_home_position: -1.5707963267948966
     lift_base_position: -0.180
     lift_stack_increment: 0.35
     max_loaded_kfs: 2

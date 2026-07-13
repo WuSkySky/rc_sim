@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <mutex>
 #include <string>
 
@@ -13,7 +14,7 @@
 namespace robot_r2_description
 {
 
-class RobotR2BarLiftController : public gazebo::ModelPlugin
+class RobotR2TipRotateController : public gazebo::ModelPlugin
 {
 public:
   void Load(gazebo::physics::ModelPtr model, sdf::ElementPtr sdf) override
@@ -21,35 +22,33 @@ public:
     model_ = model;
     node_ = gazebo_ros::Node::Get(sdf);
 
-    command_topic_ = sdf->Get<std::string>("command_topic", "/r2/gripper/lift_cmd").first;
-    feedback_topic_ = sdf->Get<std::string>("feedback_topic", "/r2/gripper/lift_feedback").first;
-    joint_name_ = sdf->Get<std::string>("joint_name", "gripper_lift_joint").first;
+    command_topic_ = sdf->Get<std::string>("command_topic", "/r2/gripper/tip_rotate_cmd").first;
+    feedback_topic_ = sdf->Get<std::string>("feedback_topic", "/r2/gripper/tip_rotate_feedback").first;
+    joint_name_ = sdf->Get<std::string>("joint_name", "gripper_tip_joint").first;
 
-    min_pos_ = sdf->Get<double>("min_position", -0.180).first;
-    max_pos_ = sdf->Get<double>("max_position",  0.240).first;
+    min_pos_ = sdf->Get<double>("min_position", -1.5708).first;
+    max_pos_ = sdf->Get<double>("max_position",  1.5708).first;
     if (min_pos_ > max_pos_) std::swap(min_pos_, max_pos_);
 
-    const double sdf_p = sdf->Get<double>("position_p_gain", 6000.0).first;
-    const double sdf_i = sdf->Get<double>("position_i_gain", 1000.0).first;
-    const double sdf_d = sdf->Get<double>("position_d_gain", 20.0).first;
-    const double sdf_imax = sdf->Get<double>("position_i_max", 1000.0).first;
-    const double sdf_imin = sdf->Get<double>("position_i_min", -1000.0).first;
-    const double sdf_force = sdf->Get<double>("max_actuation_force", 10000.0).first;
+    const double sdf_p = sdf->Get<double>("position_p_gain", 8.0).first;
+    const double sdf_i = sdf->Get<double>("position_i_gain", 3.0).first;
+    const double sdf_d = sdf->Get<double>("position_d_gain", 0.03).first;
+    const double sdf_imax = sdf->Get<double>("position_i_max", 500.0).first;
+    const double sdf_imin = sdf->Get<double>("position_i_min", -500.0).first;
+    const double sdf_force = sdf->Get<double>("max_actuation_force", 80.0).first;
 
-    node_->declare_parameter("bar_lift.position_p_gain", sdf_p);
-    node_->declare_parameter("bar_lift.position_i_gain", sdf_i);
-    node_->declare_parameter("bar_lift.position_d_gain", sdf_d);
-    node_->declare_parameter("bar_lift.position_i_max",  sdf_imax);
-    node_->declare_parameter("bar_lift.position_i_min",  sdf_imin);
-    node_->declare_parameter("bar_lift.max_actuation_force", sdf_force);
+    node_->declare_parameter("tip_rotate.position_p_gain", sdf_p);
+    node_->declare_parameter("tip_rotate.position_i_gain", sdf_i);
+    node_->declare_parameter("tip_rotate.position_d_gain", sdf_d);
+    node_->declare_parameter("tip_rotate.position_i_max",  sdf_imax);
+    node_->declare_parameter("tip_rotate.position_i_min",  sdf_imin);
+    node_->declare_parameter("tip_rotate.max_actuation_force", sdf_force);
     LoadParams();
 
     joint_ = model_->GetJoint(joint_name_);
     if (!joint_) {
       return;
     }
-
-    target_ = min_pos_;  // start at lowest position
 
     command_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       command_topic_, rclcpp::QoS(10),
@@ -61,23 +60,23 @@ public:
     feedback_pub_ = node_->create_publisher<std_msgs::msg::Float64>(feedback_topic_, rclcpp::QoS(10));
 
     param_cb_ = node_->add_on_set_parameters_callback(
-      std::bind(&RobotR2BarLiftController::OnParamsChanged, this, std::placeholders::_1));
+      std::bind(&RobotR2TipRotateController::OnParamsChanged, this, std::placeholders::_1));
 
     last_time_ = model_->GetWorld()->SimTime();
     update_conn_ = gazebo::event::Events::ConnectWorldUpdateBegin(
-      std::bind(&RobotR2BarLiftController::OnUpdate, this));
+      std::bind(&RobotR2TipRotateController::OnUpdate, this));
 
   }
 
 private:
   void LoadParams()
   {
-    p_gain_  = node_->get_parameter("bar_lift.position_p_gain").as_double();
-    i_gain_  = node_->get_parameter("bar_lift.position_i_gain").as_double();
-    d_gain_  = node_->get_parameter("bar_lift.position_d_gain").as_double();
-    i_max_   = node_->get_parameter("bar_lift.position_i_max").as_double();
-    i_min_   = node_->get_parameter("bar_lift.position_i_min").as_double();
-    force_limit_ = node_->get_parameter("bar_lift.max_actuation_force").as_double();
+    p_gain_  = node_->get_parameter("tip_rotate.position_p_gain").as_double();
+    i_gain_  = node_->get_parameter("tip_rotate.position_i_gain").as_double();
+    d_gain_  = node_->get_parameter("tip_rotate.position_d_gain").as_double();
+    i_max_   = node_->get_parameter("tip_rotate.position_i_max").as_double();
+    i_min_   = node_->get_parameter("tip_rotate.position_i_min").as_double();
+    force_limit_ = node_->get_parameter("tip_rotate.max_actuation_force").as_double();
   }
 
   rcl_interfaces::msg::SetParametersResult OnParamsChanged(
@@ -85,16 +84,16 @@ private:
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto & p : params) {
-      if (p.get_name() == "bar_lift.position_p_gain") { p_gain_ = p.as_double(); }
-      else if (p.get_name() == "bar_lift.position_i_gain") {
+      if (p.get_name() == "tip_rotate.position_p_gain") { p_gain_ = p.as_double(); }
+      else if (p.get_name() == "tip_rotate.position_i_gain") {
         i_gain_ = p.as_double();
         if (i_gain_ <= 1e-9) integral_ = 0.0;
         else integral_ = Clamp(integral_, i_min_, i_max_);
       }
-      else if (p.get_name() == "bar_lift.position_d_gain") { d_gain_ = p.as_double(); deriv_reset_ = true; }
-      else if (p.get_name() == "bar_lift.position_i_max") { i_max_ = p.as_double(); }
-      else if (p.get_name() == "bar_lift.position_i_min") { i_min_ = p.as_double(); }
-      else if (p.get_name() == "bar_lift.max_actuation_force") { force_limit_ = p.as_double(); }
+      else if (p.get_name() == "tip_rotate.position_d_gain") { d_gain_ = p.as_double(); deriv_reset_ = true; }
+      else if (p.get_name() == "tip_rotate.position_i_max") { i_max_ = p.as_double(); }
+      else if (p.get_name() == "tip_rotate.position_i_min") { i_min_ = p.as_double(); }
+      else if (p.get_name() == "tip_rotate.max_actuation_force") { force_limit_ = p.as_double(); }
     }
     rcl_interfaces::msg::SetParametersResult r; r.successful = true; return r;
   }
@@ -152,16 +151,16 @@ private:
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 
   std::mutex mutex_;
-  std::string command_topic_{"/r2/gripper/lift_cmd"};
-  std::string feedback_topic_{"/r2/gripper/lift_feedback"};
-  std::string joint_name_{"gripper_lift_joint"};
-  double min_pos_{-0.180}, max_pos_{0.240};
-  double p_gain_{6000.0}, i_gain_{1000.0}, d_gain_{20.0};
-  double i_max_{1000.0}, i_min_{-1000.0}, force_limit_{10000.0};
-  double target_{0.0}, integral_{0.0}, prev_err_{0.0};
+  std::string command_topic_{"/r2/gripper/tip_rotate_cmd"};
+  std::string feedback_topic_{"/r2/gripper/tip_rotate_feedback"};
+  std::string joint_name_{"gripper_tip_joint"};
+  double min_pos_{-1.5708}, max_pos_{1.5708};
+  double p_gain_{8.0}, i_gain_{3.0}, d_gain_{0.0};
+  double i_max_{500.0}, i_min_{-500.0}, force_limit_{80.0};
+  double target_{1.5708}, integral_{0.0}, prev_err_{0.0};
   bool deriv_reset_{false};
   gazebo::common::Time last_time_{0};
 };
 
-GZ_REGISTER_MODEL_PLUGIN(RobotR2BarLiftController)
+GZ_REGISTER_MODEL_PLUGIN(RobotR2TipRotateController)
 }  // namespace robot_r2_description
