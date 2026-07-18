@@ -1,0 +1,7 @@
+kfs_lift:
+  ros__parameters:
+    command_topic: /r2/kfs_lift/cmd
+    feedback_topic: /r2/kfs_lift/feedback
+    service_name: /r2/kfs_lift
+    default_tolerance: 0.005
+    default_timeout_sec: 10.0

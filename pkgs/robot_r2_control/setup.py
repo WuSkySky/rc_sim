@@ -16,6 +16,7 @@ setup(
             [
                 'config/stage_two.yaml',
                 'config/kfs_loader.yaml',
+                'config/step_traverse.yaml',
             ]),
     ],
     install_requires=['setuptools', 'pynput'],
@@ -30,6 +31,7 @@ setup(
             'teleop_control = robot_r2_control.teleop_control:main',
             'stage_two_control = robot_r2_control.stage_two_control:main',
             'kfs_loader_control = robot_r2_control.kfs_loader:main',
+            'step_traverse = robot_r2_control.step_traverse:main',
         ],
     },
 )

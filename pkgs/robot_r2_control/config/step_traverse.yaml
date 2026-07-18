@@ -1,0 +1,26 @@
+step_traverse:
+  ros__parameters:
+    service_name: /r2/step_traverse
+    current_pose_topic: /r2/pose_feedback
+    move_to_pose_service: /r2/move_to_pose
+    set_lift_service: /r2/lift/set
+    dependency_timeout_sec: 2.0
+    pose_wait_timeout_sec: 2.0
+    move_timeout_sec: 35.0
+    lift_timeout_sec: 15.0
+
+    a1: 0.05
+    a2: 0.42
+    a3: 0.35
+    b1: 0.23
+    b2: 0.42
+    b3: 0.10
+
+    lift_all_front: 0.20
+    lift_all_rear: 0.20
+    lift_front_only_front: 0.20
+    lift_front_only_rear: 0.0
+    lift_rear_only_front: 0.0
+    lift_rear_only_rear: 0.20
+    lift_down_front: 0.0
+    lift_down_rear: 0.0

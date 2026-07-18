@@ -1,0 +1,6 @@
+uint32 sample_count
+float64 timeout_sec
+---
+bool success
+string message
+string class_name

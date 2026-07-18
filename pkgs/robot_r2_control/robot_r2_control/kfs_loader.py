@@ -1,13 +1,16 @@
 import math
 import threading
-import time
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from robot_r2_interfaces.srv import LoadKfs, SetGripperGrip, SetGripperLift
-from robot_r2_interfaces.srv import SetGripperRotate
+from robot_r2_interfaces.srv import (
+    LoadKfs,
+    SetGripperGrip,
+    SetGripperRotate,
+    SetGripperTipRotate,
+)
 
 
 class KfsLoaderController(Node):
@@ -18,36 +21,49 @@ class KfsLoaderController(Node):
 
         self.declare_parameter('service_name', '/r2/kfs/load')
         self.declare_parameter('grip_service', '/r2/gripper/set_grip')
-        self.declare_parameter('lift_service', '/r2/gripper/set_lift')
-        self.declare_parameter('rotate_service', '/r2/gripper/set_rotate')
+        self.declare_parameter(
+            'root_rotate_service', '/r2/gripper/set_rotate')
+        self.declare_parameter(
+            'tip_rotate_service', '/r2/gripper/set_tip_rotate')
         self.declare_parameter('service_timeout_sec', 10.0)
         self.declare_parameter('kfs_grip_position', 0.064)
         self.declare_parameter('grip_open_position', 0.0)
-        self.declare_parameter('rotate_forward_position', 0.0)
-        self.declare_parameter('rotate_home_position', -math.pi/2)
-        self.declare_parameter('lift_base_position', -0.180)
-        self.declare_parameter('lift_stack_increment', 0.35)
+        self.declare_parameter(
+            'front_pickup_root_position', -math.pi / 6.0)
+        self.declare_parameter(
+            'front_pickup_tip_position', math.pi / 6.0)
+        self.declare_parameter(
+            'top_pickup_root_position', 0.1687239216732498)
+        self.declare_parameter(
+            'top_pickup_tip_position', 1.4020724051216468)
+        self.declare_parameter('tip_rear_limit_position', -math.pi / 2.0)
+        self.declare_parameter('root_initial_position', -math.pi / 2.0)
         self.declare_parameter('max_loaded_kfs', 2)
         self.declare_parameter('initial_loaded_kfs', 0)
 
         service_name = self.get_parameter('service_name').value
         grip_service = self.get_parameter('grip_service').value
-        lift_service = self.get_parameter('lift_service').value
-        rotate_service = self.get_parameter('rotate_service').value
+        root_rotate_service = self.get_parameter(
+            'root_rotate_service').value
+        tip_rotate_service = self.get_parameter('tip_rotate_service').value
         self.service_timeout_sec = self.get_parameter(
             'service_timeout_sec').value
         self.kfs_grip_position = self.get_parameter(
             'kfs_grip_position').value
         self.grip_open_position = self.get_parameter(
             'grip_open_position').value
-        self.rotate_forward_position = self.get_parameter(
-            'rotate_forward_position').value
-        self.rotate_home_position = self.get_parameter(
-            'rotate_home_position').value
-        self.lift_base_position = self.get_parameter(
-            'lift_base_position').value
-        self.lift_stack_increment = self.get_parameter(
-            'lift_stack_increment').value
+        self.front_pickup_root_position = self.get_parameter(
+            'front_pickup_root_position').value
+        self.front_pickup_tip_position = self.get_parameter(
+            'front_pickup_tip_position').value
+        self.top_pickup_root_position = self.get_parameter(
+            'top_pickup_root_position').value
+        self.top_pickup_tip_position = self.get_parameter(
+            'top_pickup_tip_position').value
+        self.tip_rear_limit_position = self.get_parameter(
+            'tip_rear_limit_position').value
+        self.root_initial_position = self.get_parameter(
+            'root_initial_position').value
         self.max_loaded_kfs = int(self.get_parameter('max_loaded_kfs').value)
         self.loaded_kfs = int(self.get_parameter('initial_loaded_kfs').value)
 
@@ -62,14 +78,14 @@ class KfsLoaderController(Node):
             grip_service,
             callback_group=self.callback_group,
         )
-        self.lift_client = self.create_client(
-            SetGripperLift,
-            lift_service,
+        self.root_rotate_client = self.create_client(
+            SetGripperRotate,
+            root_rotate_service,
             callback_group=self.callback_group,
         )
-        self.rotate_client = self.create_client(
-            SetGripperRotate,
-            rotate_service,
+        self.tip_rotate_client = self.create_client(
+            SetGripperTipRotate,
+            tip_rotate_service,
             callback_group=self.callback_group,
         )
         self.load_service = self.create_service(
@@ -83,10 +99,10 @@ class KfsLoaderController(Node):
         timeout = self.service_timeout_sec
         if not self.grip_client.wait_for_service(timeout_sec=timeout):
             raise RuntimeError('gripper grip service unavailable')
-        if not self.lift_client.wait_for_service(timeout_sec=timeout):
-            raise RuntimeError('gripper lift service unavailable')
-        if not self.rotate_client.wait_for_service(timeout_sec=timeout):
-            raise RuntimeError('gripper rotate service unavailable')
+        if not self.root_rotate_client.wait_for_service(timeout_sec=timeout):
+            raise RuntimeError('gripper root rotate service unavailable')
+        if not self.tip_rotate_client.wait_for_service(timeout_sec=timeout):
+            raise RuntimeError('gripper tip rotate service unavailable')
 
     @staticmethod
     def wait_for_future(future, timeout_sec, description):
@@ -113,50 +129,100 @@ class KfsLoaderController(Node):
         if not response.success:
             raise RuntimeError(f'SetGripperGrip failed: {response.message}')
 
-    def set_lift(self, position):
-        request = SetGripperLift.Request()
+    def make_rotation_request(self, service_type, position):
+        request = service_type.Request()
         request.position = float(position)
         request.tolerance = 0.0
         request.timeout_sec = float(self.service_timeout_sec)
-        response = self.wait_for_future(
-            self.lift_client.call_async(request),
-            self.service_timeout_sec,
-            'SetGripperLift',
-        )
-        if not response.success:
-            raise RuntimeError(f'SetGripperLift failed: {response.message}')
+        return request
 
-    def set_rotate(self, position):
-        request = SetGripperRotate.Request()
-        request.position = float(position)
-        request.tolerance = 0.0
-        request.timeout_sec = float(self.service_timeout_sec)
+    def set_root_rotate(self, position):
         response = self.wait_for_future(
-            self.rotate_client.call_async(request),
+            self.root_rotate_client.call_async(self.make_rotation_request(
+                SetGripperRotate, position)),
             self.service_timeout_sec,
             'SetGripperRotate',
         )
         if not response.success:
             raise RuntimeError(f'SetGripperRotate failed: {response.message}')
 
-    def handle_load_kfs(self, request, response):
-        del request
-        with self.operation_lock:
-            load_index = min(self.loaded_kfs, self.max_loaded_kfs - 1)
-            target_lift = (
-                self.lift_base_position +
-                load_index * self.lift_stack_increment
-            )
+    def set_tip_rotate(self, position):
+        response = self.wait_for_future(
+            self.tip_rotate_client.call_async(self.make_rotation_request(
+                SetGripperTipRotate, position)),
+            self.service_timeout_sec,
+            'SetGripperTipRotate',
+        )
+        if not response.success:
+            raise RuntimeError(
+                f'SetGripperTipRotate failed: {response.message}')
 
+    def set_pickup_pose(self, root_position, tip_position):
+        # Send both requests before waiting so both axes move concurrently.
+        root_future = self.root_rotate_client.call_async(
+            self.make_rotation_request(
+                SetGripperRotate, root_position))
+        tip_future = self.tip_rotate_client.call_async(
+            self.make_rotation_request(
+                SetGripperTipRotate, tip_position))
+
+        root_response = self.wait_for_future(
+            root_future,
+            self.service_timeout_sec,
+            'SetGripperRotate',
+        )
+        tip_response = self.wait_for_future(
+            tip_future,
+            self.service_timeout_sec,
+            'SetGripperTipRotate',
+        )
+
+        failures = []
+        if not root_response.success:
+            failures.append(f'SetGripperRotate: {root_response.message}')
+        if not tip_response.success:
+            failures.append(f'SetGripperTipRotate: {tip_response.message}')
+        if failures:
+            raise RuntimeError('; '.join(failures))
+
+    def execute_load_sequence(self, pickup_root_position,
+                              pickup_tip_position, root_returns_first):
+        self.set_pickup_pose(
+            pickup_root_position,
+            pickup_tip_position,
+        )
+        self.set_grip(self.kfs_grip_position)
+        if root_returns_first:
+            self.set_root_rotate(self.root_initial_position)
+            self.set_tip_rotate(self.tip_rear_limit_position)
+        else:
+            self.set_tip_rotate(self.tip_rear_limit_position)
+            self.set_root_rotate(self.root_initial_position)
+        self.set_grip(self.grip_open_position)
+
+    def handle_load_kfs(self, request, response):
+        with self.operation_lock:
             try:
+                if request.mode == LoadKfs.Request.FRONT:
+                    pickup_root_position = self.front_pickup_root_position
+                    pickup_tip_position = self.front_pickup_tip_position
+                    root_returns_first = False
+                    mode_name = 'front'
+                elif request.mode == LoadKfs.Request.TOP:
+                    pickup_root_position = self.top_pickup_root_position
+                    pickup_tip_position = self.top_pickup_tip_position
+                    root_returns_first = True
+                    mode_name = 'top'
+                else:
+                    raise ValueError(
+                        f'unsupported KFS load mode: {request.mode}')
+
                 self.wait_for_dependencies()
-                self.set_grip(self.kfs_grip_position)
-                self.set_lift(target_lift)
-                self.set_rotate(self.rotate_forward_position)
-                time.sleep(0.3)
-                self.set_grip(self.grip_open_position)
-                self.set_rotate(self.rotate_home_position)
-                self.set_lift(self.lift_base_position)
+                self.execute_load_sequence(
+                    pickup_root_position,
+                    pickup_tip_position,
+                    root_returns_first,
+                )
             except Exception as exc:
                 response.success = False
                 response.message = str(exc)
@@ -166,7 +232,7 @@ class KfsLoaderController(Node):
             if self.loaded_kfs < self.max_loaded_kfs:
                 self.loaded_kfs += 1
             response.success = True
-            response.message = 'KFS loaded at tier {}'.format(min(self.loaded_kfs, self.max_loaded_kfs - 1) + 1)
+            response.message = f'{mode_name} KFS load sequence completed'
             response.loaded_count = self.loaded_kfs
             return response
 

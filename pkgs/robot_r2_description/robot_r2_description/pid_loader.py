@@ -63,7 +63,6 @@ def main():
 
     pkg_dir = os.environ.get('ROBOT_R2_DESC_DIR', '')
     configs = [
-        ('bar_lift_pid.yaml',   'robot_r2_bar_lift'),
         ('bar_rotate_pid.yaml', 'robot_r2_bar_rotate'),
         ('gripper_pid.yaml',    'robot_r2_gripper'),
     ]

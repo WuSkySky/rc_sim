@@ -45,7 +45,7 @@ class KfsAlignmentController(Node):
         )
 
         self._latest_offset_x: int | None = None
-        self._latest_kfs_type: str = "none"
+        self._latest_class_name: str = ""
 
     # ---- parameters ------------------------------------------------
 
@@ -90,7 +90,7 @@ class KfsAlignmentController(Node):
     def _on_detection(self, msg: KfsProcessedDetection) -> None:
         with self.state_condition:
             self._latest_offset_x = msg.center_offset_x
-            self._latest_kfs_type = msg.kfs_type
+            self._latest_class_name = msg.class_name
             self.state_condition.notify_all()
 
     # ---- PID ------------------------------------------------------
@@ -152,10 +152,10 @@ class KfsAlignmentController(Node):
             while rclpy.ok():
                 with self.state_condition:
                     offset = self._latest_offset_x
-                    kfs_type = self._latest_kfs_type
+                    class_name = self._latest_class_name
 
                 # No detection yet — wait
-                if offset is None or kfs_type == "none":
+                if offset is None or not class_name:
                     if time.monotonic() > deadline:
                         response.success = False
                         response.message = 'Alignment timeout: no detection'

@@ -2,16 +2,23 @@ kfs_loader_control:
   ros__parameters:
     service_name: /r2/kfs/load
     grip_service: /r2/gripper/set_grip
-    lift_service: /r2/gripper/set_lift
-    rotate_service: /r2/gripper/set_rotate
+    root_rotate_service: /r2/gripper/set_rotate
+    tip_rotate_service: /r2/gripper/set_tip_rotate
     service_timeout_sec: 10.0
     # Clear open gap is 0.408 m after subtracting both 0.005 m plate halves.
     # Command 0.064 m gives approximately 0.280 m clear gap.
     kfs_grip_position: 0.064
     grip_open_position: 0.0
-    rotate_forward_position: 0.0
-    rotate_home_position: -1.5707963267948966
-    lift_base_position: -0.180
-    lift_stack_increment: 0.35
+    # Root -30 deg raises the rod 30 deg above the ground. Tip +30 deg
+    # cancels the root rotation and keeps the gripper pointing forward.
+    front_pickup_root_position: -0.4235987755982988
+    front_pickup_tip_position: 0.4235987755982988
+    # With base_link 0.199 m above the ground, the root axis is at 0.259 m.
+    # The root angle puts the tip axis at 0.170 m. The tip angle adds another
+    # +90 deg to the compensated pose so the gripper opening points downward.
+    top_pickup_root_position: 0.1687239216732498
+    top_pickup_tip_position: 1.4020724051216468
+    tip_rear_limit_position: -1.5707963267948966
+    root_initial_position: -1.5707963267948966
     max_loaded_kfs: 2
     initial_loaded_kfs: 0

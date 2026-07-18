@@ -1,7 +1,0 @@
-kfs_gripper_lift:
-  ros__parameters:
-    command_topic: /r2/gripper/lift_cmd
-    feedback_topic: /r2/gripper/lift_feedback
-    service_name: /r2/gripper/set_lift
-    default_tolerance: 0.005
-    default_timeout_sec: 10.0

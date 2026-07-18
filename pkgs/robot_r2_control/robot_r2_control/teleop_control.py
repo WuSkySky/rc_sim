@@ -14,7 +14,7 @@ Robot R2 WASD teleop
 W/S : forward / backward
 A/D : left / right strafe
 Q/E : rotate left / right
-Y/H : bar lift up / down (hold)
+
 U/J : root rotate forward / back (hold)
 I/K : tip rotate forward / back (hold)
 O/L : gripper open / close (hold)
@@ -22,13 +22,14 @@ O/L : gripper open / close (hold)
 2   : rear lift to +0.20 m
 3   : both front and rear lift to +0.20 m
 4   : both front and rear lift to 0
-X or Space : stop
+X   : stop
+Space is reserved for Gazebo pause/resume
 
 CTRL-C to quit
 """
 
 MOTION_KEYS = {'w', 'a', 's', 'd', 'q', 'e'}
-GRIPPER_KEYS = {'y', 'h', 'u', 'j', 'i', 'k', 'o', 'l'}
+GRIPPER_KEYS = {'u', 'j', 'i', 'k', 'o', 'l'}
 
 LIFT_PRESETS = {
     '1': (0.20, 0.0),
@@ -48,7 +49,6 @@ class WasdTeleop(Node):
         self.declare_parameter('angular_speed', 1.57)
         self.declare_parameter('publish_rate', 20.0)
         self.declare_parameter('lift_timeout_sec', 10.0)
-        self.declare_parameter('bar_lift_speed', 0.05)
         self.declare_parameter('bar_rotate_speed', 0.5)
         self.declare_parameter('gripper_speed', 0.05)
 
@@ -58,12 +58,10 @@ class WasdTeleop(Node):
         self.angular_speed = self.get_parameter('angular_speed').value
         publish_rate = self.get_parameter('publish_rate').value
         self.lift_timeout_sec = self.get_parameter('lift_timeout_sec').value
-        self.bar_lift_speed = self.get_parameter('bar_lift_speed').value
         self.bar_rotate_speed = self.get_parameter('bar_rotate_speed').value
         self.gripper_speed = self.get_parameter('gripper_speed').value
 
         self.cmd_vel_publisher = self.create_publisher(Twist, cmd_vel_topic, 10)
-        self.bar_lift_pub = self.create_publisher(Float64, '/r2/gripper/lift_cmd', 10)
         self.root_rotate_pub = self.create_publisher(Float64, '/r2/gripper/rotate_cmd', 10)
         self.tip_rotate_pub = self.create_publisher(Float64, '/r2/gripper/tip_rotate_cmd', 10)
         self.gripper_pub = self.create_publisher(Float64, '/r2/gripper/grip_cmd', 10)
@@ -74,7 +72,6 @@ class WasdTeleop(Node):
         self.preset_keys_down = set()
         self.key_lock = threading.Lock()
 
-        self.lift_target = -0.180
         self.rotate_target = -1.5708
         self.tip_rotate_target = 1.5708
         self.grip_target = 0.0
@@ -105,17 +102,14 @@ class WasdTeleop(Node):
 
         # Gripper controls (hold to move, release = stop at current position)
         if any(k in active for k in GRIPPER_KEYS):
-            if 'y' in active:
-                self.lift_target += self.bar_lift_speed * dt
-            if 'h' in active:
-                self.lift_target -= self.bar_lift_speed * dt
-            self.lift_target = max(-0.180, min(0.240, self.lift_target))
-
             if 'u' in active:
                 self.rotate_target -= self.bar_rotate_speed * dt
             if 'j' in active:
                 self.rotate_target += self.bar_rotate_speed * dt
-            self.rotate_target = max(-1.5708, min(0.0, self.rotate_target))
+            self.rotate_target = max(
+                -1.5707963267948966,
+                min(0.7853981633974483, self.rotate_target),
+            )
 
             if 'i' in active:
                 self.tip_rotate_target -= self.bar_rotate_speed * dt
@@ -129,7 +123,6 @@ class WasdTeleop(Node):
                 self.grip_target += self.gripper_speed * dt
             self.grip_target = max(0.0, min(0.209, self.grip_target))
 
-            self.bar_lift_pub.publish(Float64(data=self.lift_target))
             self.root_rotate_pub.publish(Float64(data=self.rotate_target))
             self.tip_rotate_pub.publish(Float64(data=self.tip_rotate_target))
             self.gripper_pub.publish(Float64(data=self.grip_target))
@@ -139,14 +132,14 @@ class WasdTeleop(Node):
         if key_name is None:
             return
 
-        publish_zero = False
+        stop_requested = False
         lift_preset = None
 
         with self.key_lock:
-            if key_name in ('space', 'x'):
+            if key_name == 'x':
                 self.pressed_keys.clear()
                 self.preset_keys_down.clear()
-                publish_zero = True
+                stop_requested = True
             elif key_name in LIFT_PRESETS:
                 if key_name in self.preset_keys_down:
                     return
@@ -155,8 +148,8 @@ class WasdTeleop(Node):
             else:
                 self.pressed_keys.add(key_name)
 
-        if publish_zero:
-            self.publish_zero_all()
+        if stop_requested:
+            self.stop_motion()
         if lift_preset is not None:
             self.send_lift_request(*lift_preset)
 
@@ -177,16 +170,10 @@ class WasdTeleop(Node):
         if publish_zero:
             self.publish_zero_twist()
 
-    def publish_zero_all(self):
+    def stop_motion(self):
+        # Position-controlled joints stop moving when their targets stop
+        # changing. Publishing 0.0 here would command a new position instead.
         self.publish_zero_twist()
-        self.lift_target = -0.180
-        self.rotate_target = -1.5708
-        self.tip_rotate_target = 1.5708
-        self.grip_target = 0.0
-        self.bar_lift_pub.publish(Float64(data=0.0))
-        self.root_rotate_pub.publish(Float64(data=0.0))
-        self.tip_rotate_pub.publish(Float64(data=0.0))
-        self.gripper_pub.publish(Float64(data=0.0))
 
     def publish_zero_twist(self):
         self.cmd_vel_publisher.publish(Twist())
@@ -213,7 +200,7 @@ class WasdTeleop(Node):
             self.pressed_keys.clear()
             self.preset_keys_down.clear()
 
-        self.publish_zero_all()
+        self.stop_motion()
 
         if self.listener.running:
             self.listener.stop()
@@ -222,8 +209,6 @@ class WasdTeleop(Node):
     def normalize_key(key):
         if isinstance(key, keyboard.KeyCode) and key.char is not None:
             return key.char.lower()
-        if key == keyboard.Key.space:
-            return 'space'
         return None
 
 

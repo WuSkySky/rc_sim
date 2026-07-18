@@ -13,11 +13,14 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/KfsProcessedDetection.msg"
   "srv/MoveToPose.srv"
   "srv/SetLift.srv"
-  "srv/SetGripperLift.srv"
+  "srv/SetKfsLift.srv"
   "srv/SetGripperRotate.srv"
+  "srv/SetGripperTipRotate.srv"
   "srv/SetGripperGrip.srv"
   "srv/LoadKfs.srv"
+  "srv/GetKfsType.srv"
   "srv/StageTwo.srv"
+  "srv/TraverseStep.srv"
   "srv/AlignToKFS.srv"
   DEPENDENCIES std_msgs
 )

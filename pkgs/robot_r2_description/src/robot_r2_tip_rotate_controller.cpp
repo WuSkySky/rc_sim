@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <array>
 #include <mutex>
 #include <string>
 
@@ -31,11 +30,12 @@ public:
     if (min_pos_ > max_pos_) std::swap(min_pos_, max_pos_);
 
     const double sdf_p = sdf->Get<double>("position_p_gain", 8.0).first;
-    const double sdf_i = sdf->Get<double>("position_i_gain", 3.0).first;
-    const double sdf_d = sdf->Get<double>("position_d_gain", 0.03).first;
-    const double sdf_imax = sdf->Get<double>("position_i_max", 500.0).first;
-    const double sdf_imin = sdf->Get<double>("position_i_min", -500.0).first;
-    const double sdf_force = sdf->Get<double>("max_actuation_force", 80.0).first;
+    const double sdf_i = sdf->Get<double>("position_i_gain", 0.0).first;
+    const double sdf_d = sdf->Get<double>("position_d_gain", 0.2).first;
+    const double sdf_imax = sdf->Get<double>("position_i_max", 1.0).first;
+    const double sdf_imin = sdf->Get<double>("position_i_min", -1.0).first;
+    const double sdf_force = sdf->Get<double>("max_actuation_force", 2.0).first;
+    const double sdf_target_velocity = sdf->Get<double>("max_target_velocity", 0.5).first;
 
     node_->declare_parameter("tip_rotate.position_p_gain", sdf_p);
     node_->declare_parameter("tip_rotate.position_i_gain", sdf_i);
@@ -43,12 +43,18 @@ public:
     node_->declare_parameter("tip_rotate.position_i_max",  sdf_imax);
     node_->declare_parameter("tip_rotate.position_i_min",  sdf_imin);
     node_->declare_parameter("tip_rotate.max_actuation_force", sdf_force);
+    node_->declare_parameter("tip_rotate.max_target_velocity", sdf_target_velocity);
     LoadParams();
 
     joint_ = model_->GetJoint(joint_name_);
     if (!joint_) {
       return;
     }
+
+    // Start the controller from the physical joint position.  The requested
+    // initial pose is still target_, but it is approached through the motion
+    // profile instead of being applied as a position step on the first tick.
+    profiled_target_ = Clamp(joint_->Position(0), min_pos_, max_pos_);
 
     command_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       command_topic_, rclcpp::QoS(10),
@@ -77,6 +83,8 @@ private:
     i_max_   = node_->get_parameter("tip_rotate.position_i_max").as_double();
     i_min_   = node_->get_parameter("tip_rotate.position_i_min").as_double();
     force_limit_ = node_->get_parameter("tip_rotate.max_actuation_force").as_double();
+    target_velocity_limit_ =
+      node_->get_parameter("tip_rotate.max_target_velocity").as_double();
   }
 
   rcl_interfaces::msg::SetParametersResult OnParamsChanged(
@@ -90,22 +98,25 @@ private:
         if (i_gain_ <= 1e-9) integral_ = 0.0;
         else integral_ = Clamp(integral_, i_min_, i_max_);
       }
-      else if (p.get_name() == "tip_rotate.position_d_gain") { d_gain_ = p.as_double(); deriv_reset_ = true; }
+      else if (p.get_name() == "tip_rotate.position_d_gain") { d_gain_ = p.as_double(); }
       else if (p.get_name() == "tip_rotate.position_i_max") { i_max_ = p.as_double(); }
       else if (p.get_name() == "tip_rotate.position_i_min") { i_min_ = p.as_double(); }
       else if (p.get_name() == "tip_rotate.max_actuation_force") { force_limit_ = p.as_double(); }
+      else if (p.get_name() == "tip_rotate.max_target_velocity") {
+        target_velocity_limit_ = p.as_double();
+      }
     }
     rcl_interfaces::msg::SetParametersResult r; r.successful = true; return r;
   }
 
   void OnUpdate()
   {
-    double target, pg, ig, dg, imax, imin, flim;
-    bool reset_d;
+    double target, pg, ig, dg, imax, imin, flim, target_velocity_limit;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       target = target_; pg = p_gain_; ig = i_gain_; dg = d_gain_;
-      imax = i_max_; imin = i_min_; flim = force_limit_; reset_d = deriv_reset_; deriv_reset_ = false;
+      imax = i_max_; imin = i_min_; flim = force_limit_;
+      target_velocity_limit = target_velocity_limit_;
     }
 
     auto now = model_->GetWorld()->SimTime();
@@ -113,13 +124,17 @@ private:
     if (dt <= 0.0 || dt > 1.0) dt = 0.001;
     last_time_ = now;
 
-    double pos = joint_->Position(0);
-    double err = target - pos;
-    if (reset_d) prev_err_ = err;
+    const double max_target_step = std::max(0.0, target_velocity_limit) * dt;
+    profiled_target_ += Clamp(
+      target - profiled_target_, -max_target_step, max_target_step);
 
-    double deriv = (dt > 1e-6) ? (err - prev_err_) / dt : 0.0;
-    double p_term = err * pg;
-    double d_term = deriv * dg;
+    const double pos = joint_->Position(0);
+    const double velocity = joint_->GetVelocity(0);
+    const double err = profiled_target_ - pos;
+    const double p_term = err * pg;
+    // Differentiate the measured position instead of the position error.
+    // This avoids a derivative kick whenever a new target is received.
+    const double d_term = -velocity * dg;
 
     double cand_i = integral_;
     if (ig > 1e-9) cand_i = Clamp(integral_ + ig * err * dt, imin, imax);
@@ -132,7 +147,6 @@ private:
     bool deeper = (sat_hi && err > 0.0) || (sat_lo && err < 0.0);
     if (ig > 1e-9 && !deeper) { integral_ = cand_i; force = Clamp(p_term + integral_ + d_term, -flim, flim); }
 
-    prev_err_ = err;
     joint_->SetForce(0, force);
 
     auto fb = std_msgs::msg::Float64();
@@ -155,10 +169,10 @@ private:
   std::string feedback_topic_{"/r2/gripper/tip_rotate_feedback"};
   std::string joint_name_{"gripper_tip_joint"};
   double min_pos_{-1.5708}, max_pos_{1.5708};
-  double p_gain_{8.0}, i_gain_{3.0}, d_gain_{0.0};
-  double i_max_{500.0}, i_min_{-500.0}, force_limit_{80.0};
-  double target_{1.5708}, integral_{0.0}, prev_err_{0.0};
-  bool deriv_reset_{false};
+  double p_gain_{8.0}, i_gain_{0.0}, d_gain_{0.2};
+  double i_max_{1.0}, i_min_{-1.0}, force_limit_{2.0};
+  double target_velocity_limit_{0.5};
+  double target_{1.5708}, profiled_target_{0.0}, integral_{0.0};
   gazebo::common::Time last_time_{0};
 };
 

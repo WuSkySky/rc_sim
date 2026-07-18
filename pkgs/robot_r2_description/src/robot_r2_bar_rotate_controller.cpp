@@ -26,8 +26,8 @@ public:
     feedback_topic_ = sdf->Get<std::string>("feedback_topic", "/r2/gripper/rotate_feedback").first;
     joint_name_ = sdf->Get<std::string>("joint_name", "gripper_root_joint").first;
 
-    min_pos_ = sdf->Get<double>("min_position", -1.5708).first;
-    max_pos_ = sdf->Get<double>("max_position",  0.0).first;
+    min_pos_ = sdf->Get<double>("min_position", -1.5707963267948966).first;
+    max_pos_ = sdf->Get<double>("max_position", 0.7853981633974483).first;
     if (min_pos_ > max_pos_) std::swap(min_pos_, max_pos_);
 
     const double sdf_p = sdf->Get<double>("position_p_gain", 8.0).first;
@@ -154,7 +154,7 @@ private:
   std::string command_topic_{"/r2/gripper/rotate_cmd"};
   std::string feedback_topic_{"/r2/gripper/rotate_feedback"};
   std::string joint_name_{"gripper_root_joint"};
-  double min_pos_{-1.5708}, max_pos_{0.0};
+  double min_pos_{-1.5707963267948966}, max_pos_{0.7853981633974483};
   double p_gain_{8.0}, i_gain_{3.0}, d_gain_{0.0};
   double i_max_{500.0}, i_min_{-500.0}, force_limit_{80.0};
   double target_{-1.5708}, integral_{0.0}, prev_err_{0.0};

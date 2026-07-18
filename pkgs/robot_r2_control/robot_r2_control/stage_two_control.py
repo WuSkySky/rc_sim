@@ -258,9 +258,11 @@ class StageTwoController(Node):
         if not response.success:
             raise RuntimeError(f'SetLift failed: {response.message}')
 
-    def load_kfs(self):
+    def load_kfs(self, mode=LoadKfs.Request.FRONT):
+        request = LoadKfs.Request()
+        request.mode = mode
         response = self.wait_for_future(
-            self.load_client.call_async(LoadKfs.Request()),
+            self.load_client.call_async(request),
             self.load_wait_timeout_sec,
             'LoadKfs',
         )

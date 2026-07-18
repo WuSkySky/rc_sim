@@ -19,6 +19,11 @@ def generate_launch_description():
         'config',
         'kfs_loader.yaml',
     )
+    step_traverse_config = os.path.join(
+        control_pkg,
+        'config',
+        'step_traverse.yaml',
+    )
 
     chassis_pose_servo_config = os.path.join(
         controller_pkg,
@@ -35,10 +40,10 @@ def generate_launch_description():
         'config',
         'kfs_alignment.yaml',
     )
-    kfs_gripper_lift_config = os.path.join(
+    kfs_lift_config = os.path.join(
         controller_pkg,
         'config',
-        'kfs_gripper_lift.yaml',
+        'kfs_lift.yaml',
     )
     kfs_gripper_rotate_config = os.path.join(
         controller_pkg,
@@ -76,6 +81,13 @@ def generate_launch_description():
         output='screen',
     )
 
+    step_traverse = Node(
+        package='robot_r2_control',
+        executable='step_traverse',
+        parameters=[step_traverse_config],
+        output='screen',
+    )
+
     chassis_pose_servo = Node(
         package='robot_r2_controller',
         executable='chassis_pose_servo',
@@ -97,10 +109,10 @@ def generate_launch_description():
         output='screen',
     )
 
-    kfs_gripper_lift = Node(
+    kfs_lift = Node(
         package='robot_r2_controller',
-        executable='kfs_gripper_lift',
-        parameters=[kfs_gripper_lift_config],
+        executable='kfs_lift',
+        parameters=[kfs_lift_config],
         output='screen',
     )
 
@@ -143,12 +155,13 @@ def generate_launch_description():
         teleop_control,
         stage_two_control,
         kfs_loader_control,
+        step_traverse,
         chassis_pose_servo,
         chassis_lift,
         kfs_alignment,
-        kfs_gripper_lift,
+        kfs_lift,
         kfs_gripper_rotate,
         kfs_gripper_tip_rotate,
         kfs_gripper_grip,
-        kfs_detect,
+        # kfs_detect,
     ])

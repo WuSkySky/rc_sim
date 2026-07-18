@@ -1,8 +1,7 @@
-# Best detection after mapping + filtering + center calculation.
+# Best detection after filtering and center calculation.
 std_msgs/Header header
 
 string  class_name        # original YOLO label, e.g. "blue" / "red"
-string  kfs_type          # mapped type: "true_kfs" / "fake_kfs"
 int32   image_width       # input image width  (pixels)
 int32   image_height      # input image height (pixels)
 float32 confidence        # confidence score [0, 1]

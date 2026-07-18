@@ -4,29 +4,43 @@
 Subscribes image → YOLO → publishes:
   /r2/detection/raw       — all raw detections (KfsRawDetections)
   /r2/detection/processed — best processed detection (KfsProcessedDetection)
+Provides:
+  /r2/detection/get_type  — majority vote over the next n processed results
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 
-# ---------------------------------------------------------------------------
-# class-name → KFS-type mapping  (blue = true KFS, red = fake KFS)
-# ---------------------------------------------------------------------------
+def _select_most_frequent_class(samples: list[str]) -> str:
+    """Return the most frequent class, preferring the most recent on ties."""
+    if not samples:
+        raise ValueError("at least one class sample is required")
 
-_CLASS_MAP = {
-    "blue": "true_kfs",
-    "red": "fake_kfs",
-}
-
-
-def _map_kfs_type(class_name: str) -> str:
-    return _CLASS_MAP.get(class_name.strip().lower(), "unknown")
+    counts = Counter(samples)
+    highest_count = max(counts.values())
+    tied_classes = {
+        class_name
+        for class_name, count in counts.items()
+        if count == highest_count
+    }
+    return next(
+        class_name
+        for class_name in reversed(samples)
+        if class_name in tied_classes
+    )
 
 
 def main(args: list[str] | None = None) -> None:
+    import math
+    import threading
+    import time
+
     import rclpy
+    from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+    from rclpy.executors import MultiThreadedExecutor
     from rclpy.node import Node
     from sensor_msgs.msg import Image
     from cv_bridge import CvBridge
@@ -35,12 +49,20 @@ def main(args: list[str] | None = None) -> None:
         KfsRawDetections,
         KfsProcessedDetection,
     )
+    from robot_r2_interfaces.srv import GetKfsType
 
     class KfsDetectNode(Node):
         """Subscribe image → YOLO → publish raw + processed detection."""
 
         def __init__(self) -> None:
             super().__init__("kfs_detect")
+            self._image_callback_group = MutuallyExclusiveCallbackGroup()
+            self._service_callback_group = MutuallyExclusiveCallbackGroup()
+            self._vote_condition = threading.Condition()
+            self._vote_active = False
+            self._vote_target_count = 0
+            self._vote_samples: list[str] = []
+
             self._declare_parameters()
             self._load_parameters()
             self._load_model()
@@ -48,7 +70,11 @@ def main(args: list[str] | None = None) -> None:
             self._bridge = CvBridge()
 
             self._sub = self.create_subscription(
-                Image, self._color_topic, self._image_cb, 10
+                Image,
+                self._color_topic,
+                self._image_cb,
+                10,
+                callback_group=self._image_callback_group,
             )
             self._pub_raw = self.create_publisher(
                 KfsRawDetections, "/r2/detection/raw", 10
@@ -59,6 +85,12 @@ def main(args: list[str] | None = None) -> None:
             self._pub_viz = self.create_publisher(
                 Image, "/r2/detection/viz", 10
             )
+            self._get_type_service = self.create_service(
+                GetKfsType,
+                self._vote_service_name,
+                self._handle_get_kfs_type,
+                callback_group=self._service_callback_group,
+            )
 
         # ---- parameters ----
 
@@ -67,6 +99,10 @@ def main(args: list[str] | None = None) -> None:
             self.declare_parameter("color_topic", "/r2/front_camera/image_raw")
             self.declare_parameter("conf", 0.75)
             self.declare_parameter("viz_topic", "/r2/detection/viz")
+            self.declare_parameter(
+                "vote_service_name", "/r2/detection/get_type"
+            )
+            self.declare_parameter("default_vote_timeout_sec", 10.0)
 
         def _load_parameters(self) -> None:
             from ament_index_python.packages import get_package_share_directory
@@ -96,6 +132,19 @@ def main(args: list[str] | None = None) -> None:
             self._model_path = model_path
             self._color_topic = str(self.get_parameter("color_topic").value)
             self._conf = float(self.get_parameter("conf").value)
+            self._vote_service_name = str(
+                self.get_parameter("vote_service_name").value
+            )
+            self._default_vote_timeout_sec = float(
+                self.get_parameter("default_vote_timeout_sec").value
+            )
+            if (
+                not math.isfinite(self._default_vote_timeout_sec)
+                or self._default_vote_timeout_sec <= 0.0
+            ):
+                raise ValueError(
+                    "default_vote_timeout_sec must be finite and positive"
+                )
 
         def _load_model(self) -> None:
             try:
@@ -162,7 +211,6 @@ def main(args: list[str] | None = None) -> None:
                 center_v = (y1 + y2) // 2
 
                 processed_msg.class_name = processed_cls_name
-                processed_msg.kfs_type = _map_kfs_type(processed_cls_name)
                 processed_msg.confidence = processed_conf
                 processed_msg.x1 = x1
                 processed_msg.y1 = y1
@@ -174,7 +222,6 @@ def main(args: list[str] | None = None) -> None:
                 processed_msg.center_offset_y = center_v - h // 2
             else:
                 processed_msg.class_name = ""
-                processed_msg.kfs_type = "none"
                 processed_msg.confidence = 0.0
                 processed_msg.x1 = 0
                 processed_msg.y1 = 0
@@ -186,6 +233,7 @@ def main(args: list[str] | None = None) -> None:
                 processed_msg.center_offset_y = 0
 
             self._pub_processed.publish(processed_msg)
+            self._record_vote_sample(processed_msg.class_name)
 
             # ------- Topic 3: visualization -------
             import cv2
@@ -218,12 +266,94 @@ def main(args: list[str] | None = None) -> None:
             viz_msg.data = viz.tobytes()
             self._pub_viz.publish(viz_msg)
 
+        # ---- majority-vote service ----
+
+        def _record_vote_sample(self, class_name: str) -> None:
+            with self._vote_condition:
+                if not self._vote_active:
+                    return
+                if len(self._vote_samples) >= self._vote_target_count:
+                    return
+
+                self._vote_samples.append(class_name)
+                if len(self._vote_samples) >= self._vote_target_count:
+                    self._vote_condition.notify_all()
+
+        def _handle_get_kfs_type(self, request, response):
+            sample_count = int(request.sample_count)
+            if sample_count <= 0:
+                response.success = False
+                response.message = "sample_count must be positive"
+                response.class_name = ""
+                return response
+
+            requested_timeout = float(request.timeout_sec)
+            if not math.isfinite(requested_timeout):
+                response.success = False
+                response.message = "timeout_sec must be finite"
+                response.class_name = ""
+                return response
+            timeout_sec = (
+                requested_timeout
+                if requested_timeout > 0.0
+                else self._default_vote_timeout_sec
+            )
+
+            deadline = time.monotonic() + timeout_sec
+            failure_message = ""
+            samples: list[str] = []
+            with self._vote_condition:
+                self._vote_samples = []
+                self._vote_target_count = sample_count
+                self._vote_active = True
+                try:
+                    while len(self._vote_samples) < sample_count:
+                        if not rclpy.ok():
+                            failure_message = (
+                                "ROS shutdown while collecting detections"
+                            )
+                            break
+
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0.0:
+                            failure_message = (
+                                "Detection vote timed out after collecting "
+                                f"{len(self._vote_samples)}/{sample_count} "
+                                "samples"
+                            )
+                            break
+                        self._vote_condition.wait(
+                            timeout=min(remaining, 0.1)
+                        )
+
+                    if not failure_message:
+                        samples = list(self._vote_samples)
+                finally:
+                    self._vote_active = False
+                    self._vote_target_count = 0
+
+            if failure_message:
+                response.success = False
+                response.message = failure_message
+                response.class_name = ""
+                return response
+
+            response.success = True
+            response.message = (
+                f"Selected most frequent class from {sample_count} samples"
+            )
+            response.class_name = _select_most_frequent_class(samples)
+            return response
+
     # ----------------------------------------------------------------
     rclpy.init(args=args)
     node = KfsDetectNode()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

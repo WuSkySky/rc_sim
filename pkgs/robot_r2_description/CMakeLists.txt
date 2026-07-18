@@ -21,8 +21,8 @@ add_library(robot_r2_lift_controller SHARED
   src/robot_r2_lift_controller.cpp
 )
 
-add_library(robot_r2_bar_lift SHARED
-  src/robot_r2_bar_lift_controller.cpp
+add_library(robot_r2_kfs_lift SHARED
+  src/robot_r2_kfs_lift_controller.cpp
 )
 
 add_library(robot_r2_bar_rotate SHARED
@@ -49,7 +49,7 @@ target_include_directories(robot_r2_lift_controller PUBLIC
   ${GAZEBO_INCLUDE_DIRS}
 )
 
-target_include_directories(robot_r2_bar_lift PUBLIC
+target_include_directories(robot_r2_kfs_lift PUBLIC
   ${GAZEBO_INCLUDE_DIRS}
 )
 
@@ -86,7 +86,7 @@ ament_target_dependencies(robot_r2_lift_controller
   robot_r2_interfaces
 )
 
-ament_target_dependencies(robot_r2_bar_lift
+ament_target_dependencies(robot_r2_kfs_lift
   gazebo_dev
   gazebo_ros
   rclcpp
@@ -126,7 +126,7 @@ target_link_libraries(robot_r2_lift_controller
   ${GAZEBO_LIBRARIES}
 )
 
-target_link_libraries(robot_r2_bar_lift
+target_link_libraries(robot_r2_kfs_lift
   ${GAZEBO_LIBRARIES}
 )
 
@@ -149,7 +149,8 @@ install(
 
 install(
   TARGETS robot_r2_planar_move robot_r2_localizer robot_r2_lift_controller
-    robot_r2_bar_lift robot_r2_bar_rotate robot_r2_gripper robot_r2_tip_rotate
+    robot_r2_kfs_lift robot_r2_bar_rotate robot_r2_gripper
+    robot_r2_tip_rotate
   LIBRARY DESTINATION lib
 )
 
