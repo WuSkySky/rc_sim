@@ -1,0 +1,8 @@
+uint8 LEFT=1
+uint8 RIGHT=2
+uint8 fake_kfs_decision
+uint8 loaded_count
+---
+bool success
+string message
+uint8 loaded_count

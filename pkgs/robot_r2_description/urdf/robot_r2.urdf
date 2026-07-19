@@ -140,7 +140,7 @@
     <origin xyz="0.100 -0.190 0.285" rpy="0 0 0"/>
   </joint>
 
-  <!-- rear vertical bar: x=-0.115 center -->
+  <!-- rear vertical bar: x=-0.130 center -->
   <link name="vertical_bar_rear">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -167,7 +167,7 @@
   <joint name="vertical_bar_rear_joint" type="fixed">
     <parent link="base_link"/>
     <child link="vertical_bar_rear"/>
-    <origin xyz="-0.115 0 0.285" rpy="0 0 0"/>
+    <origin xyz="-0.130 0 0.285" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================================= -->

@@ -15,6 +15,8 @@ setup(
         (os.path.join('share', package_name, 'config'),
             [
                 'config/stage_two.yaml',
+                'config/stage_two_point_one.yaml',
+                'config/stage_two_point_two.yaml',
                 'config/kfs_loader.yaml',
                 'config/step_traverse.yaml',
             ]),
@@ -30,6 +32,8 @@ setup(
         'console_scripts': [
             'teleop_control = robot_r2_control.teleop_control:main',
             'stage_two_control = robot_r2_control.stage_two_control:main',
+            'stage_two_point_one = robot_r2_control.stage_two_point_one:main',
+            'stage_two_point_two = robot_r2_control.stage_two_point_two:main',
             'kfs_loader_control = robot_r2_control.kfs_loader:main',
             'step_traverse = robot_r2_control.step_traverse:main',
         ],

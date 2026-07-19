@@ -261,6 +261,7 @@ class StageTwoController(Node):
     def load_kfs(self, mode=LoadKfs.Request.FRONT):
         request = LoadKfs.Request()
         request.mode = mode
+        request.load_method = LoadKfs.Request.STANDARD
         response = self.wait_for_future(
             self.load_client.call_async(request),
             self.load_wait_timeout_sec,

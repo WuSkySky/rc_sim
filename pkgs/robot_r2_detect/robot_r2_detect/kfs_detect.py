@@ -91,6 +91,11 @@ def main(args: list[str] | None = None) -> None:
                 self._handle_get_kfs_type,
                 callback_group=self._service_callback_group,
             )
+            if self._debug_force_r2:
+                self.get_logger().warn(
+                    "KFS detection service debug override is enabled; "
+                    "every request returns r2"
+                )
 
         # ---- parameters ----
 
@@ -103,6 +108,7 @@ def main(args: list[str] | None = None) -> None:
                 "vote_service_name", "/r2/detection/get_type"
             )
             self.declare_parameter("default_vote_timeout_sec", 10.0)
+            self.declare_parameter("debug_force_r2", True)
 
         def _load_parameters(self) -> None:
             from ament_index_python.packages import get_package_share_directory
@@ -137,6 +143,9 @@ def main(args: list[str] | None = None) -> None:
             )
             self._default_vote_timeout_sec = float(
                 self.get_parameter("default_vote_timeout_sec").value
+            )
+            self._debug_force_r2 = bool(
+                self.get_parameter("debug_force_r2").value
             )
             if (
                 not math.isfinite(self._default_vote_timeout_sec)
@@ -280,6 +289,12 @@ def main(args: list[str] | None = None) -> None:
                     self._vote_condition.notify_all()
 
         def _handle_get_kfs_type(self, request, response):
+            if self._debug_force_r2:
+                response.success = True
+                response.message = "Debug override: forced KFS type r2"
+                response.class_name = "r2"
+                return response
+
             sample_count = int(request.sample_count)
             if sample_count <= 0:
                 response.success = False

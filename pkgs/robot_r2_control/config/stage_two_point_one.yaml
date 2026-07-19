@@ -1,0 +1,31 @@
+stage_two_point_one:
+  ros__parameters:
+    service_name: /r2/stage_two_point_one
+    move_to_pose_service: /r2/move_to_pose
+    set_lift_service: /r2/lift/set
+    get_kfs_type_service: /r2/detection/get_type
+    load_kfs_service: /r2/kfs/load
+    release_kfs_service: /r2/kfs/release
+    dependency_timeout_sec: 2.0
+    move_timeout_sec: 35.0
+    lift_timeout_sec: 15.0
+    detection_timeout_sec: 10.0
+    load_timeout_sec: 70.0
+    release_timeout_sec: 70.0
+
+    # Each point starts at its index-5 column center, then shifts 0.2 m
+    # toward the index-4 column (world x: 3.4 -> 3.2).
+    # yaw=pi makes the robot front face -x, toward the index-4 column.
+    cell_5_3_high_kfs_edge_pose: [3.2, -1.8, 3.141592653589793]
+    cell_5_2_high_kfs_edge_pose: [3.2, -3.0, 3.141592653589793]
+    cell_5_1_high_kfs_edge_pose: [3.2, -4.2, 3.141592653589793]
+    high_kfs_edge_offset: 0.20
+    release_edge_offset: 0.20
+
+    detection_sample_count: 10
+    target_class_name: r2
+
+    lift_up_front: 0.20
+    lift_up_rear: 0.20
+    lift_down_front: 0.0
+    lift_down_rear: 0.0

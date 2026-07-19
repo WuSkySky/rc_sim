@@ -1,7 +1,9 @@
 uint8 FRONT=0
 uint8 TOP=1
+uint8 STANDARD=0
+uint8 TRANSFER=1
 uint8 mode
+uint8 load_method
 ---
 bool success
 string message
-int32 loaded_count

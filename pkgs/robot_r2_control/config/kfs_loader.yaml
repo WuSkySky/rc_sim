@@ -1,6 +1,7 @@
 kfs_loader_control:
   ros__parameters:
     service_name: /r2/kfs/load
+    release_service_name: /r2/kfs/release
     grip_service: /r2/gripper/set_grip
     root_rotate_service: /r2/gripper/set_rotate
     tip_rotate_service: /r2/gripper/set_tip_rotate
@@ -18,7 +19,11 @@ kfs_loader_control:
     # +90 deg to the compensated pose so the gripper opening points downward.
     top_pickup_root_position: 0.1687239216732498
     top_pickup_tip_position: 1.4020724051216468
+    # TRANSFER method: after gripping, root moves to -90 deg while the tip
+    # concurrently moves to +90 deg. The gripper remains closed afterward.
+    tip_front_limit_position: 1.5707963267948966
     tip_rear_limit_position: -1.5707963267948966
     root_initial_position: -1.5707963267948966
-    max_loaded_kfs: 2
-    initial_loaded_kfs: 0
+    # Release pose keeps the gripper opening facing world +x.
+    release_root_position: -0.7853981633974483
+    release_tip_position: 0.7853981633974483

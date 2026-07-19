@@ -1,0 +1,5 @@
+uint8 loaded_count
+---
+bool success
+string message
+uint8 loaded_count

@@ -14,6 +14,16 @@ def generate_launch_description():
         'config',
         'stage_two.yaml',
     )
+    stage_two_point_one_config = os.path.join(
+        control_pkg,
+        'config',
+        'stage_two_point_one.yaml',
+    )
+    stage_two_point_two_config = os.path.join(
+        control_pkg,
+        'config',
+        'stage_two_point_two.yaml',
+    )
     kfs_loader_config = os.path.join(
         control_pkg,
         'config',
@@ -71,6 +81,20 @@ def generate_launch_description():
         package='robot_r2_control',
         executable='stage_two_control',
         parameters=[stage_two_config],
+        output='screen',
+    )
+
+    stage_two_point_one = Node(
+        package='robot_r2_control',
+        executable='stage_two_point_one',
+        parameters=[stage_two_point_one_config],
+        output='screen',
+    )
+
+    stage_two_point_two = Node(
+        package='robot_r2_control',
+        executable='stage_two_point_two',
+        parameters=[stage_two_point_two_config],
         output='screen',
     )
 
@@ -154,6 +178,8 @@ def generate_launch_description():
     return LaunchDescription([
         teleop_control,
         stage_two_control,
+        stage_two_point_one,
+        stage_two_point_two,
         kfs_loader_control,
         step_traverse,
         chassis_pose_servo,
@@ -163,5 +189,5 @@ def generate_launch_description():
         kfs_gripper_rotate,
         kfs_gripper_tip_rotate,
         kfs_gripper_grip,
-        # kfs_detect,
+        kfs_detect,
     ])

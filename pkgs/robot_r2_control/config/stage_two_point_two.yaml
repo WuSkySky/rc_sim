@@ -1,0 +1,41 @@
+stage_two_point_two:
+  ros__parameters:
+    service_name: /r2/stage_two_point_two
+    current_pose_topic: /r2/pose_feedback
+    move_to_pose_service: /r2/move_to_pose
+    traverse_step_service: /r2/step_traverse
+    get_kfs_type_service: /r2/detection/get_type
+    load_kfs_service: /r2/kfs/load
+    release_kfs_service: /r2/kfs/release
+
+    dependency_timeout_sec: 2.0
+    pose_timeout_sec: 2.0
+    move_timeout_sec: 35.0
+    traverse_timeout_sec: 150.0
+    detection_timeout_sec: 10.0
+    load_timeout_sec: 70.0
+    release_timeout_sec: 70.0
+
+    # First coordinate: forward index 0..5. Second coordinate: lane 1..3.
+    forward_x: [-2.6, -1.4, -0.2, 1.0, 2.2, 3.4]
+    lateral_y: [-4.2, -3.0, -1.8]
+    # Row-major by forward index, with lanes 1, 2 and 3 in each row.
+    cell_heights: [
+      0.0, .nan, 0.0,
+      1.0, 2.0, 1.0,
+      2.0, 3.0, 2.0,
+      1.0, 2.0, 3.0,
+      2.0, 1.0, 2.0,
+      .nan, 0.0, .nan
+    ]
+
+    initial_forward_index: 5
+    initial_lateral_index: 2
+    terminal_forward_index: 0
+    chassis_front_offset: 0.35
+    higher_kfs_edge_offset: 0.20
+    lower_kfs_edge_offset: 0.40
+    release_edge_offset: 0.20
+
+    detection_sample_count: 10
+    target_class_name: r2
