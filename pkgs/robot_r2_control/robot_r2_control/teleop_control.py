@@ -23,6 +23,7 @@ O/L : gripper open / close (hold)
 3   : both front and rear lift to +0.20 m
 4   : both front and rear lift to 0
 X   : stop
+|   : toggle keyboard control enable / disable
 Space is reserved for Gazebo pause/resume
 
 CTRL-C to quit
@@ -71,6 +72,8 @@ class WasdTeleop(Node):
         self.pressed_keys = set()
         self.preset_keys_down = set()
         self.key_lock = threading.Lock()
+        self.keyboard_enabled = True
+        self.toggle_key_down = False
 
         self.rotate_target = -1.5708
         self.tip_rotate_target = 1.5708
@@ -134,9 +137,20 @@ class WasdTeleop(Node):
 
         stop_requested = False
         lift_preset = None
+        enabled_changed = None
 
         with self.key_lock:
-            if key_name == 'x':
+            if key_name == '|':
+                if self.toggle_key_down:
+                    return
+                self.toggle_key_down = True
+                self.keyboard_enabled = not self.keyboard_enabled
+                enabled_changed = self.keyboard_enabled
+                self.pressed_keys.clear()
+                self.preset_keys_down.clear()
+            elif not self.keyboard_enabled:
+                return
+            elif key_name == 'x':
                 self.pressed_keys.clear()
                 self.preset_keys_down.clear()
                 stop_requested = True
@@ -148,6 +162,10 @@ class WasdTeleop(Node):
             else:
                 self.pressed_keys.add(key_name)
 
+        if enabled_changed is not None:
+            self.stop_motion()
+            state = 'enabled' if enabled_changed else 'disabled'
+            self.get_logger().info(f'Keyboard control {state}')
         if stop_requested:
             self.stop_motion()
         if lift_preset is not None:
@@ -160,6 +178,11 @@ class WasdTeleop(Node):
 
         publish_zero = False
         with self.key_lock:
+            if key_name == '|':
+                self.toggle_key_down = False
+                return
+            if not self.keyboard_enabled:
+                return
             if key_name in LIFT_PRESETS:
                 self.preset_keys_down.discard(key_name)
             self.pressed_keys.discard(key_name)
@@ -199,6 +222,7 @@ class WasdTeleop(Node):
         with self.key_lock:
             self.pressed_keys.clear()
             self.preset_keys_down.clear()
+            self.toggle_key_down = False
 
         self.stop_motion()
 

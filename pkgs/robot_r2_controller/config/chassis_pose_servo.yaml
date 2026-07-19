@@ -6,23 +6,24 @@ chassis_pose_servo:
 
     publish_rate: 50.0
     position_tolerance: 0.01
-    yaw_tolerance: 0.03
+    yaw_tolerance: 0.01
+    yaw_stable_cycles: 10
     default_timeout_sec: 20.0
 
     x_kp: 10.0
     x_ki: 0.0
     x_kd: 0.5
     x_integral_limit: 0.5
-    x_output_limit: 5.0
+    x_output_limit: 4.0
 
     y_kp: 10.0
     y_ki: 0.0
     y_kd: 0.5
     y_integral_limit: 0.5
-    y_output_limit: 5.0
+    y_output_limit: 4.0
 
-    yaw_kp: 30.0
-    yaw_ki: 0.0
-    yaw_kd: 0.8
-    yaw_integral_limit: 0.5
-    yaw_output_limit: 6.28
+    yaw_kp: 4.0
+    yaw_ki: 0.5
+    yaw_kd: 0.001
+    yaw_integral_limit: 10.0
+    yaw_output_limit: 1000.0

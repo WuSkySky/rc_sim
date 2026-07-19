@@ -76,6 +76,7 @@ class PoseServo(Node):
         self.declare_parameter('publish_rate', 50.0)
         self.declare_parameter('position_tolerance', 0.02)
         self.declare_parameter('yaw_tolerance', 0.03)
+        self.declare_parameter('yaw_stable_cycles', 10)
         self.declare_parameter('default_timeout_sec', 20.0)
 
         self.declare_parameter('x_kp', 2.5)
@@ -104,6 +105,10 @@ class PoseServo(Node):
         self.position_tolerance = self.get_parameter(
             'position_tolerance').value
         self.yaw_tolerance = self.get_parameter('yaw_tolerance').value
+        self.yaw_stable_cycles_required = int(
+            self.get_parameter('yaw_stable_cycles').value)
+        if self.yaw_stable_cycles_required <= 0:
+            raise ValueError('yaw_stable_cycles must be greater than zero')
         self.default_timeout_sec = self.get_parameter(
             'default_timeout_sec').value
 
@@ -135,6 +140,7 @@ class PoseServo(Node):
         self.current_yaw = 0.0
         self.active_goal = None
         self.goal_completed = False
+        self.yaw_stable_cycle_count = 0
         self.last_tick = time.monotonic()
 
         self.cmd_vel_publisher = self.create_publisher(Twist, cmd_vel_topic, 10)
@@ -267,10 +273,15 @@ class PoseServo(Node):
             self.compute_goal_errors(current_pose, goal)
         )
 
+        if abs(yaw_error) <= goal['yaw_tolerance']:
+            self.yaw_stable_cycle_count += 1
+        else:
+            self.yaw_stable_cycle_count = 0
+
         if (
             abs(body_error_x) <= goal['position_tolerance'] and
             abs(body_error_y) <= goal['position_tolerance'] and
-            abs(yaw_error) <= goal['yaw_tolerance']
+            self.yaw_stable_cycle_count >= self.yaw_stable_cycles_required
         ):
             self.reset_controllers()
             self.publish_zero_twist()
@@ -338,6 +349,7 @@ class PoseServo(Node):
         self.x_pid.reset()
         self.y_pid.reset()
         self.yaw_pid.reset()
+        self.yaw_stable_cycle_count = 0
 
     def publish_zero_twist(self):
         self.cmd_vel_publisher.publish(Twist())
@@ -350,6 +362,8 @@ class PoseServo(Node):
         position_tolerance = values.get(
             'position_tolerance', self.position_tolerance)
         yaw_tolerance = values.get('yaw_tolerance', self.yaw_tolerance)
+        yaw_stable_cycles = values.get(
+            'yaw_stable_cycles', self.yaw_stable_cycles_required)
         default_timeout_sec = values.get(
             'default_timeout_sec', self.default_timeout_sec)
         current_period = self.timer.timer_period_ns / 1e9
@@ -366,6 +380,15 @@ class PoseServo(Node):
                 successful=False,
                 reason='yaw_tolerance must be non-negative',
             )
+        if (
+            not isinstance(yaw_stable_cycles, int) or
+            isinstance(yaw_stable_cycles, bool) or
+            yaw_stable_cycles <= 0
+        ):
+            return SetParametersResult(
+                successful=False,
+                reason='yaw_stable_cycles must be a positive integer',
+            )
         if default_timeout_sec <= 0.0:
             return SetParametersResult(
                 successful=False,
@@ -379,6 +402,7 @@ class PoseServo(Node):
 
         self.position_tolerance = position_tolerance
         self.yaw_tolerance = yaw_tolerance
+        self.yaw_stable_cycles_required = yaw_stable_cycles
         self.default_timeout_sec = default_timeout_sec
 
         self.x_pid.configure(

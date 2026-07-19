@@ -24,6 +24,8 @@ setup(
         'console_scripts': [
             'move_to_center_test = robot_r2_tests.move_to_center:main',
             'step_traverse_test = robot_r2_tests.step_traverse:main',
+            'rotate_90_servo_test = '
+            'robot_r2_tests.rotate_90_servo:main',
         ],
     },
 )

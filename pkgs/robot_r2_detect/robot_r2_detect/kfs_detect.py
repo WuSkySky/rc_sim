@@ -102,7 +102,7 @@ def main(args: list[str] | None = None) -> None:
         def _declare_parameters(self) -> None:
             self.declare_parameter("model_path", "")
             self.declare_parameter("color_topic", "/r2/front_camera/image_raw")
-            self.declare_parameter("conf", 0.75)
+            self.declare_parameter("conf", 0.65)
             self.declare_parameter("viz_topic", "/r2/detection/viz")
             self.declare_parameter(
                 "vote_service_name", "/r2/detection/get_type"
