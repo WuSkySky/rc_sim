@@ -1,0 +1,33 @@
+serial_bridge:
+  ros__parameters:
+    serial_port: /dev/ttyACM0
+    baud_rate: 115200
+    send_rate: 50.0
+    read_rate: 200.0
+    receive_feedback_enabled: true
+    reconnect_interval_sec: 1.0
+    write_timeout_sec: 0.1
+
+    frame_header: 170  # 0xAA
+    frame_tail: 85     # 0x55
+    float_endianness: little
+    raw_rx_topic: /r2/serial/raw_rx
+    raw_tx_topic: /r2/serial/raw_tx
+
+    cmd_vel_topic: /r2/cmd_vel
+    lift_command_topic: /r2/lift/cmd_lift
+    kfs_lift_topic: /r2/kfs_lift/cmd
+    kfs_root_rotate_topic: /r2/gripper/rotate_cmd
+    kfs_tip_rotate_topic: /r2/gripper/tip_rotate_cmd
+    kfs_grip_topic: /r2/gripper/grip_cmd
+    weapon_rotate_topic: /r2/weapon/rotate_cmd
+    weapon_grip_topic: /r2/weapon/grip_cmd
+
+    # vx, vy, vw, front lift, rear lift, KFS lift, KFS root,
+    # KFS tip, KFS grip, weapon rotate, weapon grip.
+    initial_command_values: [
+      0.0, 0.0, 0.0,
+      0.0, 0.0,
+      0.0, -1.5707963267948966, 1.5707963267948966, 0.0,
+      0.0, 0.0
+    ]

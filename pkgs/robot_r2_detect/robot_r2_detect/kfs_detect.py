@@ -14,6 +14,16 @@ from collections import Counter
 from pathlib import Path
 
 
+def _classify_kfs_model(model_name: str) -> str:
+    if "FakeKFS" in model_name:
+        return "fake"
+    if "TrueKFS" in model_name:
+        return "r2"
+    if "R1KFS" in model_name:
+        return "r1"
+    return ""
+
+
 def _select_most_frequent_class(samples: list[str]) -> str:
     """Return the most frequent class, preferring the most recent on ties."""
     if not samples:
@@ -34,6 +44,7 @@ def _select_most_frequent_class(samples: list[str]) -> str:
 
 
 def main(args: list[str] | None = None) -> None:
+    import json
     import math
     import threading
     import time
@@ -42,6 +53,7 @@ def main(args: list[str] | None = None) -> None:
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from rclpy.node import Node
+    from geometry_msgs.msg import PoseStamped
     from sensor_msgs.msg import Image
     from cv_bridge import CvBridge
     from robot_r2_interfaces.msg import (
@@ -50,6 +62,7 @@ def main(args: list[str] | None = None) -> None:
         KfsProcessedDetection,
     )
     from robot_r2_interfaces.srv import GetKfsType
+    from std_msgs.msg import String
 
     class KfsDetectNode(Node):
         """Subscribe image → YOLO → publish raw + processed detection."""
@@ -58,10 +71,17 @@ def main(args: list[str] | None = None) -> None:
             super().__init__("kfs_detect")
             self._image_callback_group = MutuallyExclusiveCallbackGroup()
             self._service_callback_group = MutuallyExclusiveCallbackGroup()
+            self._state_callback_group = MutuallyExclusiveCallbackGroup()
             self._vote_condition = threading.Condition()
             self._vote_active = False
             self._vote_target_count = 0
             self._vote_samples: list[str] = []
+            self._state_condition = threading.Condition()
+            self._latest_placements: dict[str, str] | None = None
+            self._latest_seed: int | None = None
+            self._cached_placements: dict[str, str] | None = None
+            self._cached_seed: int | None = None
+            self._robot_pose: tuple[float, float, float] | None = None
 
             self._declare_parameters()
             self._load_parameters()
@@ -75,6 +95,20 @@ def main(args: list[str] | None = None) -> None:
                 self._image_cb,
                 10,
                 callback_group=self._image_callback_group,
+            )
+            self._status_sub = self.create_subscription(
+                String,
+                self._simulation_status_topic,
+                self._simulation_status_cb,
+                10,
+                callback_group=self._state_callback_group,
+            )
+            self._pose_sub = self.create_subscription(
+                PoseStamped,
+                self._robot_pose_topic,
+                self._robot_pose_cb,
+                10,
+                callback_group=self._state_callback_group,
             )
             self._pub_raw = self.create_publisher(
                 KfsRawDetections, "/r2/detection/raw", 10
@@ -91,10 +125,11 @@ def main(args: list[str] | None = None) -> None:
                 self._handle_get_kfs_type,
                 callback_group=self._service_callback_group,
             )
-            if self._debug_force_r2:
+            if self._simulation_state_detection:
                 self.get_logger().warn(
-                    "KFS detection service debug override is enabled; "
-                    "every request returns r2"
+                    "KFS detection service simulation-state mode is "
+                    "enabled; the latest placement state will be frozen on "
+                    "the first service request"
                 )
 
         # ---- parameters ----
@@ -108,7 +143,19 @@ def main(args: list[str] | None = None) -> None:
                 "vote_service_name", "/r2/detection/get_type"
             )
             self.declare_parameter("default_vote_timeout_sec", 10.0)
-            self.declare_parameter("debug_force_r2", True)
+            self.declare_parameter("simulation_state_detection", False)
+            self.declare_parameter(
+                "simulation_status_topic", "/simulation/status"
+            )
+            self.declare_parameter("robot_pose_topic", "/r2/pose_feedback")
+            self.declare_parameter("simulation_team", "blue")
+            self.declare_parameter(
+                "grid_x", [-2.6, -1.4, -0.2, 1.0, 2.2, 3.4]
+            )
+            self.declare_parameter("grid_y", [-4.2, -3.0, -1.8])
+            self.declare_parameter("meilin_x", [2.2, 1.0, -0.2, -1.4])
+            self.declare_parameter("grid_pitch", 1.2)
+            self.declare_parameter("cell_snap_tolerance", 0.55)
 
         def _load_parameters(self) -> None:
             from ament_index_python.packages import get_package_share_directory
@@ -144,8 +191,26 @@ def main(args: list[str] | None = None) -> None:
             self._default_vote_timeout_sec = float(
                 self.get_parameter("default_vote_timeout_sec").value
             )
-            self._debug_force_r2 = bool(
-                self.get_parameter("debug_force_r2").value
+            self._simulation_state_detection = bool(
+                self.get_parameter("simulation_state_detection").value
+            )
+            self._simulation_status_topic = str(
+                self.get_parameter("simulation_status_topic").value
+            )
+            self._robot_pose_topic = str(
+                self.get_parameter("robot_pose_topic").value
+            )
+            self._simulation_team = str(
+                self.get_parameter("simulation_team").value
+            )
+            if self._simulation_team not in ("red", "blue"):
+                raise ValueError("simulation_team must be 'red' or 'blue'")
+            self._grid_x = self._finite_array_parameter("grid_x")
+            self._grid_y = self._finite_array_parameter("grid_y")
+            self._meilin_x = self._finite_array_parameter("meilin_x")
+            self._grid_pitch = self._positive_parameter("grid_pitch")
+            self._cell_snap_tolerance = self._positive_parameter(
+                "cell_snap_tolerance"
             )
             if (
                 not math.isfinite(self._default_vote_timeout_sec)
@@ -155,6 +220,20 @@ def main(args: list[str] | None = None) -> None:
                     "default_vote_timeout_sec must be finite and positive"
                 )
 
+        def _positive_parameter(self, name: str) -> float:
+            value = float(self.get_parameter(name).value)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+            return value
+
+        def _finite_array_parameter(self, name: str) -> tuple[float, ...]:
+            values = tuple(
+                float(value) for value in self.get_parameter(name).value
+            )
+            if not values or not all(math.isfinite(value) for value in values):
+                raise ValueError(f"{name} must contain finite values")
+            return values
+
         def _load_model(self) -> None:
             try:
                 from ultralytics import YOLO
@@ -163,6 +242,198 @@ def main(args: list[str] | None = None) -> None:
                     "Missing ultralytics. Run: pip install ultralytics"
                 ) from exc
             self._model = YOLO(str(self._model_path))
+
+        # ---- cached simulation state ----
+
+        def _simulation_status_cb(self, msg: String) -> None:
+            try:
+                status = json.loads(msg.data)
+                placements = status.get("placements", {})
+                current_seed = int(status.get("current_seed", -1))
+            except (TypeError, ValueError) as exc:
+                self.get_logger().warn(
+                    f"Ignored invalid simulation status: {exc}"
+                )
+                return
+
+            if not isinstance(placements, dict) or not placements:
+                return
+
+            cached = {
+                str(location): str(model)
+                for location, model in placements.items()
+            }
+            with self._state_condition:
+                # Once the first detection request freezes a layout, later
+                # status publications are intentionally ignored.
+                if self._cached_placements is not None:
+                    return
+                self._latest_placements = cached
+                self._latest_seed = current_seed
+                self._state_condition.notify_all()
+
+        def _robot_pose_cb(self, msg: PoseStamped) -> None:
+            pose = msg.pose
+            yaw = self._yaw_from_quaternion(pose.orientation)
+            values = (
+                float(pose.position.x),
+                float(pose.position.y),
+                yaw,
+            )
+            if not all(math.isfinite(value) for value in values):
+                return
+            with self._state_condition:
+                self._robot_pose = values
+                self._state_condition.notify_all()
+
+        @staticmethod
+        def _yaw_from_quaternion(quaternion) -> float:
+            sin_yaw = 2.0 * (
+                quaternion.w * quaternion.z +
+                quaternion.x * quaternion.y
+            )
+            cos_yaw = 1.0 - 2.0 * (
+                quaternion.y * quaternion.y +
+                quaternion.z * quaternion.z
+            )
+            return math.atan2(sin_yaw, cos_yaw)
+
+        @staticmethod
+        def _nearest_value(value: float, candidates: tuple[float, ...]):
+            nearest = min(
+                candidates,
+                key=lambda candidate: abs(candidate - value),
+            )
+            return nearest, abs(nearest - value)
+
+        def _infer_from_cached_state(self):
+            with self._state_condition:
+                placements = dict(self._cached_placements or {})
+                robot_pose = self._robot_pose
+
+            if not placements:
+                raise RuntimeError("Cached KFS placements are unavailable")
+            if robot_pose is None:
+                raise RuntimeError("Robot pose is unavailable")
+
+            robot_x, robot_y, robot_yaw = robot_pose
+            cell_x, error_x = self._nearest_value(robot_x, self._grid_x)
+            cell_y, error_y = self._nearest_value(robot_y, self._grid_y)
+            if math.hypot(error_x, error_y) > self._cell_snap_tolerance:
+                raise RuntimeError(
+                    f"Robot at ({robot_x:.3f}, {robot_y:.3f}) is not near "
+                    "a configured grid cell"
+                )
+
+            heading_x = math.cos(robot_yaw)
+            heading_y = math.sin(robot_yaw)
+            if abs(heading_x) >= abs(heading_y):
+                step_x = (
+                    self._grid_pitch
+                    if heading_x >= 0.0
+                    else -self._grid_pitch
+                )
+                step_y = 0.0
+            else:
+                step_x = 0.0
+                step_y = (
+                    self._grid_pitch
+                    if heading_y >= 0.0
+                    else -self._grid_pitch
+                )
+
+            target_x = cell_x + step_x
+            target_y = cell_y + step_y
+            meilin_x, meilin_x_error = self._nearest_value(
+                target_x, self._meilin_x
+            )
+            meilin_y, meilin_y_error = self._nearest_value(
+                target_y, self._grid_y
+            )
+            if (
+                meilin_x_error > 1e-6 or
+                meilin_y_error > 1e-6
+            ):
+                return "", "", ""
+
+            row = self._meilin_x.index(meilin_x)
+            column = self._grid_y.index(meilin_y)
+            location = (
+                f"{self._simulation_team}_meilin_{row * 3 + column + 1}"
+            )
+            model_name = placements.get(location, "")
+            return _classify_kfs_model(model_name), location, model_name
+
+        def _handle_simulation_state_detection(self, request, response):
+            requested_timeout = float(request.timeout_sec)
+            if not math.isfinite(requested_timeout):
+                response.success = False
+                response.message = "timeout_sec must be finite"
+                response.class_name = ""
+                return response
+            timeout_sec = (
+                requested_timeout
+                if requested_timeout > 0.0
+                else self._default_vote_timeout_sec
+            )
+
+            deadline = time.monotonic() + timeout_sec
+            with self._state_condition:
+                while (
+                    self._latest_placements is None or
+                    self._robot_pose is None
+                ):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0.0:
+                        response.success = False
+                        response.message = (
+                            "Simulation state detection timed out waiting for "
+                            "the first non-empty KFS status and robot pose"
+                        )
+                        response.class_name = ""
+                        return response
+                    self._state_condition.wait(timeout=min(remaining, 0.1))
+
+                if self._cached_placements is None:
+                    self._cached_placements = dict(
+                        self._latest_placements
+                    )
+                    self._cached_seed = self._latest_seed
+                    self.get_logger().info(
+                        "Froze simulation KFS layout on first detection: "
+                        f"seed={self._cached_seed}, "
+                        f"placements={len(self._cached_placements)}"
+                    )
+
+            try:
+                class_name, location, model_name = (
+                    self._infer_from_cached_state()
+                )
+            except Exception as exc:
+                response.success = False
+                response.message = str(exc)
+                response.class_name = ""
+                return response
+
+            response.success = True
+            response.class_name = class_name
+            if model_name:
+                response.message = (
+                    f"Cached simulation state: {location} contains "
+                    f"{model_name} ({class_name})"
+                )
+            elif location:
+                response.message = (
+                    f"Cached simulation state: {location} is empty"
+                )
+            else:
+                response.message = (
+                    "Robot is facing outside the configured Meilin cells"
+                )
+            self.get_logger().info(
+                f"KFS state detection result: {response.message}"
+            )
+            return response
 
         # ---- callback ----
 
@@ -289,11 +560,10 @@ def main(args: list[str] | None = None) -> None:
                     self._vote_condition.notify_all()
 
         def _handle_get_kfs_type(self, request, response):
-            if self._debug_force_r2:
-                response.success = True
-                response.message = "Debug override: forced KFS type r2"
-                response.class_name = "r2"
-                return response
+            if self._simulation_state_detection:
+                return self._handle_simulation_state_detection(
+                    request, response
+                )
 
             sample_count = int(request.sample_count)
             if sample_count <= 0:
@@ -363,7 +633,7 @@ def main(args: list[str] | None = None) -> None:
     # ----------------------------------------------------------------
     rclpy.init(args=args)
     node = KfsDetectNode()
-    executor = MultiThreadedExecutor(num_threads=2)
+    executor = MultiThreadedExecutor(num_threads=3)
     executor.add_node(node)
     try:
         executor.spin()

@@ -1,0 +1,14 @@
+kfs_detect:
+  ros__parameters:
+    simulation_status_topic: /simulation/status
+    robot_pose_topic: /r2/pose_feedback
+    simulation_team: blue
+
+    # Stage-two traversable cell centers and blue Meilin KFS cells.
+    grid_x: [-2.6, -1.4, -0.2, 1.0, 2.2, 3.4]
+    grid_y: [-4.2, -3.0, -1.8]
+    meilin_x: [2.2, 1.0, -0.2, -1.4]
+    grid_pitch: 1.2
+
+    # Allows detection at the 0.2 m and 0.4 m loading edge poses.
+    cell_snap_tolerance: 0.55

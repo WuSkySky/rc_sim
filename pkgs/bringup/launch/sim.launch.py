@@ -17,6 +17,7 @@ def generate_launch_description():
     field_pkg = get_package_share_directory('rc2026_field')
     robot_pkg = get_package_share_directory('robot_r2_description')
     robot_prefix = get_package_prefix('robot_r2_description')
+    sim_to_real_pkg = get_package_share_directory('sim_to_real')
 
     field_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -57,6 +58,21 @@ def generate_launch_description():
         output='screen',
     )
 
+    serial_bridge_config = os.path.join(
+        sim_to_real_pkg,
+        'config',
+        'serial_bridge.yaml',
+    )
+    serial_bridge = Node(
+        package='sim_to_real',
+        executable='serial_bridge',
+        parameters=[
+            serial_bridge_config,
+            {'receive_feedback_enabled': False},
+        ],
+        output='screen',
+    )
+
     return LaunchDescription([
         AppendEnvironmentVariable(
             'GAZEBO_PLUGIN_PATH',
@@ -65,4 +81,5 @@ def generate_launch_description():
         field_launch,
         spawn_robot_r2,
         control_launch,
+        serial_bridge,
     ])

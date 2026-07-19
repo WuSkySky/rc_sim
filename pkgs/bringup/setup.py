@@ -34,7 +34,7 @@ setup(
     zip_safe=True,
     maintainer='skysky',
     maintainer_email='skysky@example.com',
-    description='Simulation bringup launch files for RC2026.',
+    description='Simulation and real-hardware bringup for RC2026.',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={

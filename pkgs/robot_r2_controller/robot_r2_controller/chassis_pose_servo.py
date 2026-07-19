@@ -27,7 +27,7 @@ class PidAxis:
         self.last_error = 0.0
         self.has_last_error = False
 
-    def update(self, error, dt):
+    def update(self, error, dt, proportional_gain_multiplier=1.0):
         if dt <= 0.0:
             return 0.0
 
@@ -43,7 +43,7 @@ class PidAxis:
             derivative = (error - self.last_error) / dt
 
         output = (
-            self.kp * error +
+            self.kp * proportional_gain_multiplier * error +
             self.ki * self.integral +
             self.kd * derivative
         )
@@ -77,6 +77,7 @@ class PoseServo(Node):
         self.declare_parameter('position_tolerance', 0.02)
         self.declare_parameter('yaw_tolerance', 0.03)
         self.declare_parameter('yaw_stable_cycles', 10)
+        self.declare_parameter('completion_wait_sec', 0.3)
         self.declare_parameter('default_timeout_sec', 20.0)
 
         self.declare_parameter('x_kp', 2.5)
@@ -96,6 +97,7 @@ class PoseServo(Node):
         self.declare_parameter('yaw_kd', 0.2)
         self.declare_parameter('yaw_integral_limit', 0.5)
         self.declare_parameter('yaw_output_limit', 2.0)
+        self.declare_parameter('yaw_small_error_gain_multiplier', 2.0)
 
         current_pose_topic = self.get_parameter('current_pose_topic').value
         cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
@@ -109,6 +111,10 @@ class PoseServo(Node):
             self.get_parameter('yaw_stable_cycles').value)
         if self.yaw_stable_cycles_required <= 0:
             raise ValueError('yaw_stable_cycles must be greater than zero')
+        self.completion_wait_sec = float(
+            self.get_parameter('completion_wait_sec').value)
+        if self.completion_wait_sec < 0.0:
+            raise ValueError('completion_wait_sec must be non-negative')
         self.default_timeout_sec = self.get_parameter(
             'default_timeout_sec').value
 
@@ -133,6 +139,12 @@ class PoseServo(Node):
             self.get_parameter('yaw_integral_limit').value,
             self.get_parameter('yaw_output_limit').value,
         )
+        self.yaw_small_error_gain_multiplier = float(
+            self.get_parameter(
+                'yaw_small_error_gain_multiplier').value)
+        if self.yaw_small_error_gain_multiplier < 1.0:
+            raise ValueError(
+                'yaw_small_error_gain_multiplier must be at least 1.0')
 
         self.state_condition = threading.Condition()
         self.service_lock = threading.Lock()
@@ -234,6 +246,8 @@ class PoseServo(Node):
                 if should_return:
                     if not success:
                         self.publish_zero_twist()
+                    else:
+                        self.wait_after_completion()
                     self.fill_move_response(
                         response,
                         success,
@@ -256,6 +270,15 @@ class PoseServo(Node):
                 goal,
             )
             return response
+
+    def wait_after_completion(self):
+        deadline = time.monotonic() + self.completion_wait_sec
+        while rclpy.ok():
+            self.publish_zero_twist()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return
+            time.sleep(min(remaining, 0.02))
 
     def control_loop(self):
         now = time.monotonic()
@@ -295,8 +318,20 @@ class PoseServo(Node):
         cmd_vel = Twist()
         cmd_vel.linear.x = self.x_pid.update(body_error_x, dt)
         cmd_vel.linear.y = self.y_pid.update(body_error_y, dt)
-        cmd_vel.angular.z = self.yaw_pid.update(yaw_error, dt)
+        yaw_gain_multiplier = self.get_yaw_gain_multiplier(yaw_error)
+        cmd_vel.angular.z = self.yaw_pid.update(
+            yaw_error,
+            dt,
+            proportional_gain_multiplier=yaw_gain_multiplier,
+        )
         self.cmd_vel_publisher.publish(cmd_vel)
+
+    def get_yaw_gain_multiplier(self, yaw_error):
+        normalized_error = min(abs(yaw_error) / math.pi, 1.0)
+        error_proximity = 1.0 - normalized_error
+        return 1.0 + (
+            self.yaw_small_error_gain_multiplier - 1.0
+        ) * error_proximity
 
     def fill_move_response(self, response, success, message, goal):
         final_x, final_y, final_yaw, position_error, yaw_error = (
@@ -364,11 +399,17 @@ class PoseServo(Node):
         yaw_tolerance = values.get('yaw_tolerance', self.yaw_tolerance)
         yaw_stable_cycles = values.get(
             'yaw_stable_cycles', self.yaw_stable_cycles_required)
+        completion_wait_sec = values.get(
+            'completion_wait_sec', self.completion_wait_sec)
         default_timeout_sec = values.get(
             'default_timeout_sec', self.default_timeout_sec)
         current_period = self.timer.timer_period_ns / 1e9
         current_rate = 1.0 / current_period
         publish_rate = values.get('publish_rate', current_rate)
+        yaw_small_error_gain_multiplier = values.get(
+            'yaw_small_error_gain_multiplier',
+            self.yaw_small_error_gain_multiplier,
+        )
 
         if position_tolerance < 0.0:
             return SetParametersResult(
@@ -389,6 +430,11 @@ class PoseServo(Node):
                 successful=False,
                 reason='yaw_stable_cycles must be a positive integer',
             )
+        if completion_wait_sec < 0.0:
+            return SetParametersResult(
+                successful=False,
+                reason='completion_wait_sec must be non-negative',
+            )
         if default_timeout_sec <= 0.0:
             return SetParametersResult(
                 successful=False,
@@ -399,11 +445,22 @@ class PoseServo(Node):
                 successful=False,
                 reason='publish_rate must be greater than zero',
             )
+        if yaw_small_error_gain_multiplier < 1.0:
+            return SetParametersResult(
+                successful=False,
+                reason=(
+                    'yaw_small_error_gain_multiplier must be at least 1.0'
+                ),
+            )
 
         self.position_tolerance = position_tolerance
         self.yaw_tolerance = yaw_tolerance
         self.yaw_stable_cycles_required = yaw_stable_cycles
+        self.completion_wait_sec = completion_wait_sec
         self.default_timeout_sec = default_timeout_sec
+        self.yaw_small_error_gain_multiplier = (
+            yaw_small_error_gain_multiplier
+        )
 
         self.x_pid.configure(
             values.get('x_kp', self.x_pid.kp),

@@ -2,12 +2,16 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     control_pkg = get_package_share_directory('robot_r2_control')
     controller_pkg = get_package_share_directory('robot_r2_controller')
+    detect_pkg = get_package_share_directory('robot_r2_detect')
 
     stage_two_config = os.path.join(
         control_pkg,
@@ -69,6 +73,11 @@ def generate_launch_description():
         controller_pkg,
         'config',
         'kfs_gripper_grip.yaml',
+    )
+    kfs_detect_config = os.path.join(
+        detect_pkg,
+        'config',
+        'kfs_detect.yaml',
     )
 
     teleop_control = Node(
@@ -167,15 +176,28 @@ def generate_launch_description():
         name='kfs_detect',
         output='screen',
         parameters=[
+            kfs_detect_config,
             {
                 'model_path': 'best.pt',
                 'color_topic': '/r2/front_camera/image_raw',
                 'conf': 0.75,
+                'simulation_state_detection': ParameterValue(
+                    LaunchConfiguration('simulation_state_detection'),
+                    value_type=bool,
+                ),
             }
         ],
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'simulation_state_detection',
+            default_value='true',
+            description=(
+                'Infer KFS service results from the first simulation status '
+                'and the live robot grid pose'
+            ),
+        ),
         teleop_control,
         stage_two_control,
         stage_two_point_one,

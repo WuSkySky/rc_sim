@@ -15,7 +15,7 @@ class RotateNinetyServoTest(Node):
 
         self.declare_parameter('current_pose_topic', '/r2/pose_feedback')
         self.declare_parameter('move_to_pose_service', '/r2/move_to_pose')
-        self.declare_parameter('wait_after_rotation_sec', 1.0)
+        self.declare_parameter('wait_after_rotation_sec', 0.0)
         self.declare_parameter('move_timeout_sec', 20.0)
 
         pose_topic = str(self.get_parameter('current_pose_topic').value)

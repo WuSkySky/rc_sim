@@ -21,6 +21,7 @@ class StageTwoPointTwoController(Node):
     FORWARD = (-1, 0)
     LEFT = (0, -1)
     RIGHT = (0, 1)
+    POINT_ONE_COVERED_ENTRY = (4, 2)
 
     def __init__(self):
         super().__init__('stage_two_point_two')
@@ -422,6 +423,9 @@ class StageTwoPointTwoController(Node):
         self.arrival_direction = (direction_x, direction_y)
 
     def scan_deltas(self, index, arrival_delta):
+        if index == self.POINT_ONE_COVERED_ENTRY:
+            return (self.FORWARD,)
+
         _, lateral_index = index
         if lateral_index == 2:
             deltas = [self.LEFT, self.FORWARD, self.RIGHT]
@@ -521,7 +525,12 @@ class StageTwoPointTwoController(Node):
 
         return front_result
 
-    def selected_lateral_delta(self, decision):
+    def selected_lateral_delta(self, decision, current_index):
+        lateral_index = current_index[1]
+        if lateral_index == 1:
+            return self.RIGHT
+        if lateral_index == 3:
+            return self.LEFT
         if decision == StageTwoPointTwo.Request.LEFT:
             return self.LEFT
         return self.RIGHT
@@ -550,7 +559,8 @@ class StageTwoPointTwoController(Node):
                 front_result != self.target_class_name
             )
             if force_lateral or front_is_blocked:
-                next_delta = self.selected_lateral_delta(decision)
+                next_delta = self.selected_lateral_delta(
+                    decision, current_index)
                 reason = '(1, 2)' if force_lateral else 'front blocked'
                 self.get_logger().info(
                     f'Next move is lateral due to {reason}')
