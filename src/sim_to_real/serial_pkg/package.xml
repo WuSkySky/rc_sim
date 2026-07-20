@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!-- Complete ROS 2 package for the Robot R2 serial bridge. -->
+<package format="3">
+  <name>serial_pkg</name>
+  <version>0.0.0</version>
+  <description>Serial bridge between Robot R2 ROS commands and real hardware.</description>
+  <maintainer email="skysky@example.com">skysky</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>robot_r2_interfaces</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,0 +1,5 @@
+odometry_pose_republisher:
+  ros__parameters:
+    input_odometry_topic: /odin1/odometry_highfreq
+    output_pose_topic: /r2/pose_feedback
+    publish_rate: 100.0

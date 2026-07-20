@@ -14,15 +14,15 @@
 
 ## 目录约定
 
-- 这是一个 ROS 2 `colcon` 工作区，主要源码都在 `pkgs/` 下
-- `pkgs/robot_r2_interfaces`：自定义 ROS 2 消息（msg/）和服务（srv/），CMake 包（`rosidl_interface_packages`），所有包共享的接口定义
-- `pkgs/robot_r2_description`：机器人 URDF 模型和 Gazebo C++ 插件（`src/`），CMake 包，插件编译为 `.so` 供 Gazebo 加载
-- `pkgs/robot_r2_controller`：底层控制器节点（Python），每个节点封装单一硬件操作，通过 Service 对外暴露，配置由 YAML 参数文件管理（`config/`）
-- `pkgs/robot_r2_control`：高层控制节点（Python），包括键盘遥操作（`teleop_control`）、阶段二任务编排（`stage_two_control`）、KFS 装载状态机（`kfs_loader`），配置由 YAML 参数文件管理（`config/`）
-- `pkgs/robot_r2_detect`：YOLO 视觉检测节点（Python），订阅相机图像，发布 KFS 原始和处理后的检测结果
-- `pkgs/rc2026_field`：比赛场地资源，包括 world 文件（`worlds/`）、Gazebo 模型（`models/`，包含真假 KFS 模型）、场地 GUI、KFS 管理器、随机摆放脚本（`scripts/`）
-- `pkgs/bringup`：启动文件（`launch/`），只做节点组合和参数传递，不放复杂业务逻辑
-- `pkgs/test_pkg`：独立可执行测试脚本，用于测试控制 Service，不依赖仿真运行
+- 这是一个 ROS 2 `colcon` 工作区，主要源码都在 `src/` 下
+- `src/robot_r2_interfaces`：自定义 ROS 2 消息（msg/）和服务（srv/），CMake 包（`rosidl_interface_packages`），所有包共享的接口定义
+- `src/robot_r2_description`：机器人 URDF 模型和 Gazebo C++ 插件（`src/`），CMake 包，插件编译为 `.so` 供 Gazebo 加载
+- `src/robot_r2_controller`：底层控制器节点（Python），每个节点封装单一硬件操作，通过 Service 对外暴露，配置由 YAML 参数文件管理（`config/`）
+- `src/robot_r2_control`：高层控制节点（Python），包括键盘遥操作（`teleop_control`）、阶段二任务编排（`stage_two_control`）、KFS 装载状态机（`kfs_loader`），配置由 YAML 参数文件管理（`config/`）
+- `src/robot_r2_detect`：YOLO 视觉检测节点（Python），订阅相机图像，发布 KFS 原始和处理后的检测结果
+- `src/rc2026_field`：比赛场地资源，包括 world 文件（`worlds/`）、Gazebo 模型（`models/`，包含真假 KFS 模型）、场地 GUI、KFS 管理器、随机摆放脚本（`scripts/`）
+- `src/bringup`：启动文件（`launch/`），只做节点组合和参数传递，不放复杂业务逻辑
+- `src/test_pkg`：独立可执行测试脚本，用于测试控制 Service，不依赖仿真运行
 
 ## 构建与运行
 
