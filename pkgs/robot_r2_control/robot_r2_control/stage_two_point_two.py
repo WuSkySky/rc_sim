@@ -99,6 +99,10 @@ class StageTwoPointTwoController(Node):
             raise ValueError(
                 'cell_heights must contain '
                 f'{expected_height_count} values')
+        self.cell_detection_results = [
+            [None for _ in self.lateral_y]
+            for _ in self.forward_x
+        ]
 
         self.initial_index = (
             int(self.get_parameter('initial_forward_index').value),
@@ -450,6 +454,12 @@ class StageTwoPointTwoController(Node):
                 if delta != came_from_delta
             ]
 
+        if self.loaded_count == 3:
+            deltas = [
+                delta for delta in deltas
+                if delta == self.FORWARD
+            ]
+
         return tuple(deltas)
 
     def pickup_kfs(self, current_index, target_index):
@@ -501,29 +511,51 @@ class StageTwoPointTwoController(Node):
         self.load_kfs(load_mode, load_method)
         self.move_to_pose(current[0], current[1], direction_yaw)
 
-    def scan_current_cell(self, current_index, arrival_delta):
+    def detect_direction(self, current_index, delta):
         current = self.get_cell(current_index)
-        front_result = None
+        target_index = self.add_index(current_index, delta)
+        target_forward_index, target_lateral_index = target_index
+        self.get_cell(target_index)
+        cached_result = self.cell_detection_results[
+            target_forward_index
+        ][target_lateral_index - 1]
+        if cached_result is not None:
+            displayed_class = (
+                cached_result if cached_result else '<empty>')
+            self.get_logger().info(
+                f'Cached detection {current_index}->{target_index}: '
+                f'{displayed_class}')
+            return cached_result
+
+        direction_x, direction_y = self.cell_direction(
+            current_index, target_index)
+        direction_yaw = math.atan2(direction_y, direction_x)
+        self.move_to_pose(current[0], current[1], direction_yaw)
+
+        class_name = self.detect_kfs_type()
+        displayed_class = class_name if class_name else '<empty>'
+        self.get_logger().info(
+            f'Detection {current_index}->{target_index}: '
+            f'{displayed_class}')
+
+        if class_name == self.target_class_name:
+            self.pickup_kfs(current_index, target_index)
+
+        self.cell_detection_results[target_forward_index][
+            target_lateral_index - 1
+        ] = class_name
+        return class_name
+
+    def scan_current_cell(self, current_index, arrival_delta):
+        scan_results = {}
 
         for delta in self.scan_deltas(current_index, arrival_delta):
-            target_index = self.add_index(current_index, delta)
-            direction_x, direction_y = self.cell_direction(
-                current_index, target_index)
-            direction_yaw = math.atan2(direction_y, direction_x)
-            self.move_to_pose(current[0], current[1], direction_yaw)
+            if self.loaded_count == 3 and delta != self.FORWARD:
+                continue
+            scan_results[delta] = self.detect_direction(
+                current_index, delta)
 
-            class_name = self.detect_kfs_type()
-            displayed_class = class_name if class_name else '<empty>'
-            self.get_logger().info(
-                f'Detection {current_index}->{target_index}: '
-                f'{displayed_class}')
-            if delta == self.FORWARD:
-                front_result = class_name
-
-            if class_name == self.target_class_name:
-                self.pickup_kfs(current_index, target_index)
-
-        return front_result
+        return scan_results
 
     def selected_lateral_delta(self, decision, current_index):
         lateral_index = current_index[1]
@@ -549,8 +581,9 @@ class StageTwoPointTwoController(Node):
                     f'Reached terminal cell {current_index}')
                 return current_index
 
-            front_result = self.scan_current_cell(
+            scan_results = self.scan_current_cell(
                 current_index, next_delta)
+            front_result = scan_results.get(self.FORWARD)
 
             force_lateral = current_index == (1, 2)
             front_is_blocked = (
@@ -561,6 +594,11 @@ class StageTwoPointTwoController(Node):
             if force_lateral or front_is_blocked:
                 next_delta = self.selected_lateral_delta(
                     decision, current_index)
+                if (
+                    self.loaded_count == 3 and
+                    next_delta not in scan_results
+                ):
+                    self.detect_direction(current_index, next_delta)
                 reason = '(1, 2)' if force_lateral else 'front blocked'
                 self.get_logger().info(
                     f'Next move is lateral due to {reason}')
