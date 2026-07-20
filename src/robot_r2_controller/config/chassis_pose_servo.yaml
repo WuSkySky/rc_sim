@@ -15,17 +15,17 @@ chassis_pose_servo:
     x_ki: 0.0
     x_kd: 0.5
     x_integral_limit: 0.5
-    x_output_limit: 4.0
+    x_output_limit: 0.5
 
     y_kp: 10.0
     y_ki: 0.0
     y_kd: 0.5
     y_integral_limit: 0.5
-    y_output_limit: 4.0
+    y_output_limit: 0.5
 
     yaw_kp: 1.2
     yaw_ki: 0.0
     yaw_kd: 0.02
     yaw_integral_limit: 10.0
-    yaw_output_limit: 1000.0
+    yaw_output_limit: 2.0
     yaw_small_error_gain_multiplier: 11.0
