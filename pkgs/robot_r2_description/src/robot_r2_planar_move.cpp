@@ -3,6 +3,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <gazebo/common/Events.hh>
 #include <gazebo/common/Plugin.hh>
@@ -44,6 +45,8 @@ public:
     if (!base_link_) {
       return;
     }
+
+    model_links_ = model_->GetLinks();
 
     cmd_vel_sub_ = node_->create_subscription<geometry_msgs::msg::Twist>(
       command_topic_,
@@ -125,7 +128,10 @@ private:
       (tyaw - w.Z()) * yaw_velocity_p_gain_
     );
 
-    base_link_->AddRelativeForce(force);
+    const auto world_force =
+      base_link_->WorldPose().Rot().RotateVector(force);
+    base_link_->AddForceAtWorldPosition(
+      world_force, CalculateModelCenterOfMass());
     base_link_->AddTorque(torque);
 
     geometry_msgs::msg::Twist feedback;
@@ -141,9 +147,36 @@ private:
     return std::max(mn, std::min(v, mx));
   }
 
+  ignition::math::Vector3d CalculateModelCenterOfMass() const
+  {
+    ignition::math::Vector3d weighted_position =
+      ignition::math::Vector3d::Zero;
+    double total_mass = 0.0;
+
+    for (const auto & link : model_links_) {
+      if (!link || !link->GetInertial()) {
+        continue;
+      }
+
+      const double mass = link->GetInertial()->Mass();
+      if (mass <= 0.0) {
+        continue;
+      }
+
+      weighted_position += link->WorldCoGPose().Pos() * mass;
+      total_mass += mass;
+    }
+
+    if (total_mass <= 0.0) {
+      return base_link_->WorldCoGPose().Pos();
+    }
+    return weighted_position / total_mass;
+  }
+
 private:
   gazebo::physics::ModelPtr model_;
   gazebo::physics::LinkPtr base_link_;
+  std::vector<gazebo::physics::LinkPtr> model_links_;
   gazebo_ros::Node::SharedPtr node_;
   gazebo::event::ConnectionPtr update_connection_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_sub_;

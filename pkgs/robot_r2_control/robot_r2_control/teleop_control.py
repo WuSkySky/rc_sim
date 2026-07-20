@@ -22,6 +22,7 @@ O/L : gripper open / close (hold)
 2   : rear lift to +0.20 m
 3   : both front and rear lift to +0.20 m
 4   : both front and rear lift to 0
+5   : both front and rear lift to maximum (+0.376 m)
 X   : stop
 |   : toggle keyboard control enable / disable
 Space is reserved for Gazebo pause/resume
@@ -37,6 +38,7 @@ LIFT_PRESETS = {
     '2': (0.0, 0.20),
     '3': (0.20, 0.20),
     '4': (0.0, 0.0),
+    '5': (0.376, 0.376),
 }
 
 
@@ -46,7 +48,7 @@ class WasdTeleop(Node):
 
         self.declare_parameter('cmd_vel_topic', '/r2/cmd_vel')
         self.declare_parameter('set_lift_service', '/r2/lift/set')
-        self.declare_parameter('linear_speed', 1.5)
+        self.declare_parameter('linear_speed', 0.5)
         self.declare_parameter('angular_speed', 1.57)
         self.declare_parameter('publish_rate', 20.0)
         self.declare_parameter('lift_timeout_sec', 10.0)
