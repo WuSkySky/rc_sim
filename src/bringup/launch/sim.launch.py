@@ -73,6 +73,12 @@ def generate_launch_description():
         output='screen',
     )
 
+    teleop_control = Node(
+        package='robot_r2_control',
+        executable='teleop_control',
+        output='screen',
+    )
+
     return LaunchDescription([
         AppendEnvironmentVariable(
             'GAZEBO_PLUGIN_PATH',
@@ -81,5 +87,6 @@ def generate_launch_description():
         field_launch,
         spawn_robot_r2,
         control_launch,
+        teleop_control,
         # serial_bridge,
     ])

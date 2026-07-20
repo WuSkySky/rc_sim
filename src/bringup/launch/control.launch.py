@@ -80,12 +80,6 @@ def generate_launch_description():
         'kfs_detect.yaml',
     )
 
-    teleop_control = Node(
-        package='robot_r2_control',
-        executable='teleop_control',
-        output='screen',
-    )
-
     stage_two_control = Node(
         package='robot_r2_control',
         executable='stage_two_control',
@@ -198,7 +192,6 @@ def generate_launch_description():
                 'and the live robot grid pose'
             ),
         ),
-        teleop_control,
         stage_two_control,
         stage_two_point_one,
         stage_two_point_two,
