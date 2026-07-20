@@ -16,13 +16,21 @@ serial_bridge:
     raw_tx_topic: /r2/serial/raw_tx
 
     cmd_vel_topic: /r2/cmd_vel
+    velocity_feedback_topic: /r2/velocity_feedback
     lift_command_topic: /r2/lift/cmd_lift
+    lift_feedback_topic: /r2/lift/position_feedback
     kfs_lift_topic: /r2/kfs_lift/cmd
+    kfs_lift_feedback_topic: /r2/kfs_lift/feedback
     kfs_root_rotate_topic: /r2/gripper/rotate_cmd
+    kfs_root_rotate_feedback_topic: /r2/gripper/rotate_feedback
     kfs_tip_rotate_topic: /r2/gripper/tip_rotate_cmd
+    kfs_tip_rotate_feedback_topic: /r2/gripper/tip_rotate_feedback
     kfs_grip_topic: /r2/gripper/grip_cmd
+    kfs_grip_feedback_topic: /r2/gripper/grip_feedback
     weapon_rotate_topic: /r2/weapon/rotate_cmd
+    weapon_rotate_feedback_topic: /r2/weapon/rotate_feedback
     weapon_grip_topic: /r2/weapon/grip_cmd
+    weapon_grip_feedback_topic: /r2/weapon/grip_feedback
 
     # vx, vy, vw, front lift, rear lift, KFS lift, KFS root,
     # KFS tip, KFS grip, weapon rotate, weapon grip.

@@ -48,6 +48,27 @@ def encode_frame(values, header=0xAA, tail=0x55, endianness='little'):
     )
 
 
+def decode_frame(frame, header=0xAA, tail=0x55, endianness='little'):
+    frame_bytes = bytes(frame)
+    if len(frame_bytes) != FRAME_SIZE:
+        raise ValueError(
+            f'frame must be {FRAME_SIZE} bytes, got {len(frame_bytes)}')
+
+    expected_header = _validate_marker(header, 'header')
+    expected_tail = _validate_marker(tail, 'tail')
+    if frame_bytes[0] != expected_header:
+        raise ValueError(
+            f'invalid frame header 0x{frame_bytes[0]:02X}')
+    if frame_bytes[-1] != expected_tail:
+        raise ValueError(
+            f'invalid frame tail 0x{frame_bytes[-1]:02X}')
+
+    values = frame_struct(endianness).unpack(frame_bytes)[1:-1]
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError('frame values must all be finite')
+    return values
+
+
 class FrameParser:
     def __init__(self, header=0xAA, tail=0x55):
         self.header = _validate_marker(header, 'header')

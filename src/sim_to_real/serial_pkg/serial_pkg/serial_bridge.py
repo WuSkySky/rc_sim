@@ -7,13 +7,14 @@ import time
 from geometry_msgs.msg import Twist
 import rclpy
 from rclpy.node import Node
-from robot_r2_interfaces.msg import LiftCommand
+from robot_r2_interfaces.msg import LiftCommand, LiftFeedback
 import serial
 from std_msgs.msg import Float64, String
 
 from serial_pkg.protocol import (
     FLOAT_FIELD_COUNT,
     FrameParser,
+    decode_frame,
     encode_frame,
 )
 
@@ -48,16 +49,34 @@ class SerialBridge(Node):
         self.declare_parameter('raw_tx_topic', '/r2/serial/raw_tx')
 
         self.declare_parameter('cmd_vel_topic', '/r2/cmd_vel')
+        self.declare_parameter(
+            'velocity_feedback_topic', '/r2/velocity_feedback')
         self.declare_parameter('lift_command_topic', '/r2/lift/cmd_lift')
+        self.declare_parameter(
+            'lift_feedback_topic', '/r2/lift/position_feedback')
         self.declare_parameter('kfs_lift_topic', '/r2/kfs_lift/cmd')
+        self.declare_parameter(
+            'kfs_lift_feedback_topic', '/r2/kfs_lift/feedback')
         self.declare_parameter(
             'kfs_root_rotate_topic', '/r2/gripper/rotate_cmd')
         self.declare_parameter(
+            'kfs_root_rotate_feedback_topic',
+            '/r2/gripper/rotate_feedback')
+        self.declare_parameter(
             'kfs_tip_rotate_topic', '/r2/gripper/tip_rotate_cmd')
+        self.declare_parameter(
+            'kfs_tip_rotate_feedback_topic',
+            '/r2/gripper/tip_rotate_feedback')
         self.declare_parameter('kfs_grip_topic', '/r2/gripper/grip_cmd')
         self.declare_parameter(
+            'kfs_grip_feedback_topic', '/r2/gripper/grip_feedback')
+        self.declare_parameter(
             'weapon_rotate_topic', '/r2/weapon/rotate_cmd')
+        self.declare_parameter(
+            'weapon_rotate_feedback_topic', '/r2/weapon/rotate_feedback')
         self.declare_parameter('weapon_grip_topic', '/r2/weapon/grip_cmd')
+        self.declare_parameter(
+            'weapon_grip_feedback_topic', '/r2/weapon/grip_feedback')
         self.declare_parameter(
             'initial_command_values',
             [
@@ -112,6 +131,33 @@ class SerialBridge(Node):
         raw_tx_topic = str(self.get_parameter('raw_tx_topic').value)
         self.raw_tx_publisher = self.create_publisher(
             String, raw_tx_topic, 10)
+
+        self.velocity_feedback_publisher = self.create_publisher(
+            Twist,
+            str(self.get_parameter('velocity_feedback_topic').value),
+            10,
+        )
+        self.lift_feedback_publisher = self.create_publisher(
+            LiftFeedback,
+            str(self.get_parameter('lift_feedback_topic').value),
+            10,
+        )
+        float_feedback_topics = (
+            ('kfs_lift_feedback_topic', self.KFS_LIFT),
+            ('kfs_root_rotate_feedback_topic', self.KFS_ROOT_ROTATE),
+            ('kfs_tip_rotate_feedback_topic', self.KFS_TIP_ROTATE),
+            ('kfs_grip_feedback_topic', self.KFS_GRIP),
+            ('weapon_rotate_feedback_topic', self.WEAPON_ROTATE),
+            ('weapon_grip_feedback_topic', self.WEAPON_GRIP),
+        )
+        self.float_feedback_publishers = {
+            field_index: self.create_publisher(
+                Float64,
+                str(self.get_parameter(parameter_name).value),
+                10,
+            )
+            for parameter_name, field_index in float_feedback_topics
+        }
 
         self.command_subscriptions = [
             self.create_subscription(
@@ -280,6 +326,35 @@ class SerialBridge(Node):
             message = String()
             message.data = frame.hex(' ').upper()
             self.raw_rx_publisher.publish(message)
+            try:
+                values = decode_frame(
+                    frame,
+                    self.frame_header,
+                    self.frame_tail,
+                    self.float_endianness,
+                )
+            except ValueError as exc:
+                self.get_logger().warn(
+                    f'Ignored invalid serial feedback frame: {exc}')
+                continue
+            self.publish_feedback(values)
+
+    def publish_feedback(self, values):
+        velocity = Twist()
+        velocity.linear.x = values[self.VX]
+        velocity.linear.y = values[self.VY]
+        velocity.angular.z = values[self.VW]
+        self.velocity_feedback_publisher.publish(velocity)
+
+        lift = LiftFeedback()
+        lift.front_left_lift = values[self.FRONT_LIFT]
+        lift.front_right_lift = values[self.FRONT_LIFT]
+        lift.rear_left_lift = values[self.REAR_LIFT]
+        lift.rear_right_lift = values[self.REAR_LIFT]
+        self.lift_feedback_publisher.publish(lift)
+
+        for field_index, publisher in self.float_feedback_publishers.items():
+            publisher.publish(Float64(data=values[field_index]))
 
     def close(self):
         if self.serial_port is None:
