@@ -29,11 +29,6 @@ def generate_launch_description():
         parameters=[{
             'config_file': LaunchConfiguration('config_file'),
         }],
-        additional_env={
-        'LD_LIBRARY_PATH':
-            '/lib/aarch64-linux-gnu:'
-            '/usr/lib/aarch64-linux-gnu'
-        },
     )
 
     with open(control_config_path, 'r') as config_file:
