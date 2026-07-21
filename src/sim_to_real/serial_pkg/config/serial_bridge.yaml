@@ -16,6 +16,8 @@ serial_bridge:
     raw_tx_topic: /r2/serial/raw_tx
 
     cmd_vel_topic: /r2/cmd_vel
+    # Set vx, vy, and vw to zero when cmd_vel stops updating.
+    cmd_vel_timeout_sec: 0.25
     velocity_feedback_topic: /r2/velocity_feedback
     lift_command_topic: /r2/lift/cmd_lift
     lift_feedback_topic: /r2/lift/position_feedback

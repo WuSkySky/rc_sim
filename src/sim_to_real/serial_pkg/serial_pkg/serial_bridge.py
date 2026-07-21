@@ -49,6 +49,7 @@ class SerialBridge(Node):
         self.declare_parameter('raw_tx_topic', '/r2/serial/raw_tx')
 
         self.declare_parameter('cmd_vel_topic', '/r2/cmd_vel')
+        self.declare_parameter('cmd_vel_timeout_sec', 0.25)
         self.declare_parameter(
             'velocity_feedback_topic', '/r2/velocity_feedback')
         self.declare_parameter('lift_command_topic', '/r2/lift/cmd_lift')
@@ -98,6 +99,8 @@ class SerialBridge(Node):
             'reconnect_interval_sec')
         self.write_timeout_sec = self._positive_float_parameter(
             'write_timeout_sec')
+        self.cmd_vel_timeout_sec = self._positive_float_parameter(
+            'cmd_vel_timeout_sec')
         self.frame_header = self._byte_parameter('frame_header')
         self.frame_tail = self._byte_parameter('frame_tail')
         self.float_endianness = str(
@@ -121,6 +124,8 @@ class SerialBridge(Node):
 
         self.command_lock = threading.Lock()
         self.command_values = list(initial_values)
+        self.last_cmd_vel_time = None
+        self.cmd_vel_timed_out = False
         self.serial_port = None
         self.next_reconnect_time = 0.0
         self.parser = FrameParser(self.frame_header, self.frame_tail)
@@ -222,8 +227,11 @@ class SerialBridge(Node):
         if not all(math.isfinite(value) for value in values):
             self.get_logger().warn('Ignored non-finite cmd_vel')
             return
+        update_time = time.monotonic()
         with self.command_lock:
             self.command_values[self.VX:self.VW + 1] = values
+            self.last_cmd_vel_time = update_time
+            self.cmd_vel_timed_out = False
 
     def on_lift_command(self, message):
         values = (float(message.front_lift), float(message.rear_lift))
@@ -287,10 +295,31 @@ class SerialBridge(Node):
             time.monotonic() + self.reconnect_interval_sec)
 
     def send_latest_commands(self):
+        current_time = time.monotonic()
+        with self.command_lock:
+            timed_out = (
+                self.last_cmd_vel_time is None
+                or current_time - self.last_cmd_vel_time
+                >= self.cmd_vel_timeout_sec
+            )
+            if timed_out:
+                self.command_values[self.VX:self.VW + 1] = (0.0, 0.0, 0.0)
+            timeout_started = (
+                timed_out
+                and self.last_cmd_vel_time is not None
+                and not self.cmd_vel_timed_out
+            )
+            self.cmd_vel_timed_out = (
+                timed_out and self.last_cmd_vel_time is not None)
+            values = tuple(self.command_values)
+
+        if timeout_started:
+            self.get_logger().warn(
+                f'cmd_vel timed out after {self.cmd_vel_timeout_sec:.3f} s; '
+                'chassis velocity set to zero')
+
         if not self.ensure_serial_connection():
             return
-        with self.command_lock:
-            values = tuple(self.command_values)
 
         try:
             frame = encode_frame(
