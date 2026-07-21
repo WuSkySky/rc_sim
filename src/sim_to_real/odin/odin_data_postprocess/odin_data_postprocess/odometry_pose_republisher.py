@@ -1,56 +1,59 @@
+import math
+
 from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
+from tf2_ros import Buffer, TransformException, TransformListener
 
 
 class OdometryPoseRepublisher(Node):
     def __init__(self):
         super().__init__('odometry_pose_republisher')
 
-        self.declare_parameter(
-            'input_odometry_topic', '/odin1/odometry_highfreq')
         self.declare_parameter('output_pose_topic', '/r2/pose_feedback')
+        self.declare_parameter('odom_frame', 'odom')
+        self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('publish_rate', 100.0)
 
-        input_topic = str(
-            self.get_parameter('input_odometry_topic').value)
         output_topic = str(
             self.get_parameter('output_pose_topic').value)
+        self.odom_frame = str(self.get_parameter('odom_frame').value)
+        self.base_frame = str(self.get_parameter('base_frame').value)
         publish_rate = float(self.get_parameter('publish_rate').value)
-        if publish_rate <= 0.0:
-            raise ValueError('publish_rate must be positive')
+        if not output_topic:
+            raise ValueError('output_pose_topic must not be empty')
+        if not self.odom_frame or not self.base_frame:
+            raise ValueError('TF frame names must not be empty')
+        if self.odom_frame == self.base_frame:
+            raise ValueError('odom_frame and base_frame must differ')
+        if not math.isfinite(publish_rate) or publish_rate <= 0.0:
+            raise ValueError('publish_rate must be finite and positive')
 
-        odometry_qos = QoSProfile(
-            depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.VOLATILE,
-        )
         self.pose_publisher = self.create_publisher(
             PoseStamped, output_topic, 10)
-        self.odometry_subscription = self.create_subscription(
-            Odometry,
-            input_topic,
-            self.on_odometry,
-            odometry_qos,
-        )
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.publish_timer = self.create_timer(
-            1.0 / publish_rate, self.publish_latest_pose)
+            1.0 / publish_rate, self.publish_base_pose)
 
-        self.latest_odometry = None
-
-    def on_odometry(self, message):
-        self.latest_odometry = message
-
-    def publish_latest_pose(self):
-        odometry = self.latest_odometry
-        if odometry is None:
+    def publish_base_pose(self):
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.odom_frame,
+                self.base_frame,
+                Time(),
+            )
+        except TransformException:
             return
 
         pose = PoseStamped()
-        pose.header = odometry.header
-        pose.pose = odometry.pose.pose
+        pose.header.stamp = transform.header.stamp
+        pose.header.frame_id = self.odom_frame
+        pose.pose.position.x = transform.transform.translation.x
+        pose.pose.position.y = transform.transform.translation.y
+        pose.pose.position.z = transform.transform.translation.z
+        pose.pose.orientation = transform.transform.rotation
         self.pose_publisher.publish(pose)
 
 

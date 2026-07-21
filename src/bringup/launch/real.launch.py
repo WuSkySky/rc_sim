@@ -24,6 +24,18 @@ def generate_launch_description():
         )
     )
 
+    odometry_tf_config = os.path.join(
+        odin_data_postprocess_pkg,
+        'config',
+        'odometry_tf_publisher.yaml',
+    )
+    odometry_tf_publisher = Node(
+        package='odin_data_postprocess',
+        executable='odometry_tf_publisher',
+        parameters=[odometry_tf_config],
+        output='screen',
+    )
+
     odometry_pose_config = os.path.join(
         odin_data_postprocess_pkg,
         'config',
@@ -66,6 +78,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         odin_launch,
+        odometry_tf_publisher,
         odometry_pose_republisher,
         control_launch,
         serial_bridge,

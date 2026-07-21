@@ -36,9 +36,9 @@ register_keys:
   # Odometry data
   sendodom: 1             # 0: off; 1: on
 
-  # TF from odom to base_link. Leave it on unless you specifically need it off.
-  # ATTENTION: critical for rviz to show cloud_raw.
-  send_odom_baselink_tf: 1 # 0: off; 1: on.
+  # odin_data_postprocess publishes the corrected odom -> base_link TF.
+  # Keep the driver's native odom -> odin1_base_link TF disabled.
+  send_odom_baselink_tf: 0 # 0: off; 1: on.
 
   # raw dtof data
   senddtof: 1             # 0: off; 1: on

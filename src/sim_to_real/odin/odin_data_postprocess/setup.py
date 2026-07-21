@@ -17,7 +17,10 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (
             os.path.join('share', package_name, 'config'),
-            ['config/odometry_pose_republisher.yaml'],
+            [
+                'config/odometry_pose_republisher.yaml',
+                'config/odometry_tf_publisher.yaml',
+            ],
         ),
     ],
     install_requires=['setuptools'],
@@ -30,6 +33,8 @@ setup(
         'console_scripts': [
             'odometry_pose_republisher = '
             'odin_data_postprocess.odometry_pose_republisher:main',
+            'odometry_tf_publisher = '
+            'odin_data_postprocess.odometry_tf_publisher:main',
         ],
     },
 )

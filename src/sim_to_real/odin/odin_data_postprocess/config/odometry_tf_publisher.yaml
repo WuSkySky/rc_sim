@@ -1,0 +1,10 @@
+odometry_tf_publisher:
+  ros__parameters:
+    input_odometry_topic: /odin1/odometry_highfreq
+    odom_frame: odom
+    base_frame: base_link
+    odin_frame: odin_link
+    # Translation is in metres; RPY angles are in radians.
+    base_to_odin_xyz: [0.3, 0.0, 0.0]
+    base_to_odin_rpy: [0.0, 0.0, 0.0]
+    publish_rate: 100.0
