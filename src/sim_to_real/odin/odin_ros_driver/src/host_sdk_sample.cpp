@@ -328,8 +328,11 @@ static void signal_handler(int signum) {
         if (odinDevice) {
             // Convert calib.yaml to cam_in_ex.txt at program end
             if (g_ros_object) {
-                const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
-                (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
+                const std::filesystem::path recording_root = g_ros_object->get_root_dir();
+                if (!recording_root.empty()) {
+                    const std::filesystem::path out_path = recording_root / "image" / "cam_in_ex.txt";
+                    (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
+                }
 
                 #ifdef ROS2
                     RCLCPP_INFO(rclcpp::get_logger("device_cb"), "pose_index: %d", g_ros_object->get_pose_index());
@@ -1291,23 +1294,11 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             #endif
             return;
         }
-	const std::string package_name = "odin_ros_driver";
-	std::string config_dir = "";
+	std::string config_dir;
 	#ifdef ROS2
-	    char* ros_workspace = std::getenv("COLCON_PREFIX_PATH");
-	    if (ros_workspace) {
-		std::string workspace_path(ros_workspace);
-		size_t pos = workspace_path.find("/install");
-		if (pos != std::string::npos) {
-		    config_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/config";
-		} else {
-		    config_dir = ament_index_cpp::get_package_share_directory(package_name) + "/config";
-		}
-	    } else {
-		config_dir = ament_index_cpp::get_package_share_directory(package_name) + "/config";
-	    }
+	    config_dir = get_package_source_directory() + "/config";
 	#else
-	    config_dir = ros::package::getPath(package_name) + "/config";
+	    config_dir = ros::package::getPath("odin_ros_driver") + "/config";
 	#endif
    		 std::cout << "config_dir"<< config_dir <<std::endl;
         #ifdef ROS2
@@ -1317,7 +1308,7 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
         #endif
 
         std::filesystem::path per_con_log_root_dir;
-        {
+        if (g_devstatus_log || g_save_log) {
             auto connection_time = std::chrono::system_clock::now();
             std::time_t t = std::chrono::system_clock::to_time_t(connection_time);
             std::tm tm{};
@@ -1777,31 +1768,33 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
             return;
         }
         
-        std::string dev_status_csv_file_path_ = per_con_log_root_dir / "dev_status.csv";
+        if (g_devstatus_log) {
+            std::string dev_status_csv_file_path_ = per_con_log_root_dir / "dev_status.csv";
 
-        if (dev_status_csv_file) {
-            std::fflush(dev_status_csv_file);
-            fclose(dev_status_csv_file);
-            dev_status_csv_file = nullptr;
-        }
+            if (dev_status_csv_file) {
+                std::fflush(dev_status_csv_file);
+                fclose(dev_status_csv_file);
+                dev_status_csv_file = nullptr;
+            }
 
-        // Open the file in append mode
-        dev_status_csv_file = fopen(dev_status_csv_file_path_.c_str(), "a");
-        if (!dev_status_csv_file) {
-            #ifdef ROS2
-                RCLCPP_ERROR(rclcpp::get_logger("init"), "Failed to open dev_status CSV file");
-            #else
-                ROS_ERROR("Failed to open dev_status CSV file");
-            #endif
-        } else {
-            const char* header =
-            "uptime_seconds,package_temp,cpu_temp,center_temp,gpu_temp,npu_temp,dtof_tx_temp,dtof_rx_temp,"
-            "cpu0,cpu1,cpu2,cpu3,cpu4,cpu5,cpu6,cpu7,ram_use(%),"
-            "rgb_configured_odr,rgb_tx_odr,rgb_rx_odr,dtof_configured_odr,dtof_tx_odr,dtof_rx_odr,imu_configured_odr,imu_tx_odr,imu_rx_odr,"
-            "slam_cloud_tx_odr,slam_cloud_rx_odr,slam_odom_tx_odr,slam_odom_rx_odr,slam_odom_highfreq_tx_odr,slam_odom_highfreq_rx_odr,"
-            "host_ram_use(mb)\n";
-            fprintf(dev_status_csv_file, "%s", header);
-            std::fflush(dev_status_csv_file);
+            // Open the file in append mode
+            dev_status_csv_file = fopen(dev_status_csv_file_path_.c_str(), "a");
+            if (!dev_status_csv_file) {
+                #ifdef ROS2
+                    RCLCPP_ERROR(rclcpp::get_logger("init"), "Failed to open dev_status CSV file");
+                #else
+                    ROS_ERROR("Failed to open dev_status CSV file");
+                #endif
+            } else {
+                const char* header =
+                "uptime_seconds,package_temp,cpu_temp,center_temp,gpu_temp,npu_temp,dtof_tx_temp,dtof_rx_temp,"
+                "cpu0,cpu1,cpu2,cpu3,cpu4,cpu5,cpu6,cpu7,ram_use(%),"
+                "rgb_configured_odr,rgb_tx_odr,rgb_rx_odr,dtof_configured_odr,dtof_tx_odr,dtof_rx_odr,imu_configured_odr,imu_tx_odr,imu_rx_odr,"
+                "slam_cloud_tx_odr,slam_cloud_rx_odr,slam_odom_tx_odr,slam_odom_rx_odr,slam_odom_highfreq_tx_odr,slam_odom_highfreq_rx_odr,"
+                "host_ram_use(mb)\n";
+                fprintf(dev_status_csv_file, "%s", header);
+                std::fflush(dev_status_csv_file);
+            }
         }
 
         uint32_t dtof_subframe_odr = 0;
@@ -2253,34 +2246,9 @@ int main(int argc, char *argv[])
 
         lidar_log_set_level(LIDAR_LOG_INFO);
 
-        const std::string package_name = "odin_ros_driver";
-        std::string data_dir = "";
-        std::string log_dir = "";
-        std::string map_dir = "";
-        #ifdef ROS2
-            char* ros_workspace = std::getenv("COLCON_PREFIX_PATH");
-            if (ros_workspace) {
-                std::string workspace_path(ros_workspace);
-                size_t pos = workspace_path.find("/install");
-                if (pos != std::string::npos) {
-                    data_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/recorddata";
-                    log_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/log";
-                    map_dir = workspace_path.substr(0, pos) + "/src/odin_ros_driver/map";
-                } else {
-                    data_dir = ament_index_cpp::get_package_share_directory(package_name) + "/recorddata";
-                    log_dir = ament_index_cpp::get_package_share_directory(package_name) + "/log";
-                    map_dir = ament_index_cpp::get_package_share_directory(package_name) + "/map";
-                }
-            } else {
-                data_dir = ament_index_cpp::get_package_share_directory(package_name) + "/recorddata";
-                log_dir = ament_index_cpp::get_package_share_directory(package_name) + "/log";
-                map_dir = ament_index_cpp::get_package_share_directory(package_name) + "/map";
-            }
-        #else
-            data_dir = ros::package::getPath(package_name) + "/recorddata";
-            log_dir = ros::package::getPath(package_name) + "/log";
-            map_dir = ros::package::getPath(package_name) + "/map";
-        #endif
+        std::string data_dir = package_path + "/recorddata";
+        std::string log_dir = package_path + "/log";
+        std::string map_dir = package_path + "/map";
 
         if (g_record_data) {
             g_ros_object->initialize_data_logger(data_dir);
@@ -2296,7 +2264,7 @@ int main(int argc, char *argv[])
         #endif
         std::strftime(driver_start_time, sizeof(driver_start_time), "%Y%m%d_%H%M%S", &tm);
 
-        if (g_devstatus_log) {
+        if (g_devstatus_log || g_save_log) {
             std::string folder_name = std::string("Driver_") + std::string(driver_start_time);
             log_root_dir_ = std::filesystem::path(log_dir) / folder_name;
             std::filesystem::create_directories(log_root_dir_);
@@ -2476,8 +2444,11 @@ int main(int argc, char *argv[])
     if (odinDevice) {
         // Convert calib.yaml to cam_in_ex.txt at program end
         if (g_ros_object) {
-            const std::filesystem::path out_path = g_ros_object->get_root_dir() / "image" / "cam_in_ex.txt";
-            (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
+            const std::filesystem::path recording_root = g_ros_object->get_root_dir();
+            if (!recording_root.empty()) {
+                const std::filesystem::path out_path = recording_root / "image" / "cam_in_ex.txt";
+                (void)convert_calib_to_cam_in_ex(calib_file_, out_path);
+            }
         }
         #ifdef ROS2
             RCLCPP_INFO(rclcpp::get_logger("device_cb"), "pose_index: %d", g_ros_object->get_pose_index());
