@@ -14,16 +14,18 @@ setup(
             'share/ament_index/resource_index/packages',
             ['resource/' + package_name],
         ),
-        ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name, ['package.xml', 'README.md']),
         (
             os.path.join('share', package_name, 'config'),
             [
+                'config/map_odom_tf_publisher.yaml',
                 'config/odometry_pose_republisher.yaml',
                 'config/odometry_tf_publisher.yaml',
             ],
         ),
     ],
     install_requires=['setuptools'],
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='skysky',
     maintainer_email='skysky@example.com',
@@ -31,6 +33,8 @@ setup(
     license='TODO: License declaration',
     entry_points={
         'console_scripts': [
+            'map_odom_tf_publisher = '
+            'odin_data_postprocess.map_odom_tf_publisher:main',
             'odometry_pose_republisher = '
             'odin_data_postprocess.odometry_pose_republisher:main',
             'odometry_tf_publisher = '

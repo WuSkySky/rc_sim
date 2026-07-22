@@ -48,6 +48,18 @@ def generate_launch_description():
         output='screen',
     )
 
+    map_odom_tf_config = os.path.join(
+        odin_data_postprocess_pkg,
+        'config',
+        'map_odom_tf_publisher.yaml',
+    )
+    map_odom_tf_publisher = Node(
+        package='odin_data_postprocess',
+        executable='map_odom_tf_publisher',
+        parameters=[map_odom_tf_config],
+        output='screen',
+    )
+
     control_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
@@ -80,6 +92,7 @@ def generate_launch_description():
         odin_launch,
         odometry_tf_publisher,
         odometry_pose_republisher,
+        map_odom_tf_publisher,
         control_launch,
         serial_bridge,
     ])

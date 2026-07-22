@@ -6,7 +6,9 @@ register_keys:
   # 0: use odin internal system time as data time stamp, typical and recommended;
   # 1: use host ros time (upon receive) as data time stamp, only use if you specifically require this setup, not recommended for most users
   # 2: align odin1 time to host time, timestamp is the sensor data reception time on host time axis
-  use_host_ros_time: 0  # Changed to 0 to use device timestamp without PTP offset correction
+  # Use host ROS time so Odin messages share the same time domain as the
+  # map -> odom TF published by odin_data_postprocess.
+  use_host_ros_time: 1
 
   streamctrl: 1           # 0: off; 1: on
 

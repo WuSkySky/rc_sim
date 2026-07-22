@@ -1,0 +1,10 @@
+map_odom_tf_publisher:
+  ros__parameters:
+    map_frame: map
+    odom_frame: odom
+    base_frame: base_link
+    # Translation is in metres; RPY angles are in radians.
+    default_base_xyz: [0.0, 0.0, 0.0]
+    default_base_rpy: [0.0, 0.0, 0.0]
+    service_name: /r2/set_base_pose
+    publish_rate: 100.0
