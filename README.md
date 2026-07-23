@@ -40,11 +40,56 @@ ros2 service call /r2/stage_two_point_two \
 
 ## 常用服务
 
+底盘速度控制，`linear.x` 为前后速度、`linear.y` 为左右速度，
+`angular.z` 为旋转角速度：
+
+```bash
+ros2 topic pub -r 20 /r2/cmd_vel geometry_msgs/msg/Twist \
+  '{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+```
+
 位置伺服，坐标单位为米，偏航角单位为弧度：
 
 ```bash
 ros2 service call /r2/move_to_pose robot_r2_interfaces/srv/MoveToPose \
   "{x: 0.0, y: 0.0, yaw: 1.5708, position_tolerance: 0.0, yaw_tolerance: 0.0, timeout_sec: 20.0}"
+```
+
+KFS 视觉对齐会根据前相机中的红蓝区域横向移动底盘。该节点已由
+`sim.launch.py` 和 `real.launch.py` 自动启动；在另一个 Bash 终端中调用：
+
+```bash
+source install/setup.bash
+ros2 service call /r2/align_to_kfs \
+  robot_r2_interfaces/srv/AlignToKFS \
+  "{pixel_tolerance: 20.0, timeout_sec: 10.0}"
+```
+
+`pixel_tolerance` 是允许的图像横向像素误差，`timeout_sec` 是整个对齐过程的
+最大等待时间。两项都填写 `0.0` 时使用 `kfs_alignment.yaml` 中的默认值：
+
+```bash
+ros2 service call /r2/align_to_kfs \
+  robot_r2_interfaces/srv/AlignToKFS \
+  "{pixel_tolerance: 0.0, timeout_sec: 0.0}"
+```
+
+返回值中的 `success` 表示是否连续稳定达到容差，`final_offset_x` 是最后一次
+有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于前相机视野内。
+
+可视化默认关闭，此时节点只在对齐 Service 执行期间处理图像。可在运行时动态
+开启持续检测和可视化发布：
+
+```bash
+ros2 param set /kfs_alignment visualization_enabled true
+```
+
+可视化图像发布在 `/r2/alignment/viz`（`sensor_msgs/msg/Image`），内容为原图与
+红蓝合并二值掩膜的左右拼接图。绿色标记检测边界的掩膜白色部分，红色竖线标记
+检测中心，左上角显示横向像素误差。关闭持续检测：
+
+```bash
+ros2 param set /kfs_alignment visualization_enabled false
 ```
 
 KFS 检测：

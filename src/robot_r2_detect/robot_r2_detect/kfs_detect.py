@@ -44,18 +44,19 @@ def _select_most_frequent_class(samples: list[str]) -> str:
 
 
 def main(args: list[str] | None = None) -> None:
+    import cv2
     import json
     import math
     import threading
     import time
 
+    import numpy as np
     import rclpy
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from rclpy.node import Node
     from geometry_msgs.msg import PoseStamped
     from sensor_msgs.msg import Image
-    from cv_bridge import CvBridge
     from robot_r2_interfaces.msg import (
         KfsRawBox,
         KfsRawDetections,
@@ -63,6 +64,34 @@ def main(args: list[str] | None = None) -> None:
     )
     from robot_r2_interfaces.srv import GetKfsType
     from std_msgs.msg import String
+
+    def image_message_to_bgr(msg: Image) -> np.ndarray:
+        """Convert packed rgb8/bgr8 ROS image data into contiguous BGR."""
+        encoding = msg.encoding.lower()
+        if encoding not in ("rgb8", "bgr8"):
+            raise ValueError(f"unsupported image encoding: {msg.encoding}")
+        if msg.height <= 0 or msg.width <= 0:
+            raise ValueError("image height and width must be positive")
+
+        row_size = int(msg.width) * 3
+        if msg.step < row_size:
+            raise ValueError(
+                f"image step {msg.step} is smaller than row size {row_size}"
+            )
+        expected_size = int(msg.height) * int(msg.step)
+        data = np.frombuffer(msg.data, dtype=np.uint8)
+        if data.size != expected_size:
+            raise ValueError(
+                f"image data has {data.size} bytes, expected {expected_size}"
+            )
+
+        rows = data.reshape(int(msg.height), int(msg.step))
+        image = rows[:, :row_size].reshape(
+            int(msg.height), int(msg.width), 3
+        )
+        if encoding == "rgb8":
+            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        return np.ascontiguousarray(image)
 
     class KfsDetectNode(Node):
         """Subscribe image → YOLO → publish raw + processed detection."""
@@ -86,8 +115,6 @@ def main(args: list[str] | None = None) -> None:
             self._declare_parameters()
             self._load_parameters()
             self._load_model()
-
-            self._bridge = CvBridge()
 
             self._sub = self.create_subscription(
                 Image,
@@ -438,7 +465,13 @@ def main(args: list[str] | None = None) -> None:
         # ---- callback ----
 
         def _image_cb(self, msg: Image) -> None:
-            image = self._bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+            try:
+                image = image_message_to_bgr(msg)
+            except (TypeError, ValueError) as exc:
+                self.get_logger().error(
+                    f"Failed to convert detection image: {exc}"
+                )
+                return
             h, w = image.shape[:2]
 
             result = self._model.predict(image, conf=self._conf, verbose=False)[0]
@@ -516,7 +549,6 @@ def main(args: list[str] | None = None) -> None:
             self._record_vote_sample(processed_msg.class_name)
 
             # ------- Topic 3: visualization -------
-            import cv2
             viz = image.copy()
 
             proc_x1 = processed_msg.x1 if processed_msg.class_name else -1

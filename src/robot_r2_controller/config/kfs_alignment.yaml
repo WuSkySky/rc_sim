@@ -1,11 +1,22 @@
 kfs_alignment:
   ros__parameters:
-    detection_topic: /r2/detection/processed
+    color_topic: /r2/front_camera/image_raw
     cmd_vel_topic: /r2/cmd_vel
     align_service: /r2/align_to_kfs
     pixel_tolerance: 20
+    stable_cycles: 10
     default_timeout_sec: 10.0
-    control_rate: 50.0
+    target_processing_rate: 30.0
+    visualization_enabled: false
+
+    # HSV masks used by the alignment-only red/blue detector.
+    blue_hsv_lower: [90, 80, 60]
+    blue_hsv_upper: [130, 255, 255]
+    red_low_hsv_lower: [0, 80, 60]
+    red_low_hsv_upper: [10, 255, 255]
+    red_high_hsv_lower: [170, 80, 60]
+    red_high_hsv_upper: [179, 255, 255]
+    column_threshold_ratio: 0.8
 
     # PID for lateral (linear.y) alignment
     kp: 0.008
