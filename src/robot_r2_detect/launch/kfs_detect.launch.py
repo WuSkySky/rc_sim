@@ -19,7 +19,6 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("model_path", default_value="best.pt"),
             DeclareLaunchArgument(
                 "color_topic", default_value="/r2/front_camera/image_raw"
             ),
@@ -36,7 +35,6 @@ def generate_launch_description():
                 parameters=[
                     config_file,
                     {
-                        "model_path": LaunchConfiguration("model_path"),
                         "color_topic": LaunchConfiguration("color_topic"),
                         "conf": LaunchConfiguration("conf"),
                         "simulation_state_detection": ParameterValue(

@@ -3,7 +3,7 @@
 <package format="3">
   <name>robot_r2_detect</name>
   <version>0.1.0</version>
-  <description>YOLO-based KFS detection node. Subscribes to image topic, publishes raw and processed detections.</description>
+  <description>KFS image classification and detection ROS 2 node.</description>
   <maintainer email="skysky@todo.todo">skysky</maintainer>
   <license>Apache-2.0</license>
 

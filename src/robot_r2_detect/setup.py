@@ -20,12 +20,12 @@ setup(
     zip_safe=True,
     maintainer="skysky",
     maintainer_email="skysky@todo.todo",
-    description="YOLO-based KFS detection node.",
+    description="KFS image classification and detection node.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "kfs_detect = robot_r2_detect.kfs_detect:main",
+            "kfs_detect = robot_r2_detect.kfs_detect_resnet:main",
         ],
     },
 )

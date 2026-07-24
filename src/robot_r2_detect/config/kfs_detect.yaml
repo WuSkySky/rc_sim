@@ -1,5 +1,7 @@
 kfs_detect:
   ros__parameters:
+    model_path: best_resnet.pt
+
     simulation_status_topic: /simulation/status
     robot_pose_topic: /r2/pose_feedback
     simulation_team: blue

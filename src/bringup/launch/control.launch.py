@@ -172,7 +172,6 @@ def generate_launch_description():
         parameters=[
             kfs_detect_config,
             {
-                'model_path': 'best.pt',
                 'color_topic': '/r2/front_camera/image_raw',
                 'conf': 0.75,
                 'simulation_state_detection': ParameterValue(
