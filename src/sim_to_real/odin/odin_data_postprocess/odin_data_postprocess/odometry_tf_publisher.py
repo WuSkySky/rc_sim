@@ -69,7 +69,11 @@ class OdometryTfPublisher(Node):
 
         odometry_qos = QoSProfile(
             depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
+            # This node only needs the newest 400 Hz odometry sample.
+            # RELIABLE delivery can accumulate old samples when the Python
+            # callback falls behind, making the published TF several seconds
+            # stale and preventing it from composing with map -> odom.
+            reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
         )
         self.odometry_subscription = self.create_subscription(

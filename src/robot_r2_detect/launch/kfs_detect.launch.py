@@ -11,10 +11,16 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    config_file = os.path.join(
-        get_package_share_directory("robot_r2_detect"),
+    package_share = get_package_share_directory("robot_r2_detect")
+    detect_config = os.path.join(
+        package_share,
         "config",
         "kfs_detect.yaml",
+    )
+    roi_config = os.path.join(
+        package_share,
+        "config",
+        "kfs_roi.yaml",
     )
 
     return LaunchDescription(
@@ -22,21 +28,37 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "color_topic", default_value="/r2/front_camera/image_raw"
             ),
-            DeclareLaunchArgument("conf", default_value="0.75"),
+            DeclareLaunchArgument("conf", default_value="0.5"),
             DeclareLaunchArgument(
                 "simulation_state_detection", default_value="false"
             ),
 
             Node(
                 package="robot_r2_detect",
+                executable="kfs_roi",
+                name="kfs_roi",
+                output="screen",
+                parameters=[
+                    roi_config,
+                    {
+                        "color_topic": LaunchConfiguration(
+                            "color_topic"
+                        ),
+                    },
+                ],
+            ),
+            Node(
+                package="robot_r2_detect",
                 executable="kfs_detect",
                 name="kfs_detect",
                 output="screen",
                 parameters=[
-                    config_file,
+                    detect_config,
                     {
-                        "color_topic": LaunchConfiguration("color_topic"),
-                        "conf": LaunchConfiguration("conf"),
+                        "conf": ParameterValue(
+                            LaunchConfiguration("conf"),
+                            value_type=float,
+                        ),
                         "simulation_state_detection": ParameterValue(
                             LaunchConfiguration(
                                 "simulation_state_detection"

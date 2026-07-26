@@ -31,6 +31,7 @@ setup(
     entry_points={
         'console_scripts': [
             'teleop_control = robot_r2_control.teleop_control:main',
+            'gui_control = robot_r2_control.gui_control:main',
             'stage_two_control = robot_r2_control.stage_two_control:main',
             'stage_two_point_one = robot_r2_control.stage_two_point_one:main',
             'stage_two_point_two = robot_r2_control.stage_two_point_two:main',

@@ -1,7 +1,7 @@
 # Best detection after filtering and center calculation.
 std_msgs/Header header
 
-string  class_name        # original YOLO label, e.g. "blue" / "red"
+string  class_name        # accepted KFS class: "r2", "fake", or "r1"
 int32   image_width       # input image width  (pixels)
 int32   image_height      # input image height (pixels)
 float32 confidence        # confidence score [0, 1]

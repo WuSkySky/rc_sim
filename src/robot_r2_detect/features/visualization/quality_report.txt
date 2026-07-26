@@ -1,0 +1,32 @@
+KFS binary-mask Chamfer feature quality report
+==============================================
+template_count: 31
+class_counts: r2=15, fake=15, r1=1
+foreground_density: min=0.1530, median=0.2252, max=0.2840
+
+Pairwise symmetric Chamfer distance distributions
+within_r2:       min=0.011948, p10=0.015251, median=0.023256, p90=0.036606, max=0.060583
+within_fake:     min=0.007347, p10=0.009881, median=0.013446, p90=0.018995, max=0.025094
+cross_r2_fake:   min=0.007864, p10=0.012327, median=0.019466, p90=0.028113, max=0.048100
+r1_vs_other:     min=0.026353, p10=0.033086, median=0.036986, p90=0.045402, max=0.048505
+
+Closest cross-class pairs
+- r2_11 vs fake_11: 0.007864486
+- r2_12 vs fake_03: 0.008517253
+- r2_11 vs fake_13: 0.008989732
+- r2_11 vs fake_02: 0.009059651
+- r2_11 vs fake_10: 0.009085299
+- r2_12 vs fake_09: 0.009812063
+- r2_11 vs fake_12: 0.010776005
+- r2_12 vs fake_12: 0.010877573
+- r2_02 vs fake_02: 0.010924109
+- r2_03 vs fake_03: 0.011022966
+
+Synthetic robustness
+scenario: exact_template/31, correct_class/31, median_best_distance, median_class_margin
+- anisotropic_5pct: 31/31, 31/31, 0.002635, 0.009631
+- anisotropic_10pct: 25/31, 28/31, 0.009199, 0.004659
+- shear_5pct: 31/31, 31/31, 0.001713, 0.011058
+- shear_10pct: 31/31, 31/31, 0.004301, 0.008469
+- rotation_3deg: 31/31, 31/31, 0.002053, 0.010260
+- rotation_6deg: 31/31, 31/31, 0.005282, 0.006274

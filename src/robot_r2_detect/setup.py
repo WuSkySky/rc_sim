@@ -15,17 +15,27 @@ setup(
         (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
         (os.path.join("share", package_name, "model"), glob("model/*")),
+        (
+            os.path.join("share", package_name, "features"),
+            glob("features/*.npz"),
+        ),
+        (
+            os.path.join("share", package_name, "reference"),
+            glob("reference/*.png"),
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="skysky",
     maintainer_email="skysky@todo.todo",
-    description="KFS image classification and detection node.",
+    description="KFS and AprilTag-guided LED detection nodes.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "kfs_detect = robot_r2_detect.kfs_detect_resnet:main",
+            "kfs_roi = robot_r2_detect.kfs_roi:main",
+            "led_detect = robot_r2_detect.led_detect:main",
         ],
     },
 )

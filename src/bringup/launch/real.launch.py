@@ -2,9 +2,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import GroupAction, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetRemap
 
 
 def generate_launch_description():
@@ -14,14 +14,22 @@ def generate_launch_description():
         'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
 
-    odin_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                odin_driver_pkg,
-                'launch',
-                'odin1_ros2_no_rviz.launch.py',
-            )
-        )
+    odin_launch = GroupAction(
+        actions=[
+            SetRemap(
+                src='/odin1/image/undistorted',
+                dst='/r2/front_camera/image_raw',
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(
+                        odin_driver_pkg,
+                        'launch',
+                        'odin1_ros2_no_rviz.launch.py',
+                    )
+                )
+            ),
+        ],
     )
 
     odometry_tf_config = os.path.join(

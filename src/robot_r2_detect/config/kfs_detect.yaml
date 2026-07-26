@@ -1,6 +1,14 @@
 kfs_detect:
   ros__parameters:
-    model_path: best_resnet.pt
+    feature_path: kfs_shape_templates.npz
+    roi_topic: /r2/kfs/roi
+    visualization_topic: /r2/detection/viz
+    visualization_enabled: false
+    conf: 0.5
+    max_chamfer_distance: 0.015
+    min_class_margin: 0.004
+    vote_service_name: /r2/detection/get_type
+    default_vote_timeout_sec: 10.0
 
     simulation_status_topic: /simulation/status
     robot_pose_topic: /r2/pose_feedback

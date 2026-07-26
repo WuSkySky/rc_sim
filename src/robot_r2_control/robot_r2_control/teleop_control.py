@@ -48,8 +48,8 @@ class WasdTeleop(Node):
 
         self.declare_parameter('cmd_vel_topic', '/r2/cmd_vel')
         self.declare_parameter('set_lift_service', '/r2/lift/set')
-        self.declare_parameter('linear_speed', 0.5)
-        self.declare_parameter('angular_speed', 1.57)
+        self.declare_parameter('linear_speed', 0.2)
+        self.declare_parameter('angular_speed', 1.0)
         self.declare_parameter('publish_rate', 20.0)
         self.declare_parameter('lift_timeout_sec', 10.0)
         self.declare_parameter('bar_rotate_speed', 0.5)

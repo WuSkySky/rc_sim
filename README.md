@@ -14,7 +14,46 @@ source install/setup.bash
 ros2 launch bringup real.launch.py
 ```
 
-## 阶段二
+## ROS 2 服务
+
+以下命令需在已经加载工作区环境的终端中执行：
+
+```bash
+source install/setup.bash
+```
+
+可用 `ros2 service list` 查看当前已启动的服务，使用下面的命令查看某个自定义
+服务的完整请求和响应字段：
+
+```bash
+ros2 interface show robot_r2_interfaces/srv/MoveToPose
+```
+
+### 服务速查
+
+
+| 功能         | 服务名                          | 服务类型                                          | 可用环境  |
+| ---------- | ---------------------------- | --------------------------------------------- | ----- |
+| 完整阶段二      | `/r2/stage_two`              | `robot_r2_interfaces/srv/StageTwo`            | 仿真、实机 |
+| 阶段 2.1     | `/r2/stage_two_point_one`    | `robot_r2_interfaces/srv/StageTwoPointOne`    | 仿真、实机 |
+| 阶段 2.2     | `/r2/stage_two_point_two`    | `robot_r2_interfaces/srv/StageTwoPointTwo`    | 仿真、实机 |
+| 底盘位置伺服     | `/r2/move_to_pose`           | `robot_r2_interfaces/srv/MoveToPose`          | 仿真、实机 |
+| 重置或设置里程计位姿 | `/r2/set_base_pose`          | `robot_r2_interfaces/srv/SetBasePose`         | 仅实机   |
+| 四轮抬升       | `/r2/lift/set`               | `robot_r2_interfaces/srv/SetLift`             | 仿真、实机 |
+| 跨越台阶       | `/r2/step_traverse`          | `robot_r2_interfaces/srv/TraverseStep`        | 仿真、实机 |
+| KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/AlignToKFS`          | 仿真、实机 |
+| KFS 类型检测   | `/r2/detection/get_type`     | `robot_r2_interfaces/srv/GetKfsType`          | 仿真、实机 |
+| LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
+| KFS 装载     | `/r2/kfs/load`               | `robot_r2_interfaces/srv/LoadKfs`             | 仿真、实机 |
+| KFS 释放     | `/r2/kfs/release`            | `robot_r2_interfaces/srv/ReleaseKfs`          | 仿真、实机 |
+| KFS 夹爪升降   | `/r2/kfs_lift`               | `robot_r2_interfaces/srv/SetKfsLift`          | 仿真、实机 |
+| KFS 夹爪根部旋转 | `/r2/gripper/set_rotate`     | `robot_r2_interfaces/srv/SetGripperRotate`    | 仿真、实机 |
+| KFS 夹爪末端旋转 | `/r2/gripper/set_tip_rotate` | `robot_r2_interfaces/srv/SetGripperTipRotate` | 仿真、实机 |
+| KFS 夹爪开合   | `/r2/gripper/set_grip`       | `robot_r2_interfaces/srv/SetGripperGrip`      | 仿真、实机 |
+| 重新随机摆放 KFS | `/simulation/reset_kfs`      | `std_srvs/srv/Trigger`                        | 仅仿真   |
+
+
+### 阶段二任务
 
 完整执行阶段 2.1 → 2.2。假 KFS 决策：`1=左`，`2=右`。
 
@@ -38,66 +77,96 @@ ros2 service call /r2/stage_two_point_two \
   "{fake_kfs_decision: 1, loaded_count: 0}"
 ```
 
-## 常用服务
+### 底盘、里程计与抬升
 
-底盘速度控制，`linear.x` 为前后速度、`linear.y` 为左右速度，
-`angular.z` 为旋转角速度：
+底盘速度控制使用 Topic 而不是 Service。`linear.x` 为前后速度、`linear.y` 为
+左右速度，`angular.z` 为旋转角速度：
 
 ```bash
 ros2 topic pub -r 20 /r2/cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
 ```
 
-位置伺服，坐标单位为米，偏航角单位为弧度：
+底盘位置伺服的坐标单位为米，偏航角单位为弧度：
 
 ```bash
 ros2 service call /r2/move_to_pose robot_r2_interfaces/srv/MoveToPose \
   "{x: 0.0, y: 0.0, yaw: 1.5708, position_tolerance: 0.0, yaw_tolerance: 0.0, timeout_sec: 20.0}"
 ```
 
-KFS 视觉对齐会根据前相机中的红蓝区域横向移动底盘。该节点已由
-`sim.launch.py` 和 `real.launch.py` 自动启动；在另一个 Bash 终端中调用：
+实机重置里程计位姿，将调用时刻的 `base_link` 对齐到 `map` 原点：
 
 ```bash
-source install/setup.bash
+ros2 service call /r2/set_base_pose \
+  robot_r2_interfaces/srv/SetBasePose "{}"
+```
+
+也可以将当前位姿设置为指定值。平移单位为米，RPY 角度单位为弧度：
+
+```bash
+ros2 service call /r2/set_base_pose \
+  robot_r2_interfaces/srv/SetBasePose \
+  "{x: 1.5, y: -0.5, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 1.5708}"
+```
+
+该服务由 `real.launch.py` 中的 `map_odom_tf_publisher` 提供。它会更新
+`map -> odom`，从而校正 `/r2/pose_feedback` 和底盘位置伺服使用的地图位姿；
+不会清空 Odin 发布的原始里程计数据。调用时必须已经存在
+`odom -> base_link` TF，否则服务会返回失败。
+
+四轮抬升：
+
+```bash
+ros2 service call /r2/lift/set robot_r2_interfaces/srv/SetLift \
+  "{front_lift: 0.2, rear_lift: 0.2, tolerance: 0.0, timeout_sec: 15.0}"
+```
+
+跨越台阶，方向：`0=上`、`1=下`，距离允许为负数。
+
+```bash
+ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
+  "{direction: 0, distance_to_step: 0.2}"
+```
+
+### KFS 与视觉
+
+KFS 视觉对齐会根据前相机中的红蓝区域横向移动底盘：
+
+```bash
 ros2 service call /r2/align_to_kfs \
   robot_r2_interfaces/srv/AlignToKFS \
   "{pixel_tolerance: 20.0, timeout_sec: 10.0}"
 ```
 
 `pixel_tolerance` 是允许的图像横向像素误差，`timeout_sec` 是整个对齐过程的
-最大等待时间。两项都填写 `0.0` 时使用 `kfs_alignment.yaml` 中的默认值：
-
-```bash
-ros2 service call /r2/align_to_kfs \
-  robot_r2_interfaces/srv/AlignToKFS \
-  "{pixel_tolerance: 0.0, timeout_sec: 0.0}"
-```
-
+最大等待时间。两项都填写 `0.0` 时使用 `kfs_alignment.yaml` 中的默认值。
 返回值中的 `success` 表示是否连续稳定达到容差，`final_offset_x` 是最后一次
 有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于前相机视野内。
 
 可视化默认关闭，此时节点只在对齐 Service 执行期间处理图像。可在运行时动态
-开启持续检测和可视化发布：
+开启或关闭持续检测和可视化发布：
 
 ```bash
 ros2 param set /kfs_alignment visualization_enabled true
-```
-
-可视化图像发布在 `/r2/alignment/viz`（`sensor_msgs/msg/Image`），内容为原图与
-红蓝合并二值掩膜的左右拼接图。绿色标记检测边界的掩膜白色部分，红色竖线标记
-检测中心，左上角显示横向像素误差。关闭持续检测：
-
-```bash
 ros2 param set /kfs_alignment visualization_enabled false
 ```
 
-KFS 检测：
+可视化图像发布在 `/r2/alignment/viz`（`sensor_msgs/msg/Image`）。
+
+KFS 类型检测：
 
 ```bash
 ros2 service call /r2/detection/get_type \
   robot_r2_interfaces/srv/GetKfsType \
   "{sample_count: 10, timeout_sec: 10.0}"
+```
+
+LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：
+
+```bash
+ros2 service call /r2/led_detection/detect \
+  robot_r2_interfaces/srv/DetectLed \
+  "{target_states: [true, false, true]}"
 ```
 
 KFS 装载，位置：`0=前方`、`1=上方`；方式：`0=标准`、`1=转移`。
@@ -113,18 +182,33 @@ ros2 service call /r2/kfs/load robot_r2_interfaces/srv/LoadKfs \
 ros2 service call /r2/kfs/release robot_r2_interfaces/srv/ReleaseKfs "{}"
 ```
 
-跨越台阶，方向：`0=上`、`1=下`，距离允许为负数。
+以下服务用于直接调试 KFS 夹爪机构。`position` 分别表示升降位置、根部角度、
+末端角度和开合位置；升降及开合单位为米，角度单位为弧度。`tolerance` 和
+`timeout_sec` 填写 `0.0` 时使用对应控制器配置中的默认值。
 
 ```bash
-ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
-  "{direction: 0, distance_to_step: 0.2}"
+ros2 service call /r2/kfs_lift robot_r2_interfaces/srv/SetKfsLift \
+  "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
+
+ros2 service call /r2/gripper/set_rotate \
+  robot_r2_interfaces/srv/SetGripperRotate \
+  "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
+
+ros2 service call /r2/gripper/set_tip_rotate \
+  robot_r2_interfaces/srv/SetGripperTipRotate \
+  "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
+
+ros2 service call /r2/gripper/set_grip \
+  robot_r2_interfaces/srv/SetGripperGrip \
+  "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
 ```
 
-四轮抬升：
+### 仿真场地
+
+重新随机摆放 KFS：
 
 ```bash
-ros2 service call /r2/lift/set robot_r2_interfaces/srv/SetLift \
-  "{front_lift: 0.2, rear_lift: 0.2, tolerance: 0.0, timeout_sec: 15.0}"
+ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
 ```
 
 ## 串口协议
@@ -143,19 +227,21 @@ ros2 service call /r2/lift/set robot_r2_interfaces/srv/SetLift \
 
 字段排列如下，下发帧表示目标值，反馈帧表示相同机构的实际值：
 
-| 序号 | 字节 | 字段 | 下发含义 | 反馈含义 | 单位 |
-| ---: | ---: | --- | --- | --- | --- |
-| 0 | 1~4 | `vx` | 底盘前后目标速度 | 底盘前后实际速度 | m/s |
-| 1 | 5~8 | `vy` | 底盘左右目标速度 | 底盘左右实际速度 | m/s |
-| 2 | 9~12 | `vw` | 底盘目标角速度 | 底盘实际角速度 | rad/s |
-| 3 | 13~16 | `front_lift` | 前轮抬升目标位置 | 前轮抬升实际位置 | m |
-| 4 | 17~20 | `rear_lift` | 后轮抬升目标位置 | 后轮抬升实际位置 | m |
-| 5 | 21~24 | `kfs_lift` | KFS 升降目标位置 | KFS 升降实际位置 | m |
-| 6 | 25~28 | `kfs_root_rotate` | KFS 根部目标角度 | KFS 根部实际角度 | rad |
-| 7 | 29~32 | `kfs_tip_rotate` | KFS 末端目标角度 | KFS 末端实际角度 | rad |
-| 8 | 33~36 | `kfs_grip` | KFS 夹爪目标开合位置 | KFS 夹爪实际开合位置 | m |
-| 9 | 37~40 | `weapon_rotate` | 武器目标角度 | 武器实际角度 | rad |
-| 10 | 41~44 | `weapon_grip` | 武器目标开合位置 | 武器实际开合位置 | m |
+
+| 序号  | 字节    | 字段                | 下发含义         | 反馈含义         | 单位    |
+| ---: | -----: | ----------------- | ------------ | ------------ | ----- |
+| 0   | 1~4   | `vx`              | 底盘前后目标速度     | 底盘前后实际速度     | m/s   |
+| 1   | 5~8   | `vy`              | 底盘左右目标速度     | 底盘左右实际速度     | m/s   |
+| 2   | 9~12  | `vw`              | 底盘目标角速度      | 底盘实际角速度      | rad/s |
+| 3   | 13~16 | `front_lift`      | 前轮抬升目标位置     | 前轮抬升实际位置     | m     |
+| 4   | 17~20 | `rear_lift`       | 后轮抬升目标位置     | 后轮抬升实际位置     | m     |
+| 5   | 21~24 | `kfs_lift`        | KFS 升降目标位置   | KFS 升降实际位置   | m     |
+| 6   | 25~28 | `kfs_root_rotate` | KFS 根部目标角度   | KFS 根部实际角度   | rad   |
+| 7   | 29~32 | `kfs_tip_rotate`  | KFS 末端目标角度   | KFS 末端实际角度   | rad   |
+| 8   | 33~36 | `kfs_grip`        | KFS 夹爪目标开合位置 | KFS 夹爪实际开合位置 | m     |
+| 9   | 37~40 | `weapon_rotate`   | 武器目标角度       | 武器实际角度       | rad   |
+| 10  | 41~44 | `weapon_grip`     | 武器目标开合位置     | 武器实际开合位置     | m     |
+
 
 ### 1. 上位机到下位机：命令协议
 
@@ -169,16 +255,18 @@ ros2 service call /r2/lift/set robot_r2_interfaces/srv/SetLift \
 
 下位机按相同字段顺序返回完整反馈帧。串口节点校验帧头、固定长度、帧尾和浮点数有效性后，发布以下反馈话题：
 
-| 反馈内容 | ROS 2 话题 | 消息类型 |
-| --- | --- | --- |
-| 底盘实际速度 | `/r2/velocity_feedback` | `geometry_msgs/msg/Twist` |
-| 前后轮抬升位置 | `/r2/lift/position_feedback` | `robot_r2_interfaces/msg/LiftFeedback` |
-| KFS 升降位置 | `/r2/kfs_lift/feedback` | `std_msgs/msg/Float64` |
-| KFS 根部角度 | `/r2/gripper/rotate_feedback` | `std_msgs/msg/Float64` |
-| KFS 末端角度 | `/r2/gripper/tip_rotate_feedback` | `std_msgs/msg/Float64` |
-| KFS 夹爪开合位置 | `/r2/gripper/grip_feedback` | `std_msgs/msg/Float64` |
-| 武器角度 | `/r2/weapon/rotate_feedback` | `std_msgs/msg/Float64` |
-| 武器开合位置 | `/r2/weapon/grip_feedback` | `std_msgs/msg/Float64` |
+
+| 反馈内容       | ROS 2 话题                          | 消息类型                                   |
+| ---------- | --------------------------------- | -------------------------------------- |
+| 底盘实际速度     | `/r2/velocity_feedback`           | `geometry_msgs/msg/Twist`              |
+| 前后轮抬升位置    | `/r2/lift/position_feedback`      | `robot_r2_interfaces/msg/LiftFeedback` |
+| KFS 升降位置   | `/r2/kfs_lift/feedback`           | `std_msgs/msg/Float64`                 |
+| KFS 根部角度   | `/r2/gripper/rotate_feedback`     | `std_msgs/msg/Float64`                 |
+| KFS 末端角度   | `/r2/gripper/tip_rotate_feedback` | `std_msgs/msg/Float64`                 |
+| KFS 夹爪开合位置 | `/r2/gripper/grip_feedback`       | `std_msgs/msg/Float64`                 |
+| 武器角度       | `/r2/weapon/rotate_feedback`      | `std_msgs/msg/Float64`                 |
+| 武器开合位置     | `/r2/weapon/grip_feedback`        | `std_msgs/msg/Float64`                 |
+
 
 协议只反馈前、后两组抬升位置，因此发布 `LiftFeedback` 时同一组左右轮使用相同值。原始反馈帧同时发布到：
 
@@ -187,12 +275,6 @@ ros2 service call /r2/lift/set robot_r2_interfaces/srv/SetLift \
 ```
 
 ## 调试
-
-重置随机 KFS：
-
-```bash
-ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
-```
 
 查看完整串口发送帧：
 
@@ -205,3 +287,4 @@ ros2 topic echo /r2/serial/raw_tx --field data --full-length --once
 ```bash
 ros2 topic echo /r2/serial/raw_rx --field data --full-length --once
 ```
+

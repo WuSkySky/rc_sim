@@ -3,6 +3,7 @@ project(robot_r2_interfaces)
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -11,6 +12,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/KfsRawBox.msg"
   "msg/KfsRawDetections.msg"
   "msg/KfsProcessedDetection.msg"
+  "msg/KfsRoiDetection.msg"
   "srv/MoveToPose.srv"
   "srv/SetBasePose.srv"
   "srv/SetLift.srv"
@@ -21,12 +23,13 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/LoadKfs.srv"
   "srv/ReleaseKfs.srv"
   "srv/GetKfsType.srv"
+  "srv/DetectLed.srv"
   "srv/StageTwo.srv"
   "srv/StageTwoPointOne.srv"
   "srv/StageTwoPointTwo.srv"
   "srv/TraverseStep.srv"
   "srv/AlignToKFS.srv"
-  DEPENDENCIES std_msgs
+  DEPENDENCIES sensor_msgs std_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)

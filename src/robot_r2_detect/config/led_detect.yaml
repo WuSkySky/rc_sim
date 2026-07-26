@@ -1,0 +1,27 @@
+led_detect:
+  ros__parameters:
+    color_topic: /r2/front_camera/image_raw
+    service_name: /r2/led_detection/detect
+    visualization_topic: /r2/led_detection/viz
+    visualization_enabled: false
+
+    # When false, images are processed only while the service is active.
+    # This parameter can be changed at runtime.
+    continuous_detection: false
+
+    tag_family: tag36h11
+    # Set to -1 to accept the detected tag with the highest decision margin.
+    target_tag_id: 0
+    # Outer edge length of the AprilTag black border.
+    tag_size_mm: 100.0
+
+    # LED positions are relative to the black border's top-left corner.
+    # Request and response state arrays use this same index order.
+    led_count: 3
+    led_positions_x_mm: [0.0, 33.333333, 66.666667]
+    led_positions_y_mm: [110.0, 110.0, 110.0]
+    led_radius_mm: 5.0
+    brightness_threshold: 120.0
+
+    # Warn when one frame takes longer than the 10 Hz camera period.
+    target_processing_rate: 10.0

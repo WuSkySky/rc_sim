@@ -4,7 +4,7 @@
 Subscribes image -> ResNet -> publishes:
   /r2/detection/raw       - raw top-1 classification
   /r2/detection/processed - confidence-filtered classification
-  /r2/detection/viz       - image with classification text
+  /r2/detection/viz       - optional image with classification text
 Provides:
   /r2/detection/get_type  - majority vote over the next n processed results
 """
@@ -148,6 +148,7 @@ def main(args: list[str] | None = None) -> None:
             self.declare_parameter("color_topic", "/r2/front_camera/image_raw")
             self.declare_parameter("conf", 0.65)
             self.declare_parameter("viz_topic", "/r2/detection/viz")
+            self.declare_parameter("visualization_enabled", False)
             self.declare_parameter(
                 "vote_service_name", "/r2/detection/get_type"
             )
@@ -194,6 +195,9 @@ def main(args: list[str] | None = None) -> None:
             self._model_path = model_path
             self._color_topic = str(self.get_parameter("color_topic").value)
             self._viz_topic = str(self.get_parameter("viz_topic").value)
+            self._visualization_enabled = bool(
+                self.get_parameter("visualization_enabled").value
+            )
             self._conf = float(self.get_parameter("conf").value)
             if not math.isfinite(self._conf) or not 0.0 <= self._conf <= 1.0:
                 raise ValueError("conf must be finite and in [0, 1]")
@@ -247,12 +251,25 @@ def main(args: list[str] | None = None) -> None:
             return values
 
         def _load_model(self) -> None:
-            with torch.serialization.safe_globals([PosixPath]):
+            safe_globals = getattr(
+                torch.serialization, "safe_globals", None
+            )
+            if safe_globals is None:
+                # Jetson PyTorch releases may only provide the persistent
+                # allowlist API, not the newer safe_globals context manager.
+                torch.serialization.add_safe_globals([PosixPath])
                 checkpoint = torch.load(
                     self._model_path,
                     map_location="cpu",
                     weights_only=True,
                 )
+            else:
+                with safe_globals([PosixPath]):
+                    checkpoint = torch.load(
+                        self._model_path,
+                        map_location="cpu",
+                        weights_only=True,
+                    )
             if not isinstance(checkpoint, dict):
                 raise ValueError("ResNet checkpoint must contain a dictionary")
             if checkpoint.get("arch") != "resnet18":
@@ -583,27 +600,28 @@ def main(args: list[str] | None = None) -> None:
             self._pub_processed.publish(processed_msg)
             self._record_vote_sample(processed_msg.class_name)
 
-            viz = image.copy()
-            passed_threshold = confidence >= self._conf
-            color = (0, 255, 0) if passed_threshold else (0, 0, 255)
-            cv2.putText(
-                viz,
-                f"{class_name} {confidence:.2f}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                color,
-                2,
-            )
-            viz_msg = Image()
-            viz_msg.header = msg.header
-            viz_msg.height = viz.shape[0]
-            viz_msg.width = viz.shape[1]
-            viz_msg.encoding = "bgr8"
-            viz_msg.is_bigendian = 0
-            viz_msg.step = viz.shape[1] * 3
-            viz_msg.data = viz.tobytes()
-            self._pub_viz.publish(viz_msg)
+            if self._visualization_enabled:
+                viz = image.copy()
+                passed_threshold = confidence >= self._conf
+                color = (0, 255, 0) if passed_threshold else (0, 0, 255)
+                cv2.putText(
+                    viz,
+                    f"{class_name} {confidence:.2f}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    color,
+                    2,
+                )
+                viz_msg = Image()
+                viz_msg.header = msg.header
+                viz_msg.height = viz.shape[0]
+                viz_msg.width = viz.shape[1]
+                viz_msg.encoding = "bgr8"
+                viz_msg.is_bigendian = 0
+                viz_msg.step = viz.shape[1] * 3
+                viz_msg.data = viz.tobytes()
+                self._pub_viz.publish(viz_msg)
 
         # ---- majority-vote service ----
 

@@ -79,6 +79,16 @@ def generate_launch_description():
         'config',
         'kfs_detect.yaml',
     )
+    kfs_roi_config = os.path.join(
+        detect_pkg,
+        'config',
+        'kfs_roi.yaml',
+    )
+    led_detect_config = os.path.join(
+        detect_pkg,
+        'config',
+        'led_detect.yaml',
+    )
 
     stage_two_control = Node(
         package='robot_r2_control',
@@ -136,6 +146,14 @@ def generate_launch_description():
         output='screen',
     )
 
+    kfs_roi = Node(
+        package='robot_r2_detect',
+        executable='kfs_roi',
+        name='kfs_roi',
+        output='screen',
+        parameters=[kfs_roi_config],
+    )
+
     kfs_lift = Node(
         package='robot_r2_controller',
         executable='kfs_lift',
@@ -172,14 +190,20 @@ def generate_launch_description():
         parameters=[
             kfs_detect_config,
             {
-                'color_topic': '/r2/front_camera/image_raw',
-                'conf': 0.75,
                 'simulation_state_detection': ParameterValue(
                     LaunchConfiguration('simulation_state_detection'),
                     value_type=bool,
                 ),
             }
         ],
+    )
+
+    led_detect = Node(
+        package='robot_r2_detect',
+        executable='led_detect',
+        name='led_detect',
+        output='screen',
+        parameters=[led_detect_config],
     )
 
     return LaunchDescription([
@@ -198,10 +222,12 @@ def generate_launch_description():
         step_traverse,
         chassis_pose_servo,
         chassis_lift,
+        kfs_roi,
         kfs_alignment,
         kfs_lift,
         kfs_gripper_rotate,
         kfs_gripper_tip_rotate,
         kfs_gripper_grip,
         kfs_detect,
+        led_detect,
     ])

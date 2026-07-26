@@ -1,6 +1,6 @@
-# Single raw YOLO detection box.
-string  class_name    # original YOLO class label, e.g. "red"
-int32   class_id      # YOLO class id
+# Single raw KFS detection box.
+string  class_name    # KFS class: "r2", "fake", or "r1"
+int32   class_id      # stable KFS class id
 float32 confidence    # confidence score [0, 1]
 int32   x1            # top-left x (pixel)
 int32   y1            # top-left y (pixel)

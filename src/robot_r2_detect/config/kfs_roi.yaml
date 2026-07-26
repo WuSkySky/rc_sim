@@ -1,0 +1,15 @@
+kfs_roi:
+  ros__parameters:
+    color_topic: /r2/front_camera/image_raw
+    roi_topic: /r2/kfs/roi
+    visualization_topic: /r2/alignment/viz
+    target_processing_rate: 30.0
+    visualization_enabled: false
+
+    blue_hsv_lower: [90, 80, 60]
+    blue_hsv_upper: [130, 255, 255]
+    red_low_hsv_lower: [0, 80, 60]
+    red_low_hsv_upper: [10, 255, 255]
+    red_high_hsv_lower: [170, 80, 60]
+    red_high_hsv_upper: [179, 255, 255]
+    column_threshold_ratio: 0.8
