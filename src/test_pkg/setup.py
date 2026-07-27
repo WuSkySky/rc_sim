@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer='skysky',
     maintainer_email='skysky@example.com',
-    description='Standalone executable tests for Robot R2 control services.',
+    description='Robot R2 control tests and C++ camera benchmarks.',
     license='TODO: License declaration',
     entry_points={
         'console_scripts': [

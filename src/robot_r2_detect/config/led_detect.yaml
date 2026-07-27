@@ -1,13 +1,13 @@
 led_detect:
   ros__parameters:
-    color_topic: /r2/front_camera/image_raw
+    color_topic: /image_raw
     service_name: /r2/led_detection/detect
     visualization_topic: /r2/led_detection/viz
-    visualization_enabled: false
+    visualization_enabled: true
 
     # When false, images are processed only while the service is active.
     # This parameter can be changed at runtime.
-    continuous_detection: false
+    continuous_detection: true
 
     tag_family: tag36h11
     # Set to -1 to accept the detected tag with the highest decision margin.

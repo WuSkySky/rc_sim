@@ -7,6 +7,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/CameraFrame.msg"
   "msg/LiftCommand.msg"
   "msg/LiftFeedback.msg"
   "msg/KfsRawBox.msg"
@@ -30,6 +31,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/TraverseStep.srv"
   "srv/AlignToKFS.srv"
   DEPENDENCIES sensor_msgs std_msgs
+)
+
+install(
+  DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_export_dependencies(rosidl_default_runtime)

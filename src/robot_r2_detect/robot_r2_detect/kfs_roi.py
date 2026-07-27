@@ -21,18 +21,14 @@ from robot_r2_detect.kfs_roi_detection import (
 
 
 def image_message_to_bgr(msg: Image) -> np.ndarray:
-    """Convert a packed rgb8/bgr8 ROS image into contiguous BGR."""
+    """Convert a ROS image message into contiguous BGR.
+
+    Supported encodings: rgb8, bgr8, yuv422_yuy2.
+    """
     encoding = msg.encoding.lower()
-    if encoding not in ("rgb8", "bgr8"):
-        raise ValueError(f"unsupported image encoding: {msg.encoding}")
     if msg.height <= 0 or msg.width <= 0:
         raise ValueError("image height and width must be positive")
 
-    row_size = int(msg.width) * 3
-    if msg.step < row_size:
-        raise ValueError(
-            f"image step {msg.step} is smaller than row size {row_size}"
-        )
     expected_size = int(msg.height) * int(msg.step)
     data = np.frombuffer(msg.data, dtype=np.uint8)
     if data.size != expected_size:
@@ -40,15 +36,35 @@ def image_message_to_bgr(msg: Image) -> np.ndarray:
             f"image data has {data.size} bytes, expected {expected_size}"
         )
 
-    rows = data.reshape(int(msg.height), int(msg.step))
-    image = rows[:, :row_size].reshape(
-        int(msg.height),
-        int(msg.width),
-        3,
-    )
-    if encoding == "rgb8":
-        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    return np.ascontiguousarray(image)
+    if encoding in ("rgb8", "bgr8"):
+        row_size = int(msg.width) * 3
+        if msg.step < row_size:
+            raise ValueError(
+                f"image step {msg.step} is smaller than row size {row_size}"
+            )
+        rows = data.reshape(int(msg.height), int(msg.step))
+        image = rows[:, :row_size].reshape(
+            int(msg.height),
+            int(msg.width),
+            3,
+        )
+        if encoding == "rgb8":
+            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        return np.ascontiguousarray(image)
+
+    if encoding == "yuv422_yuy2":
+        row_size = int(msg.width) * 2
+        if msg.step < row_size:
+            raise ValueError(
+                f"image step {msg.step} is smaller than row size {row_size}"
+            )
+        rows = data.reshape(int(msg.height), int(msg.step))
+        yuv = rows[:, :row_size].reshape(
+            int(msg.height), int(msg.width), 2
+        )
+        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_YUYV)
+
+    raise ValueError(f"unsupported image encoding: {msg.encoding}")
 
 
 def bgr_to_image_message(image: np.ndarray, header) -> Image:

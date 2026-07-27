@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <publisher profile_name="camera data sharing publisher"
+             is_default_profile="true">
+    <qos>
+      <publishMode>
+        <kind>SYNCHRONOUS</kind>
+      </publishMode>
+      <data_sharing>
+        <kind>AUTOMATIC</kind>
+      </data_sharing>
+    </qos>
+    <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+  </publisher>
+
+  <subscriber profile_name="camera data sharing subscriber"
+              is_default_profile="true">
+    <qos>
+      <data_sharing>
+        <kind>AUTOMATIC</kind>
+      </data_sharing>
+    </qos>
+    <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+  </subscriber>
+
+</profiles>

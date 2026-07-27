@@ -31,18 +31,14 @@ SERVICE_TIMEOUT_SEC = 60.0
 
 
 def image_message_to_bgr(message: Image) -> np.ndarray:
-    """Convert a packed rgb8/bgr8 ROS image into contiguous BGR data."""
+    """Convert a ROS image message into contiguous BGR data.
+
+    Supported encodings: rgb8, bgr8, yuv422_yuy2.
+    """
     encoding = message.encoding.lower()
-    if encoding not in ("rgb8", "bgr8"):
-        raise ValueError(f"unsupported image encoding: {message.encoding}")
     if message.height <= 0 or message.width <= 0:
         raise ValueError("image height and width must be positive")
 
-    row_size = int(message.width) * 3
-    if message.step < row_size:
-        raise ValueError(
-            f"image step {message.step} is smaller than row size {row_size}"
-        )
     expected_size = int(message.height) * int(message.step)
     data = np.frombuffer(message.data, dtype=np.uint8)
     if data.size != expected_size:
@@ -50,13 +46,33 @@ def image_message_to_bgr(message: Image) -> np.ndarray:
             f"image data has {data.size} bytes, expected {expected_size}"
         )
 
-    rows = data.reshape(int(message.height), int(message.step))
-    image = rows[:, :row_size].reshape(
-        int(message.height), int(message.width), 3
-    )
-    if encoding == "rgb8":
-        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-    return np.ascontiguousarray(image)
+    if encoding in ("rgb8", "bgr8"):
+        row_size = int(message.width) * 3
+        if message.step < row_size:
+            raise ValueError(
+                f"image step {message.step} is smaller than row size {row_size}"
+            )
+        rows = data.reshape(int(message.height), int(message.step))
+        image = rows[:, :row_size].reshape(
+            int(message.height), int(message.width), 3
+        )
+        if encoding == "rgb8":
+            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        return np.ascontiguousarray(image)
+
+    if encoding == "yuv422_yuy2":
+        row_size = int(message.width) * 2
+        if message.step < row_size:
+            raise ValueError(
+                f"image step {message.step} is smaller than row size {row_size}"
+            )
+        rows = data.reshape(int(message.height), int(message.step))
+        yuv = rows[:, :row_size].reshape(
+            int(message.height), int(message.width), 2
+        )
+        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_YUYV)
+
+    raise ValueError(f"unsupported image encoding: {message.encoding}")
 
 
 class LedDetectNode(Node):

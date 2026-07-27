@@ -1,23 +1,23 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>test_pkg</name>
+  <name>camera_driver</name>
   <version>0.0.0</version>
-  <description>Robot R2 control tests and C++ camera benchmarks.</description>
+  <description>Jetson CSI camera driver for Robot R2.</description>
   <maintainer email="skysky@example.com">skysky</maintainer>
   <license>TODO: License declaration</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
-  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
-  <depend>geometry_msgs</depend>
+  <build_depend>libgstreamer-plugins-base1.0-dev</build_depend>
+  <build_depend>libgstreamer1.0-dev</build_depend>
+  <build_depend>pkg-config</build_depend>
+
   <depend>rclcpp</depend>
-  <depend>rclpy</depend>
   <depend>robot_r2_interfaces</depend>
   <depend>sensor_msgs</depend>
 
-  <build_depend>libopencv-dev</build_depend>
-  <exec_depend>libopencv-dev</exec_depend>
+  <exec_depend>gstreamer1.0-plugins-base</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
