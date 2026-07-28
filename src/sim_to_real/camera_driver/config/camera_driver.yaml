@@ -7,6 +7,7 @@
 
     # NVIDIA nvvidconv flip method, 0 means no rotation or mirroring.
     flip_method: 0
+    visualization_enabled: false
 
 # Stable aliases bind each node to one physical Jetson MIPI connector.
 left_camera_driver:

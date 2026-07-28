@@ -3,7 +3,6 @@ project(robot_r2_interfaces)
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
-find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -30,7 +29,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StageTwoPointTwo.srv"
   "srv/TraverseStep.srv"
   "srv/AlignToKFS.srv"
-  DEPENDENCIES sensor_msgs std_msgs
+  DEPENDENCIES std_msgs
 )
 
 install(

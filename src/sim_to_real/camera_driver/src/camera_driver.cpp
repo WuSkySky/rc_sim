@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -17,8 +18,10 @@
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
 #include "robot_r2_interfaces/msg/camera_frame.hpp"
 #include "sensor_msgs/msg/camera_info.hpp"
+#include "sensor_msgs/msg/image.hpp"
 
 namespace
 {
@@ -55,6 +58,8 @@ public:
     flip_method_ = declare_parameter<int64_t>("flip_method", 0);
     frame_id_ = declare_parameter<std::string>(
       "frame_id", "camera_optical_frame");
+    visualization_enabled_.store(
+      declare_parameter<bool>("visualization_enabled", false));
 
     const auto mode = validate_mode(mode_values);
     width_ = static_cast<int>(mode[0]);
@@ -91,9 +96,20 @@ public:
     image_message_.is_bigendian = 0U;
     image_message_.layout_version = CameraFrame::LAYOUT_VERSION;
     image_message_.data.reserve(CameraFrame::DATA_CAPACITY);
+    standard_image_publisher_ =
+      create_publisher<sensor_msgs::msg::Image>(
+      "/r2/camera/image_raw/debug", image_qos);
+    standard_image_message_.header.frame_id = frame_id_;
+    standard_image_message_.encoding = "bgr8";
+    standard_image_message_.is_bigendian = 0U;
+    standard_image_message_.data.reserve(CameraFrame::DATA_CAPACITY);
     camera_info_publisher_ =
       create_publisher<sensor_msgs::msg::CameraInfo>(
       "/r2/camera/camera_info", rclcpp::QoS(10));
+    parameter_callback_handle_ = add_on_set_parameters_callback(
+      std::bind(
+        &CameraDriver::on_parameters_changed, this,
+        std::placeholders::_1));
 
     start_pipeline();
     bus_timer_ = create_wall_timer(
@@ -133,6 +149,30 @@ public:
   }
 
 private:
+  rcl_interfaces::msg::SetParametersResult on_parameters_changed(
+    const std::vector<rclcpp::Parameter> & parameters)
+  {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    for (const auto & parameter : parameters) {
+      if (parameter.get_name() != "visualization_enabled") {
+        continue;
+      }
+      if (parameter.get_type() !=
+        rclcpp::ParameterType::PARAMETER_BOOL)
+      {
+        result.successful = false;
+        result.reason = "visualization_enabled must be a boolean";
+        return result;
+      }
+      visualization_enabled_.store(parameter.as_bool());
+      RCLCPP_INFO(
+        get_logger(), "Camera debug image publication %s",
+        parameter.as_bool() ? "enabled" : "disabled");
+    }
+    return result;
+  }
+
   static CameraMode validate_mode(const std::vector<int64_t> & values)
   {
     if (values.size() != 3) {
@@ -362,6 +402,16 @@ private:
       sample_released = true;
 
       image_publisher_->publish(image);
+      if (visualization_enabled_.load()) {
+        auto & standard = standard_image_message_;
+        standard.header.stamp = stamp;
+        standard.height = image.height;
+        standard.width = image.width;
+        standard.step = image.step;
+        standard.data.resize(data_size);
+        std::memcpy(standard.data.data(), &image.data[0], data_size);
+        standard_image_publisher_->publish(standard);
+      }
       ++sequence_;
     } catch (const std::exception & error) {
       if (!sample_released) {
@@ -443,9 +493,15 @@ private:
 
   rclcpp::Publisher<CameraFrame>::SharedPtr image_publisher_;
   CameraFrame image_message_;
+  std::atomic_bool visualization_enabled_{false};
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr
+  standard_image_publisher_;
+  sensor_msgs::msg::Image standard_image_message_;
   rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr
   camera_info_publisher_;
   rclcpp::TimerBase::SharedPtr bus_timer_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
+  parameter_callback_handle_;
 
   GstElement * pipeline_{nullptr};
   GstElement * sink_{nullptr};

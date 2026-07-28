@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -12,6 +12,12 @@ def generate_launch_description():
     control_pkg = get_package_share_directory('robot_r2_control')
     controller_pkg = get_package_share_directory('robot_r2_controller')
     detect_pkg = get_package_share_directory('robot_r2_detect')
+    interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
+    fastdds_profile = os.path.join(
+        interfaces_pkg,
+        'config',
+        'fastdds_camera.xml',
+    )
 
     stage_two_config = os.path.join(
         control_pkg,
@@ -207,6 +213,14 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        SetEnvironmentVariable(
+            'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
+        SetEnvironmentVariable(
+            'RMW_FASTRTPS_USE_QOS_FROM_XML', '1'),
+        SetEnvironmentVariable(
+            'FASTDDS_DEFAULT_PROFILES_FILE', fastdds_profile),
+        SetEnvironmentVariable(
+            'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         DeclareLaunchArgument(
             'simulation_state_detection',
             default_value='true',

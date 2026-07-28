@@ -15,6 +15,12 @@ from rclpy.callback_groups import (
 )
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
 from robot_r2_interfaces.msg import KfsRoiDetection
 from robot_r2_interfaces.srv import AlignToKFS
 
@@ -36,12 +42,18 @@ class KfsAlignmentController(Node):
         self._latest_offset_x: int | None = None
         self._latest_frame_received_at = 0.0
         self._alignment_active = False
+        image_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+        )
 
         self._subscription = self.create_subscription(
             KfsRoiDetection,
             self._roi_topic,
             self._on_roi,
-            1,
+            image_qos,
             callback_group=self._feedback_callback_group,
         )
         self._pub_cmd = self.create_publisher(

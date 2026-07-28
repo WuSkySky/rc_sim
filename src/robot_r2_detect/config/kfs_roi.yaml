@@ -2,7 +2,8 @@ kfs_roi:
   ros__parameters:
     color_topic: /r2/front_camera/image_raw
     roi_topic: /r2/kfs/roi
-    visualization_topic: /r2/alignment/viz
+    visualization_topic: /r2/alignment/debug
+    standard_image_topic: /r2/kfs/roi/debug
     target_processing_rate: 30.0
     visualization_enabled: false
 

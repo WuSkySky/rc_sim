@@ -4,7 +4,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -12,6 +12,12 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     package_share = get_package_share_directory("robot_r2_detect")
+    interfaces_share = get_package_share_directory("robot_r2_interfaces")
+    fastdds_profile = os.path.join(
+        interfaces_share,
+        "config",
+        "fastdds_camera.xml",
+    )
     detect_config = os.path.join(
         package_share,
         "config",
@@ -25,6 +31,18 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            SetEnvironmentVariable(
+                "RMW_IMPLEMENTATION", "rmw_fastrtps_cpp"
+            ),
+            SetEnvironmentVariable(
+                "RMW_FASTRTPS_USE_QOS_FROM_XML", "1"
+            ),
+            SetEnvironmentVariable(
+                "FASTDDS_DEFAULT_PROFILES_FILE", fastdds_profile
+            ),
+            SetEnvironmentVariable(
+                "FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile
+            ),
             DeclareLaunchArgument(
                 "color_topic", default_value="/r2/front_camera/image_raw"
             ),

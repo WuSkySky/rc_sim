@@ -21,6 +21,7 @@ def main(args: list[str] | None = None) -> None:
     import numpy as np
     import rclpy
     from geometry_msgs.msg import PoseStamped
+    from rcl_interfaces.msg import SetParametersResult
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from rclpy.node import Node
@@ -34,40 +35,15 @@ def main(args: list[str] | None = None) -> None:
     from sensor_msgs.msg import Image
     from std_msgs.msg import String
 
+    from robot_r2_detect.camera_frame import (
+        camera_frame_header,
+        camera_frame_to_bgr,
+        camera_qos,
+    )
     from robot_r2_detect.kfs_chamfer_matcher import (
         KfsChamferMatcher,
         KfsMatchResult,
     )
-
-    def image_message_to_bgr(msg: Image) -> np.ndarray:
-        encoding = msg.encoding.lower()
-        if encoding not in ("rgb8", "bgr8"):
-            raise ValueError(
-                f"unsupported image encoding: {msg.encoding}"
-            )
-        if msg.height <= 0 or msg.width <= 0:
-            raise ValueError("ROI image dimensions must be positive")
-        row_size = int(msg.width) * 3
-        if msg.step < row_size:
-            raise ValueError(
-                f"ROI step {msg.step} is smaller than {row_size}"
-            )
-        expected_size = int(msg.height) * int(msg.step)
-        data = np.frombuffer(msg.data, dtype=np.uint8)
-        if data.size != expected_size:
-            raise ValueError(
-                f"ROI data has {data.size} bytes, expected "
-                f"{expected_size}"
-            )
-        rows = data.reshape(int(msg.height), int(msg.step))
-        image = rows[:, :row_size].reshape(
-            int(msg.height),
-            int(msg.width),
-            3,
-        )
-        if encoding == "rgb8":
-            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        return np.ascontiguousarray(image)
 
     class KfsDetectOpenCvNode(Node):
         """Classify KFS ROI messages while preserving the public API."""
@@ -90,6 +66,7 @@ def main(args: list[str] | None = None) -> None:
 
             self._declare_parameters()
             self._load_parameters()
+            image_qos = camera_qos()
             self._matcher = KfsChamferMatcher(
                 self._feature_path,
                 self._max_chamfer_distance,
@@ -101,7 +78,7 @@ def main(args: list[str] | None = None) -> None:
                 KfsRoiDetection,
                 self._roi_topic,
                 self._on_roi,
-                1,
+                image_qos,
                 callback_group=self._roi_callback_group,
             )
             self._status_subscription = self.create_subscription(
@@ -131,13 +108,16 @@ def main(args: list[str] | None = None) -> None:
             self._visualization_publisher = self.create_publisher(
                 Image,
                 self._visualization_topic,
-                10,
+                image_qos,
             )
             self._service = self.create_service(
                 GetKfsType,
                 self._vote_service_name,
                 self._handle_get_kfs_type,
                 callback_group=self._service_callback_group,
+            )
+            self.add_on_set_parameters_callback(
+                self._on_parameters_changed
             )
             self.get_logger().info(
                 "Loaded OpenCV KFS Chamfer features from "
@@ -157,7 +137,7 @@ def main(args: list[str] | None = None) -> None:
             self.declare_parameter("min_class_margin", 0.003)
             self.declare_parameter(
                 "visualization_topic",
-                "/r2/detection/viz",
+                "/r2/detection/debug",
             )
             self.declare_parameter("visualization_enabled", False)
             self.declare_parameter(
@@ -261,6 +241,26 @@ def main(args: list[str] | None = None) -> None:
             self._cell_snap_tolerance = self._positive_parameter(
                 "cell_snap_tolerance"
             )
+
+        def _on_parameters_changed(
+            self, parameters
+        ) -> SetParametersResult:
+            for parameter in parameters:
+                if parameter.name != "visualization_enabled":
+                    continue
+                if not isinstance(parameter.value, bool):
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            "visualization_enabled must be a boolean"
+                        ),
+                    )
+                self._visualization_enabled = parameter.value
+                state = "enabled" if parameter.value else "disabled"
+                self.get_logger().info(
+                    f"KFS detection visualization {state}"
+                )
+            return SetParametersResult(successful=True)
 
         def _positive_parameter(self, name: str) -> float:
             value = float(self.get_parameter(name).value)
@@ -494,7 +494,7 @@ def main(args: list[str] | None = None) -> None:
                 return
             try:
                 self._validate_roi_geometry(msg)
-                roi = image_message_to_bgr(msg.roi)
+                roi = camera_frame_to_bgr(msg.roi)
                 result = self._matcher.match(roi)
             except (cv2.error, KeyError, TypeError, ValueError) as exc:
                 self.get_logger().error(
@@ -504,7 +504,7 @@ def main(args: list[str] | None = None) -> None:
                 return
 
             raw_message = KfsRawDetections()
-            raw_message.header = msg.header
+            raw_message.header = camera_frame_header(msg.roi)
             raw_message.boxes = [
                 KfsRawBox(
                     class_name=result.class_name,
@@ -533,7 +533,11 @@ def main(args: list[str] | None = None) -> None:
                 self._record_vote_sample(result.class_name)
             self._processed_publisher.publish(processed)
             if self._visualization_enabled:
-                self._publish_visualization(msg.header, roi, result)
+                self._publish_visualization(
+                    camera_frame_header(msg.roi),
+                    roi,
+                    result,
+                )
 
         @staticmethod
         def _validate_roi_geometry(msg: KfsRoiDetection) -> None:
@@ -561,14 +565,14 @@ def main(args: list[str] | None = None) -> None:
             msg: KfsRoiDetection,
         ) -> KfsProcessedDetection:
             processed = KfsProcessedDetection()
-            processed.header = msg.header
+            processed.header = camera_frame_header(msg.roi)
             processed.image_width = msg.image_width
             processed.image_height = msg.image_height
             return processed
 
         def _publish_empty(self, msg: KfsRoiDetection) -> None:
             raw = KfsRawDetections()
-            raw.header = msg.header
+            raw.header = camera_frame_header(msg.roi)
             raw.boxes = []
             self._raw_publisher.publish(raw)
             self._processed_publisher.publish(

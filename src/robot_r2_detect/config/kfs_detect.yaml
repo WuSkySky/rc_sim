@@ -2,7 +2,7 @@ kfs_detect:
   ros__parameters:
     feature_path: kfs_shape_templates.npz
     roi_topic: /r2/kfs/roi
-    visualization_topic: /r2/detection/viz
+    visualization_topic: /r2/detection/debug
     visualization_enabled: false
     conf: 0.5
     max_chamfer_distance: 0.015

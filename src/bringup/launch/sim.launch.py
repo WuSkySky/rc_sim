@@ -8,6 +8,7 @@ from launch import LaunchDescription
 from launch.actions import (
     AppendEnvironmentVariable,
     IncludeLaunchDescription,
+    SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
@@ -17,7 +18,13 @@ def generate_launch_description():
     field_pkg = get_package_share_directory('rc2026_field')
     robot_pkg = get_package_share_directory('robot_r2_description')
     robot_prefix = get_package_prefix('robot_r2_description')
+    interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
     serial_pkg = get_package_share_directory('serial_pkg')
+    fastdds_profile = os.path.join(
+        interfaces_pkg,
+        'config',
+        'fastdds_camera.xml',
+    )
 
     field_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -80,6 +87,14 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        SetEnvironmentVariable(
+            'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
+        SetEnvironmentVariable(
+            'RMW_FASTRTPS_USE_QOS_FROM_XML', '1'),
+        SetEnvironmentVariable(
+            'FASTDDS_DEFAULT_PROFILES_FILE', fastdds_profile),
+        SetEnvironmentVariable(
+            'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         AppendEnvironmentVariable(
             'GAZEBO_PLUGIN_PATH',
             os.path.join(robot_prefix, 'lib'),

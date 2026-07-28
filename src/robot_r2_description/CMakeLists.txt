@@ -6,8 +6,18 @@ find_package(gazebo_dev REQUIRED)
 find_package(gazebo_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(robot_r2_interfaces REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+
+find_library(GAZEBO_CAMERA_PLUGIN_LIBRARY
+  NAMES CameraPlugin
+  HINTS ${GAZEBO_LIBRARY_DIRS}
+)
+if(NOT GAZEBO_CAMERA_PLUGIN_LIBRARY)
+  message(FATAL_ERROR "Gazebo CameraPlugin library was not found")
+endif()
 
 add_library(robot_r2_planar_move SHARED
   src/robot_r2_planar_move.cpp
@@ -37,6 +47,10 @@ add_library(robot_r2_tip_rotate SHARED
   src/robot_r2_tip_rotate_controller.cpp
 )
 
+add_library(robot_r2_camera SHARED
+  src/robot_r2_camera.cpp
+)
+
 target_include_directories(robot_r2_planar_move PUBLIC
   ${GAZEBO_INCLUDE_DIRS}
 )
@@ -62,6 +76,10 @@ target_include_directories(robot_r2_gripper PUBLIC
 )
 
 target_include_directories(robot_r2_tip_rotate PUBLIC
+  ${GAZEBO_INCLUDE_DIRS}
+)
+
+target_include_directories(robot_r2_camera PUBLIC
   ${GAZEBO_INCLUDE_DIRS}
 )
 
@@ -114,6 +132,15 @@ ament_target_dependencies(robot_r2_tip_rotate
   std_msgs
 )
 
+ament_target_dependencies(robot_r2_camera
+  gazebo_dev
+  gazebo_ros
+  rclcpp
+  rcl_interfaces
+  robot_r2_interfaces
+  sensor_msgs
+)
+
 target_link_libraries(robot_r2_planar_move
   ${GAZEBO_LIBRARIES}
 )
@@ -142,6 +169,11 @@ target_link_libraries(robot_r2_tip_rotate
   ${GAZEBO_LIBRARIES}
 )
 
+target_link_libraries(robot_r2_camera
+  ${GAZEBO_CAMERA_PLUGIN_LIBRARY}
+  ${GAZEBO_LIBRARIES}
+)
+
 install(
   DIRECTORY urdf
   DESTINATION share/${PROJECT_NAME}
@@ -150,7 +182,7 @@ install(
 install(
   TARGETS robot_r2_planar_move robot_r2_localizer robot_r2_lift_controller
     robot_r2_kfs_lift robot_r2_bar_rotate robot_r2_gripper
-    robot_r2_tip_rotate
+    robot_r2_tip_rotate robot_r2_camera
   LIBRARY DESTINATION lib
 )
 

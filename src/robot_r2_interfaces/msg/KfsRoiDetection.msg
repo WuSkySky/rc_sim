@@ -1,7 +1,8 @@
 # KFS region of interest and alignment metadata from one camera frame.
-std_msgs/Header header
+# The nested frame is the sole source of sequence, timestamp, and frame_id.
+# When valid is false, roi keeps that identity but has zero dimensions/data.
 bool valid
-sensor_msgs/Image roi
+robot_r2_interfaces/CameraFrame roi
 
 int32 image_width
 int32 image_height

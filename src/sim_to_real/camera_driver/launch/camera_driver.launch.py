@@ -27,6 +27,10 @@ def generate_launch_description():
         parameters=[config],
         remappings=[
             ('/r2/camera/image_raw', '/r2/left_camera/image_raw'),
+            (
+                '/r2/camera/image_raw/debug',
+                '/r2/left_camera/image_raw/debug',
+            ),
             ('/r2/camera/camera_info', '/r2/left_camera/camera_info'),
         ],
         output='screen',
@@ -38,6 +42,10 @@ def generate_launch_description():
         parameters=[config],
         remappings=[
             ('/r2/camera/image_raw', '/r2/right_camera/image_raw'),
+            (
+                '/r2/camera/image_raw/debug',
+                '/r2/right_camera/image_raw/debug',
+            ),
             ('/r2/camera/camera_info', '/r2/right_camera/camera_info'),
         ],
         output='screen',

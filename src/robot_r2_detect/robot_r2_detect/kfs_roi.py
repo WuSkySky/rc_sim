@@ -11,86 +11,21 @@ import numpy as np
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
-from robot_r2_interfaces.msg import KfsRoiDetection
+from robot_r2_interfaces.msg import CameraFrame, KfsRoiDetection
 from sensor_msgs.msg import Image
 
+from robot_r2_detect.camera_frame import (
+    bgr_to_image_message,
+    camera_frame_header,
+    camera_frame_to_bgr,
+    camera_qos,
+    clear_camera_frame,
+    fill_bgr_camera_frame,
+)
 from robot_r2_detect.kfs_roi_detection import (
     KfsRoiResult,
     extract_kfs_roi,
 )
-
-
-def image_message_to_bgr(msg: Image) -> np.ndarray:
-    """Convert a ROS image message into contiguous BGR.
-
-    Supported encodings: rgb8, bgr8, yuv422_yuy2.
-    """
-    encoding = msg.encoding.lower()
-    if msg.height <= 0 or msg.width <= 0:
-        raise ValueError("image height and width must be positive")
-
-    expected_size = int(msg.height) * int(msg.step)
-    data = np.frombuffer(msg.data, dtype=np.uint8)
-    if data.size != expected_size:
-        raise ValueError(
-            f"image data has {data.size} bytes, expected {expected_size}"
-        )
-
-    if encoding in ("rgb8", "bgr8"):
-        row_size = int(msg.width) * 3
-        if msg.step < row_size:
-            raise ValueError(
-                f"image step {msg.step} is smaller than row size {row_size}"
-            )
-        rows = data.reshape(int(msg.height), int(msg.step))
-        image = rows[:, :row_size].reshape(
-            int(msg.height),
-            int(msg.width),
-            3,
-        )
-        if encoding == "rgb8":
-            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        return np.ascontiguousarray(image)
-
-    if encoding == "yuv422_yuy2":
-        row_size = int(msg.width) * 2
-        if msg.step < row_size:
-            raise ValueError(
-                f"image step {msg.step} is smaller than row size {row_size}"
-            )
-        rows = data.reshape(int(msg.height), int(msg.step))
-        yuv = rows[:, :row_size].reshape(
-            int(msg.height), int(msg.width), 2
-        )
-        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_YUYV)
-
-    raise ValueError(f"unsupported image encoding: {msg.encoding}")
-
-
-def bgr_to_image_message(image: np.ndarray, header) -> Image:
-    """Convert a BGR array into a ROS image with the supplied header."""
-    image = np.ascontiguousarray(image, dtype=np.uint8)
-    message = Image()
-    message.header = header
-    message.height = image.shape[0]
-    message.width = image.shape[1]
-    message.encoding = "bgr8"
-    message.is_bigendian = 0
-    message.step = image.shape[1] * 3
-    message.data = image.tobytes()
-    return message
-
-
-def empty_image_message(header) -> Image:
-    message = Image()
-    message.header = header
-    message.height = 0
-    message.width = 0
-    message.encoding = "bgr8"
-    message.is_bigendian = 0
-    message.step = 0
-    message.data = b""
-    return message
 
 
 class KfsRoiNode(Node):
@@ -100,22 +35,29 @@ class KfsRoiNode(Node):
         super().__init__("kfs_roi")
         self._declare_parameters()
         self._load_parameters()
+        image_qos = camera_qos()
+        self._roi_message = KfsRoiDetection()
 
         self._publisher = self.create_publisher(
             KfsRoiDetection,
             self._roi_topic,
-            1,
+            image_qos,
         )
         self._visualization_publisher = self.create_publisher(
             Image,
             self._visualization_topic,
-            1,
+            image_qos,
+        )
+        self._standard_image_publisher = self.create_publisher(
+            Image,
+            self._standard_image_topic,
+            image_qos,
         )
         self._subscription = self.create_subscription(
-            Image,
+            CameraFrame,
             self._color_topic,
             self._on_image,
-            1,
+            image_qos,
         )
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
@@ -127,7 +69,11 @@ class KfsRoiNode(Node):
         self.declare_parameter("roi_topic", "/r2/kfs/roi")
         self.declare_parameter(
             "visualization_topic",
-            "/r2/alignment/viz",
+            "/r2/alignment/debug",
+        )
+        self.declare_parameter(
+            "standard_image_topic",
+            "/r2/kfs/roi/debug",
         )
         self.declare_parameter("target_processing_rate", 30.0)
         self.declare_parameter("visualization_enabled", False)
@@ -147,6 +93,11 @@ class KfsRoiNode(Node):
         self._visualization_topic = str(
             self.get_parameter("visualization_topic").value
         )
+        self._standard_image_topic = str(
+            self.get_parameter("standard_image_topic").value
+        )
+        if not self._standard_image_topic:
+            raise ValueError("standard_image_topic must not be empty")
         target_rate = float(
             self.get_parameter("target_processing_rate").value
         )
@@ -242,10 +193,10 @@ class KfsRoiNode(Node):
             )
         return SetParametersResult(successful=True)
 
-    def _on_image(self, msg: Image) -> None:
+    def _on_image(self, msg: CameraFrame) -> None:
         started_at = time.monotonic()
         try:
-            image = image_message_to_bgr(msg)
+            image = camera_frame_to_bgr(msg)
             result = extract_kfs_roi(
                 image,
                 self._blue_lower,
@@ -260,15 +211,26 @@ class KfsRoiNode(Node):
             self.get_logger().error(f"Failed to extract KFS ROI: {exc}")
             return
 
-        self._publisher.publish(
-            self._make_roi_message(msg, image, result)
-        )
+        roi_message = self._make_roi_message(msg, image, result)
+        self._publisher.publish(roi_message)
         if self._visualization_enabled:
-            visualization = self._make_visualization(image, result)
-            if self._visualization_enabled:
-                self._visualization_publisher.publish(
-                    bgr_to_image_message(visualization, msg.header)
+            if result.valid and result.roi is not None:
+                standard_image = bgr_to_image_message(
+                    result.roi,
+                    camera_frame_header(msg),
                 )
+            else:
+                standard_image = Image()
+                standard_image.header = camera_frame_header(msg)
+                standard_image.encoding = "bgr8"
+            self._standard_image_publisher.publish(standard_image)
+            visualization = self._make_visualization(image, result)
+            self._visualization_publisher.publish(
+                bgr_to_image_message(
+                    visualization,
+                    camera_frame_header(msg),
+                )
+            )
 
         processing_time = time.monotonic() - started_at
         if processing_time > self._processing_deadline_sec:
@@ -279,22 +241,29 @@ class KfsRoiNode(Node):
                 f"(target {self._target_processing_rate:g} Hz)"
             )
 
-    @staticmethod
     def _make_roi_message(
-        source: Image,
+        self,
+        source: CameraFrame,
         image: np.ndarray,
         result: KfsRoiResult,
     ) -> KfsRoiDetection:
-        message = KfsRoiDetection()
-        message.header = source.header
+        message = self._roi_message
         message.valid = result.valid
         message.image_width = image.shape[1]
         message.image_height = image.shape[0]
         if not result.valid or result.roi is None:
-            message.roi = empty_image_message(source.header)
+            clear_camera_frame(message.roi, source)
+            message.x1 = 0
+            message.y1 = 0
+            message.x2 = 0
+            message.y2 = 0
+            message.center_u = 0
+            message.center_v = 0
+            message.center_offset_x = 0
+            message.center_offset_y = 0
             return message
 
-        message.roi = bgr_to_image_message(result.roi, source.header)
+        fill_bgr_camera_frame(message.roi, result.roi, source)
         message.x1 = result.x1
         message.y1 = result.y1
         message.x2 = result.x2

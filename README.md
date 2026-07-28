@@ -143,15 +143,24 @@ ros2 service call /r2/align_to_kfs \
 返回值中的 `success` 表示是否连续稳定达到容差，`final_offset_x` 是最后一次
 有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于前相机视野内。
 
-可视化默认关闭，此时节点只在对齐 Service 执行期间处理图像。可在运行时动态
-开启或关闭持续检测和可视化发布：
+可视化默认关闭。所有可能发布调试图像的节点统一使用动态参数
+`visualization_enabled`，可在运行时开启或关闭：
 
 ```bash
-ros2 param set /kfs_alignment visualization_enabled true
-ros2 param set /kfs_alignment visualization_enabled false
+ros2 param set /kfs_roi visualization_enabled true
+ros2 param set /kfs_detect visualization_enabled true
+ros2 param set /led_detect visualization_enabled true
+ros2 param set /r2/front_camera_controller visualization_enabled true
+ros2 param set /camera_frame_postprocess visualization_enabled true
+ros2 param set /left_camera_driver visualization_enabled true
+ros2 param set /right_camera_driver visualization_enabled true
 ```
 
-可视化图像发布在 `/r2/alignment/viz`（`sensor_msgs/msg/Image`）。
+将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 同时控制
+`/r2/kfs/roi/debug` 和 `/r2/alignment/debug`；检测与 LED 节点分别控制
+`/r2/detection/debug` 和 `/r2/led_detection/debug`。仿真前相机、Odin
+后处理以及左右实体相机也使用同一个动态参数控制各自的 `/debug` 图像。这些
+调试话题均使用 `sensor_msgs/msg/Image`。
 
 KFS 类型检测：
 
@@ -287,4 +296,3 @@ ros2 topic echo /r2/serial/raw_tx --field data --full-length --once
 ```bash
 ros2 topic echo /r2/serial/raw_rx --field data --full-length --once
 ```
-

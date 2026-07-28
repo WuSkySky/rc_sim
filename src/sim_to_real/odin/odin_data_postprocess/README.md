@@ -2,9 +2,19 @@
 
 Odin 里程计数据的 ROS 2 后处理节点，包括：
 
+- 将 Odin 的普通去畸变图像转换为 bounded `CameraFrame`；
 - 发布校正后的 `odom -> base_link` TF；
 - 将 `map -> base_link` 转发到 `/r2/pose_feedback`；
 - 发布可通过服务重设的 `map -> odom` TF。
+
+`camera_frame_postprocess` 订阅 `/odin1/image/undistorted`，发布
+`/r2/front_camera/image_raw`。普通调试图像默认关闭，可在运行时动态开启
+`visualization_enabled`，开启后会额外发布
+`/r2/front_camera/image_raw/debug`：
+
+```bash
+ros2 param set /camera_frame_postprocess visualization_enabled true
+```
 
 ## `map_odom_tf_publisher` 调试
 

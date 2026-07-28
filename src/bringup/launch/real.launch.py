@@ -2,34 +2,44 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import GroupAction, IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_ros.actions import Node, SetRemap
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
     bringup_pkg = get_package_share_directory('bringup')
+    interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
     odin_driver_pkg = get_package_share_directory('odin_ros_driver')
     odin_data_postprocess_pkg = get_package_share_directory(
         'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
+    fastdds_profile = os.path.join(
+        interfaces_pkg,
+        'config',
+        'fastdds_camera.xml',
+    )
 
-    odin_launch = GroupAction(
-        actions=[
-            SetRemap(
-                src='/odin1/image/undistorted',
-                dst='/r2/front_camera/image_raw',
-            ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    os.path.join(
-                        odin_driver_pkg,
-                        'launch',
-                        'odin1_ros2_no_rviz.launch.py',
-                    )
-                )
-            ),
-        ],
+    odin_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                odin_driver_pkg,
+                'launch',
+                'odin1_ros2_no_rviz.launch.py',
+            )
+        )
+    )
+
+    camera_frame_config = os.path.join(
+        odin_data_postprocess_pkg,
+        'config',
+        'camera_frame_postprocess.yaml',
+    )
+    camera_frame_postprocess = Node(
+        package='odin_data_postprocess',
+        executable='camera_frame_postprocess',
+        parameters=[camera_frame_config],
+        output='screen',
     )
 
     odometry_tf_config = os.path.join(
@@ -97,7 +107,16 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        SetEnvironmentVariable(
+            'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
+        SetEnvironmentVariable(
+            'RMW_FASTRTPS_USE_QOS_FROM_XML', '1'),
+        SetEnvironmentVariable(
+            'FASTDDS_DEFAULT_PROFILES_FILE', fastdds_profile),
+        SetEnvironmentVariable(
+            'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         odin_launch,
+        camera_frame_postprocess,
         odometry_tf_publisher,
         odometry_pose_republisher,
         map_odom_tf_publisher,

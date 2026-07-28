@@ -50,14 +50,15 @@ def main(args: list[str] | None = None) -> None:
     import threading
     import time
 
-    import numpy as np
     import rclpy
+    from rcl_interfaces.msg import SetParametersResult
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from rclpy.node import Node
     from geometry_msgs.msg import PoseStamped
     from sensor_msgs.msg import Image
     from robot_r2_interfaces.msg import (
+        CameraFrame,
         KfsRawBox,
         KfsRawDetections,
         KfsProcessedDetection,
@@ -65,33 +66,12 @@ def main(args: list[str] | None = None) -> None:
     from robot_r2_interfaces.srv import GetKfsType
     from std_msgs.msg import String
 
-    def image_message_to_bgr(msg: Image) -> np.ndarray:
-        """Convert packed rgb8/bgr8 ROS image data into contiguous BGR."""
-        encoding = msg.encoding.lower()
-        if encoding not in ("rgb8", "bgr8"):
-            raise ValueError(f"unsupported image encoding: {msg.encoding}")
-        if msg.height <= 0 or msg.width <= 0:
-            raise ValueError("image height and width must be positive")
-
-        row_size = int(msg.width) * 3
-        if msg.step < row_size:
-            raise ValueError(
-                f"image step {msg.step} is smaller than row size {row_size}"
-            )
-        expected_size = int(msg.height) * int(msg.step)
-        data = np.frombuffer(msg.data, dtype=np.uint8)
-        if data.size != expected_size:
-            raise ValueError(
-                f"image data has {data.size} bytes, expected {expected_size}"
-            )
-
-        rows = data.reshape(int(msg.height), int(msg.step))
-        image = rows[:, :row_size].reshape(
-            int(msg.height), int(msg.width), 3
-        )
-        if encoding == "rgb8":
-            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        return np.ascontiguousarray(image)
+    from robot_r2_detect.camera_frame import (
+        bgr_to_image_message,
+        camera_frame_header,
+        camera_frame_to_bgr,
+        camera_qos,
+    )
 
     class KfsDetectNode(Node):
         """Subscribe image → YOLO → publish raw + processed detection."""
@@ -115,12 +95,13 @@ def main(args: list[str] | None = None) -> None:
             self._declare_parameters()
             self._load_parameters()
             self._load_model()
+            image_qos = camera_qos()
 
             self._sub = self.create_subscription(
-                Image,
+                CameraFrame,
                 self._color_topic,
                 self._image_cb,
-                10,
+                image_qos,
                 callback_group=self._image_callback_group,
             )
             self._status_sub = self.create_subscription(
@@ -144,13 +125,16 @@ def main(args: list[str] | None = None) -> None:
                 KfsProcessedDetection, "/r2/detection/processed", 10
             )
             self._pub_viz = self.create_publisher(
-                Image, "/r2/detection/viz", 10
+                Image, self._viz_topic, image_qos
             )
             self._get_type_service = self.create_service(
                 GetKfsType,
                 self._vote_service_name,
                 self._handle_get_kfs_type,
                 callback_group=self._service_callback_group,
+            )
+            self.add_on_set_parameters_callback(
+                self._on_parameters_changed
             )
             if self._simulation_state_detection:
                 self.get_logger().warn(
@@ -165,7 +149,9 @@ def main(args: list[str] | None = None) -> None:
             self.declare_parameter("model_path", "")
             self.declare_parameter("color_topic", "/r2/front_camera/image_raw")
             self.declare_parameter("conf", 0.65)
-            self.declare_parameter("viz_topic", "/r2/detection/viz")
+            self.declare_parameter(
+                "visualization_topic", "/r2/detection/debug"
+            )
             self.declare_parameter("visualization_enabled", False)
             self.declare_parameter(
                 "vote_service_name", "/r2/detection/get_type"
@@ -212,6 +198,9 @@ def main(args: list[str] | None = None) -> None:
                 )
             self._model_path = model_path
             self._color_topic = str(self.get_parameter("color_topic").value)
+            self._viz_topic = str(
+                self.get_parameter("visualization_topic").value
+            )
             self._visualization_enabled = bool(
                 self.get_parameter("visualization_enabled").value
             )
@@ -250,6 +239,26 @@ def main(args: list[str] | None = None) -> None:
                 raise ValueError(
                     "default_vote_timeout_sec must be finite and positive"
                 )
+
+        def _on_parameters_changed(
+            self, parameters
+        ) -> SetParametersResult:
+            for parameter in parameters:
+                if parameter.name != "visualization_enabled":
+                    continue
+                if not isinstance(parameter.value, bool):
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            "visualization_enabled must be a boolean"
+                        ),
+                    )
+                self._visualization_enabled = parameter.value
+                state = "enabled" if parameter.value else "disabled"
+                self.get_logger().info(
+                    f"KFS detection visualization {state}"
+                )
+            return SetParametersResult(successful=True)
 
         def _positive_parameter(self, name: str) -> float:
             value = float(self.get_parameter(name).value)
@@ -468,9 +477,9 @@ def main(args: list[str] | None = None) -> None:
 
         # ---- callback ----
 
-        def _image_cb(self, msg: Image) -> None:
+        def _image_cb(self, msg: CameraFrame) -> None:
             try:
-                image = image_message_to_bgr(msg)
+                image = camera_frame_to_bgr(msg)
             except (TypeError, ValueError) as exc:
                 self.get_logger().error(
                     f"Failed to convert detection image: {exc}"
@@ -497,7 +506,7 @@ def main(args: list[str] | None = None) -> None:
                 )
 
             raw_msg = KfsRawDetections()
-            raw_msg.header = msg.header
+            raw_msg.header = camera_frame_header(msg)
             raw_msg.boxes = raw_boxes
             self._pub_raw.publish(raw_msg)
 
@@ -518,7 +527,7 @@ def main(args: list[str] | None = None) -> None:
                     processed_box = (x1, y1, x2, y2)
 
             processed_msg = KfsProcessedDetection()
-            processed_msg.header = msg.header
+            processed_msg.header = camera_frame_header(msg)
             processed_msg.image_width = w
             processed_msg.image_height = h
 
@@ -584,15 +593,9 @@ def main(args: list[str] | None = None) -> None:
                         1,
                     )
 
-                viz_msg = Image()
-                viz_msg.header = msg.header
-                viz_msg.height = viz.shape[0]
-                viz_msg.width = viz.shape[1]
-                viz_msg.encoding = "bgr8"
-                viz_msg.is_bigendian = 0
-                viz_msg.step = viz.shape[1] * 3
-                viz_msg.data = viz.tobytes()
-                self._pub_viz.publish(viz_msg)
+                self._pub_viz.publish(
+                    bgr_to_image_message(viz, camera_frame_header(msg))
+                )
 
         # ---- majority-vote service ----
 

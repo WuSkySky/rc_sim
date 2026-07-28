@@ -14,9 +14,16 @@ import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_interfaces.msg import CameraFrame
 from robot_r2_interfaces.srv import DetectLed
 from sensor_msgs.msg import Image
 
+from .camera_frame import (
+    bgr_to_image_message,
+    camera_frame_header,
+    camera_frame_to_bgr,
+    camera_qos,
+)
 from .led_detection import (
     ApriltagDetector,
     AprilTagLedMapper,
@@ -28,51 +35,6 @@ from .led_detection import (
 
 STABLE_MATCH_FRAMES = 3
 SERVICE_TIMEOUT_SEC = 60.0
-
-
-def image_message_to_bgr(message: Image) -> np.ndarray:
-    """Convert a ROS image message into contiguous BGR data.
-
-    Supported encodings: rgb8, bgr8, yuv422_yuy2.
-    """
-    encoding = message.encoding.lower()
-    if message.height <= 0 or message.width <= 0:
-        raise ValueError("image height and width must be positive")
-
-    expected_size = int(message.height) * int(message.step)
-    data = np.frombuffer(message.data, dtype=np.uint8)
-    if data.size != expected_size:
-        raise ValueError(
-            f"image data has {data.size} bytes, expected {expected_size}"
-        )
-
-    if encoding in ("rgb8", "bgr8"):
-        row_size = int(message.width) * 3
-        if message.step < row_size:
-            raise ValueError(
-                f"image step {message.step} is smaller than row size {row_size}"
-            )
-        rows = data.reshape(int(message.height), int(message.step))
-        image = rows[:, :row_size].reshape(
-            int(message.height), int(message.width), 3
-        )
-        if encoding == "rgb8":
-            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        return np.ascontiguousarray(image)
-
-    if encoding == "yuv422_yuy2":
-        row_size = int(message.width) * 2
-        if message.step < row_size:
-            raise ValueError(
-                f"image step {message.step} is smaller than row size {row_size}"
-            )
-        rows = data.reshape(int(message.height), int(message.step))
-        yuv = rows[:, :row_size].reshape(
-            int(message.height), int(message.width), 2
-        )
-        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_YUYV)
-
-    raise ValueError(f"unsupported image encoding: {message.encoding}")
 
 
 class LedDetectNode(Node):
@@ -94,16 +56,17 @@ class LedDetectNode(Node):
 
         self._declare_parameters()
         self._load_parameters()
+        image_qos = camera_qos()
 
         self._image_subscription = self.create_subscription(
-            Image,
+            CameraFrame,
             self._color_topic,
             self._on_image,
-            1,
+            image_qos,
             callback_group=self._image_callback_group,
         )
         self._visualization_publisher = self.create_publisher(
-            Image, self._visualization_topic, 1
+            Image, self._visualization_topic, image_qos
         )
         self._service = self.create_service(
             DetectLed,
@@ -121,7 +84,7 @@ class LedDetectNode(Node):
             "service_name", "/r2/led_detection/detect"
         )
         self.declare_parameter(
-            "visualization_topic", "/r2/led_detection/viz"
+            "visualization_topic", "/r2/led_detection/debug"
         )
         self.declare_parameter("visualization_enabled", False)
         self.declare_parameter("continuous_detection", False)
@@ -258,7 +221,7 @@ class LedDetectNode(Node):
             self.get_logger().info(f"LED visualization {state}")
         return SetParametersResult(successful=True)
 
-    def _on_image(self, message: Image) -> None:
+    def _on_image(self, message: CameraFrame) -> None:
         with self._state_condition:
             should_process = (
                 self._continuous_detection or self._service_active
@@ -269,7 +232,7 @@ class LedDetectNode(Node):
         started_at = time.monotonic()
         image: np.ndarray | None = None
         try:
-            image = image_message_to_bgr(message)
+            image = camera_frame_to_bgr(message)
             result = self._state_detector.detect(image)
         except Exception as exc:
             result = LedDetectionResult(
@@ -309,8 +272,9 @@ class LedDetectNode(Node):
             visualization = self._make_visualization(
                 image, result, target, match_count
             )
-            visualization_message = self._bgr_to_image_message(
-                visualization, message
+            visualization_message = bgr_to_image_message(
+                visualization,
+                camera_frame_header(message),
             )
             with self._state_condition:
                 visualization_enabled = self._visualization_enabled
@@ -536,23 +500,6 @@ class LedDetectNode(Node):
             2,
             cv2.LINE_AA,
         )
-
-    @staticmethod
-    def _bgr_to_image_message(
-        image: np.ndarray,
-        source: Image,
-    ) -> Image:
-        image = np.ascontiguousarray(image, dtype=np.uint8)
-        message = Image()
-        message.header = source.header
-        message.height = image.shape[0]
-        message.width = image.shape[1]
-        message.encoding = "bgr8"
-        message.is_bigendian = 0
-        message.step = image.shape[1] * 3
-        message.data = image.tobytes()
-        return message
-
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)

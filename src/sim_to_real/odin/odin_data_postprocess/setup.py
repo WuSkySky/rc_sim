@@ -19,6 +19,7 @@ setup(
             os.path.join('share', package_name, 'config'),
             [
                 'config/map_odom_tf_publisher.yaml',
+                'config/camera_frame_postprocess.yaml',
                 'config/odometry_pose_republisher.yaml',
                 'config/odometry_tf_publisher.yaml',
             ],
@@ -33,6 +34,8 @@ setup(
     license='TODO: License declaration',
     entry_points={
         'console_scripts': [
+            'camera_frame_postprocess = '
+            'odin_data_postprocess.camera_frame_postprocess:main',
             'map_odom_tf_publisher = '
             'odin_data_postprocess.map_odom_tf_publisher:main',
             'odometry_pose_republisher = '

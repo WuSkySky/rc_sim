@@ -12,6 +12,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(robot_r2_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
@@ -27,6 +28,7 @@ add_executable(camera_driver src/camera_driver.cpp)
 ament_target_dependencies(
   camera_driver
   rclcpp
+  rcl_interfaces
   robot_r2_interfaces
   sensor_msgs
 )

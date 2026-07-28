@@ -1302,12 +1302,15 @@
           <far>50.0</far>
         </clip>
       </camera>
-      <plugin name="front_camera_controller" filename="libgazebo_ros_camera.so">
+      <plugin name="front_camera_controller" filename="librobot_r2_camera.so">
         <ros>
           <namespace>/r2</namespace>
         </ros>
-        <camera_name>front_camera</camera_name>
+        <image_topic>front_camera/image_raw</image_topic>
+        <debug_image_topic>front_camera/image_raw/debug</debug_image_topic>
+        <camera_info_topic>front_camera/camera_info</camera_info_topic>
         <frame_name>base_link</frame_name>
+        <visualization_enabled>false</visualization_enabled>
       </plugin>
     </sensor>
   </gazebo>

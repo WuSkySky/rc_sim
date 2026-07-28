@@ -37,7 +37,8 @@ ros2 launch test_pkg camera_benchmark.launch.py \
   left:=true right:=true
 ```
 
-For a baseline against an old camera publisher:
+For the optional standard debug stream (the benchmark automatically appends
+`/debug` to the configured camera topic):
 
 ```bash
 ros2 launch test_pkg camera_benchmark.launch.py \

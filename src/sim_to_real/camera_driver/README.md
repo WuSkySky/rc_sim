@@ -32,13 +32,16 @@ the IMX219 modes detected on the Jetson:
 Each driver instance publishes generic topics internally:
 
 - `/r2/camera/image_raw` (`robot_r2_interfaces/CameraFrame`)
+- `/r2/camera/image_raw/debug` (`sensor_msgs/Image`, disabled by default)
 - `/r2/camera/camera_info`
 
 The launch file remaps them to:
 
 - `/r2/left_camera/image_raw`
+- `/r2/left_camera/image_raw/debug`
 - `/r2/left_camera/camera_info`
 - `/r2/right_camera/image_raw`
+- `/r2/right_camera/image_raw/debug`
 - `/r2/right_camera/camera_info`
 
 The `CameraInfo` messages contain the image dimensions but no calibration
@@ -48,6 +51,13 @@ matrix until the cameras have been calibrated.
 DDS profile installed by `robot_r2_interfaces`. Image QoS is Best Effort,
 Keep Last 1, Volatile; Data Sharing is `AUTOMATIC`.
 
-Consumers that still subscribe with `sensor_msgs/Image`, including the current
-Python detection nodes, are not compatible with these image topics until they
-are updated or a conversion node is added.
+Debug image publication is controlled by the dynamic
+`visualization_enabled` parameter and is disabled by default. It can be
+changed without restarting either camera node:
+
+```bash
+ros2 param set /left_camera_driver visualization_enabled true
+ros2 param set /right_camera_driver visualization_enabled true
+```
+
+Normal processing nodes subscribe to the bounded topic.

@@ -149,6 +149,12 @@ public:
       throw std::invalid_argument(
               "message_type must be 'standard' or 'bounded'");
     }
+    if (message_type_ == "standard" &&
+      (topic_.size() < 6U ||
+      topic_.compare(topic_.size() - 6U, 6U, "/debug") != 0))
+    {
+      topic_ += "/debug";
+    }
     if (processing_mode_ != "transport" &&
       processing_mode_ != "opencv_mean")
     {

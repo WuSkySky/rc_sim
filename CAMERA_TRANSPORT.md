@@ -151,6 +151,25 @@ Data Sharing 不消除相机采集缓冲区到 DDS 消息缓冲区之间的一�
 复用同一个消息对象及其 `data` 缓冲区，不能逐帧重新创建数 MB 的 `bytes`、
 `list` 或消息对象。
 
+### 4.1 调试图像发布
+
+所有可能额外发布 `sensor_msgs/msg/Image` 调试图像的节点都必须声明同名
+ROS 2 参数 `visualization_enabled`：
+
+- 参数类型为 `bool`，默认值为 `false`。
+- 参数必须支持运行时动态修改，不得只在节点启动或插件加载时读取一次。
+- 调试图像发布器可以常驻，但参数为 `false` 时不得构造或发布调试图像。
+- 参数只控制 `/debug` 图像，不影响主 `CameraFrame`、检测结果或相机信息。
+- 一个节点发布多个调试图像 Topic 时，由该节点的同一个
+  `visualization_enabled` 参数统一控制。
+
+例如：
+
+```bash
+ros2 param set /node_name visualization_enabled true
+ros2 param set /node_name visualization_enabled false
+```
+
 ## 5. 订阅端约束
 
 - 使用与发布端完全相同的接口包版本和 QoS。
