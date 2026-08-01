@@ -1,3 +1,4 @@
+import math
 import threading
 
 import rclpy
@@ -20,6 +21,8 @@ class GripperGripServiceController(Node):
         self.declare_parameter(
             'gap_feedback_topic', '/r2/gripper/grip_gap_feedback')
         self.declare_parameter('service_name', '/r2/gripper/set_grip')
+        self.declare_parameter('min_position', 0.0)
+        self.declare_parameter('max_position', 0.209)
         self.declare_parameter('default_tolerance', 0.005)
         self.declare_parameter('default_timeout_sec', 10.0)
         self.declare_parameter('closed_gap_threshold', 0.38)
@@ -28,11 +31,23 @@ class GripperGripServiceController(Node):
         feedback_topic = self.get_parameter('feedback_topic').value
         gap_feedback_topic = self.get_parameter('gap_feedback_topic').value
         service_name = self.get_parameter('service_name').value
+        self.min_position = float(
+            self.get_parameter('min_position').value)
+        self.max_position = float(
+            self.get_parameter('max_position').value)
         self.default_tolerance = self.get_parameter('default_tolerance').value
         self.default_timeout_sec = self.get_parameter(
             'default_timeout_sec').value
         self.closed_gap_threshold = self.get_parameter(
             'closed_gap_threshold').value
+
+        if not math.isfinite(self.min_position):
+            raise ValueError('min_position must be finite')
+        if not math.isfinite(self.max_position):
+            raise ValueError('max_position must be finite')
+        if self.min_position >= self.max_position:
+            raise ValueError(
+                'min_position must be less than max_position')
 
         self.current_position = None
         self.current_gap = None
@@ -72,6 +87,18 @@ class GripperGripServiceController(Node):
 
     def handle_set_grip(self, request, response):
         with self.service_lock:
+            if not math.isfinite(request.position):
+                return self._reject_request(
+                    response,
+                    'Gripper grip position must be finite',
+                )
+            if not self.min_position <= request.position <= self.max_position:
+                return self._reject_request(
+                    response,
+                    'Gripper grip position must be between '
+                    f'{self.min_position} and {self.max_position}',
+                )
+
             tolerance = (
                 request.tolerance
                 if request.tolerance > 0.0
@@ -95,16 +122,16 @@ class GripperGripServiceController(Node):
                         should_wait = True
                     else:
                         error = request.position - self.current_position
-                        is_closing = request.position > 0.0
+                        is_closing = (
+                            request.position < self.current_position
+                        )
                         close_reached = (
                             is_closing and
                             self.current_gap is not None and
-                            self.current_gap < self.closed_gap_threshold
+                            self.current_gap <= self.closed_gap_threshold
                         )
                         reached = (
-                            close_reached
-                            if is_closing
-                            else abs(error) <= tolerance
+                            abs(error) <= tolerance or close_reached
                         )
                         if reached:
                             response.success = True
@@ -130,6 +157,18 @@ class GripperGripServiceController(Node):
                 response.final_position = final_pos
                 response.position_error = request.position - final_pos
                 return response
+
+    def _reject_request(self, response, message):
+        with self.state_condition:
+            final_position = (
+                self.current_position
+                if self.current_position is not None else 0.0
+            )
+        response.success = False
+        response.message = message
+        response.final_position = final_position
+        response.position_error = 0.0
+        return response
 
 
 def main():

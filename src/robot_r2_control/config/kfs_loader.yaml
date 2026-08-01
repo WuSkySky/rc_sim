@@ -6,24 +6,24 @@ kfs_loader_control:
     root_rotate_service: /r2/gripper/set_rotate
     tip_rotate_service: /r2/gripper/set_tip_rotate
     service_timeout_sec: 10.0
-    # Clear open gap is 0.408 m after subtracting both 0.005 m plate halves.
-    # Command 0.064 m gives approximately 0.280 m clear gap.
-    kfs_grip_position: 0.064
-    grip_open_position: 0.0
-    # Root -30 deg raises the rod 30 deg above the ground. Tip +30 deg
-    # cancels the root rotation and keeps the gripper pointing forward.
-    front_pickup_root_position: -0.4235987755982988
-    front_pickup_tip_position: 0.4235987755982988
+    # The opening coordinate is 0.0 m when closed and 0.209 m when open.
+    # Command 0.145 m gives approximately 0.280 m clear gap.
+    kfs_grip_position: 0.145
+    grip_open_position: 0.209
+    # Root and tip commands are expressed from the vertical initial pose.
+    # These paired commands preserve the previous front-pickup geometry.
+    front_pickup_root_position: 1.1471975511965977
+    front_pickup_tip_position: 1.1471975511965977
     # With base_link 0.199 m above the ground, the root axis is at 0.259 m.
-    # The root angle puts the tip axis at 0.170 m. The tip angle adds another
-    # +90 deg to the compensated pose so the gripper opening points downward.
-    top_pickup_root_position: 0.1687239216732498
-    top_pickup_tip_position: 1.4020724051216468
-    # TRANSFER method: after gripping, root moves to -90 deg while the tip
-    # concurrently moves to +90 deg. The gripper remains closed afterward.
-    tip_front_limit_position: 1.5707963267948966
-    tip_rear_limit_position: -1.5707963267948966
-    root_initial_position: -1.5707963267948966
+    # The root angle puts the tip axis at 0.170 m. The paired tip angle keeps
+    # the gripper opening pointed downward.
+    top_pickup_root_position: 1.7395202484681462
+    top_pickup_tip_position: 0.16872392167324968
+    # TRANSFER method: after gripping, both axes return to the zero initial
+    # pose concurrently. The gripper remains closed afterward.
+    tip_front_limit_position: 0.0
+    tip_rear_limit_position: 3.141592653589793
+    root_initial_position: 0.0
     # Release pose keeps the gripper opening facing world +x.
-    release_root_position: -0.7853981633974483
+    release_root_position: 0.7853981633974483
     release_tip_position: 0.7853981633974483

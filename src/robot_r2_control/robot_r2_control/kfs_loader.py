@@ -29,20 +29,20 @@ class KfsLoaderController(Node):
         self.declare_parameter(
             'tip_rotate_service', '/r2/gripper/set_tip_rotate')
         self.declare_parameter('service_timeout_sec', 10.0)
-        self.declare_parameter('kfs_grip_position', 0.064)
-        self.declare_parameter('grip_open_position', 0.0)
+        self.declare_parameter('kfs_grip_position', 0.145)
+        self.declare_parameter('grip_open_position', 0.209)
         self.declare_parameter(
-            'front_pickup_root_position', -math.pi / 6.0)
+            'front_pickup_root_position', 1.1471975511965977)
         self.declare_parameter(
-            'front_pickup_tip_position', math.pi / 6.0)
+            'front_pickup_tip_position', 1.1471975511965977)
         self.declare_parameter(
-            'top_pickup_root_position', 0.1687239216732498)
+            'top_pickup_root_position', 1.7395202484681462)
         self.declare_parameter(
-            'top_pickup_tip_position', 1.4020724051216468)
-        self.declare_parameter('tip_front_limit_position', math.pi / 2.0)
-        self.declare_parameter('tip_rear_limit_position', -math.pi / 2.0)
-        self.declare_parameter('root_initial_position', -math.pi / 2.0)
-        self.declare_parameter('release_root_position', -math.pi / 4.0)
+            'top_pickup_tip_position', 0.16872392167324968)
+        self.declare_parameter('tip_front_limit_position', 0.0)
+        self.declare_parameter('tip_rear_limit_position', math.pi)
+        self.declare_parameter('root_initial_position', 0.0)
+        self.declare_parameter('release_root_position', math.pi / 4.0)
         self.declare_parameter('release_tip_position', math.pi / 4.0)
 
         service_name = self.get_parameter('service_name').value

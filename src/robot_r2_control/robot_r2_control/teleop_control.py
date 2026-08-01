@@ -77,9 +77,9 @@ class WasdTeleop(Node):
         self.keyboard_enabled = True
         self.toggle_key_down = False
 
-        self.rotate_target = -1.5708
-        self.tip_rotate_target = 1.5708
-        self.grip_target = 0.0
+        self.rotate_target = 0.0
+        self.tip_rotate_target = 0.0
+        self.grip_target = 0.209
 
         self.timer = self.create_timer(1.0 / publish_rate, self.publish_commands)
         self.listener = keyboard.Listener(
@@ -112,20 +112,23 @@ class WasdTeleop(Node):
             if 'j' in active:
                 self.rotate_target += self.bar_rotate_speed * dt
             self.rotate_target = max(
-                -1.5707963267948966,
-                min(0.7853981633974483, self.rotate_target),
+                0.0,
+                min(2.356194490192345, self.rotate_target),
             )
 
             if 'i' in active:
-                self.tip_rotate_target -= self.bar_rotate_speed * dt
-            if 'k' in active:
                 self.tip_rotate_target += self.bar_rotate_speed * dt
-            self.tip_rotate_target = max(-1.5708, min(1.5708, self.tip_rotate_target))
+            if 'k' in active:
+                self.tip_rotate_target -= self.bar_rotate_speed * dt
+            self.tip_rotate_target = max(
+                0.0,
+                min(3.141592653589793, self.tip_rotate_target),
+            )
 
             if 'o' in active:
-                self.grip_target -= self.gripper_speed * dt
-            if 'l' in active:
                 self.grip_target += self.gripper_speed * dt
+            if 'l' in active:
+                self.grip_target -= self.gripper_speed * dt
             self.grip_target = max(0.0, min(0.209, self.grip_target))
 
             self.root_rotate_pub.publish(Float64(data=self.rotate_target))

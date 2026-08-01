@@ -1,3 +1,4 @@
+import math
 import threading
 
 import rclpy
@@ -18,15 +19,29 @@ class GripperTipRotateServiceController(Node):
         self.declare_parameter('command_topic', '/r2/gripper/tip_rotate_cmd')
         self.declare_parameter('feedback_topic', '/r2/gripper/tip_rotate_feedback')
         self.declare_parameter('service_name', '/r2/gripper/set_tip_rotate')
+        self.declare_parameter('min_position', 0.0)
+        self.declare_parameter('max_position', math.pi)
         self.declare_parameter('default_tolerance', 0.01)
         self.declare_parameter('default_timeout_sec', 10.0)
 
         command_topic = self.get_parameter('command_topic').value
         feedback_topic = self.get_parameter('feedback_topic').value
         service_name = self.get_parameter('service_name').value
+        self.min_position = float(
+            self.get_parameter('min_position').value)
+        self.max_position = float(
+            self.get_parameter('max_position').value)
         self.default_tolerance = self.get_parameter('default_tolerance').value
         self.default_timeout_sec = self.get_parameter(
             'default_timeout_sec').value
+
+        if not math.isfinite(self.min_position):
+            raise ValueError('min_position must be finite')
+        if not math.isfinite(self.max_position):
+            raise ValueError('max_position must be finite')
+        if self.min_position >= self.max_position:
+            raise ValueError(
+                'min_position must be less than max_position')
 
         self.current_position = None
 
@@ -53,6 +68,18 @@ class GripperTipRotateServiceController(Node):
 
     def handle_set_tip_rotate(self, request, response):
         with self.service_lock:
+            if not math.isfinite(request.position):
+                return self._reject_request(
+                    response,
+                    'Gripper tip rotate position must be finite',
+                )
+            if not self.min_position <= request.position <= self.max_position:
+                return self._reject_request(
+                    response,
+                    'Gripper tip rotate position must be between '
+                    f'{self.min_position} and {self.max_position}',
+                )
+
             tolerance = (
                 request.tolerance
                 if request.tolerance > 0.0
@@ -101,6 +128,18 @@ class GripperTipRotateServiceController(Node):
                 response.final_position = final_pos
                 response.position_error = request.position - final_pos
                 return response
+
+    def _reject_request(self, response, message):
+        with self.state_condition:
+            final_position = (
+                self.current_position
+                if self.current_position is not None else 0.0
+            )
+        response.success = False
+        response.message = message
+        response.final_position = final_position
+        response.position_error = 0.0
+        return response
 
 
 def main():

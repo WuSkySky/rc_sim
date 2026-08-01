@@ -4,6 +4,9 @@ kfs_gripper_grip:
     feedback_topic: /r2/gripper/grip_feedback
     gap_feedback_topic: /r2/gripper/grip_gap_feedback
     service_name: /r2/gripper/set_grip
+    # Opening coordinate: 0.0 is closed and 0.209 is fully open.
+    min_position: 0.0
+    max_position: 0.209
     default_tolerance: 0.005
     default_timeout_sec: 10.0
     closed_gap_threshold: 0.38

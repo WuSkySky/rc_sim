@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <mutex>
 #include <string>
 
@@ -30,10 +29,9 @@ public:
     joint_names_[0] = sdf->Get<std::string>("left_joint_name",  "gripper_left_joint").first;
     joint_names_[1] = sdf->Get<std::string>("right_joint_name", "gripper_right_joint").first;
 
-    // Left:  lower=-0.209 (closed), upper=0 (open)
-    // Right: lower=0 (open), upper=0.209 (closed)
-    // Single command 0.0=open, 0.209=closed → map to each joint
+    // Both joints use the same coordinate: 0.0=closed, stroke=open.
     stroke_ = sdf->Get<double>("stroke", 0.209).first;
+    command_ = stroke_;
 
     const double sdf_p = sdf->Get<double>("position_p_gain", 1000.0).first;
     const double sdf_i = sdf->Get<double>("position_i_gain", 0.0).first;
@@ -55,9 +53,11 @@ public:
       if (!joints_[i]) {
         return;
       }
+      // Spawn with the gripper open even though the joint zero is closed.
+      joints_[i]->SetPosition(0, stroke_, true);
     }
 
-    // Command: 0.0 = open (grippers at ends), stroke = closed (grippers at center)
+    // Command: 0.0=closed, stroke=open.
     command_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       command_topic_, rclcpp::QoS(10),
       [this](std_msgs::msg::Float64::SharedPtr msg) {
@@ -117,10 +117,8 @@ private:
       imax = i_max_; imin = i_min_; flim = force_limit_; reset_d = deriv_reset_; deriv_reset_ = false;
     }
 
-    // Map single command to individual joint targets
-    // Left:  open=0 → target=0,   closed=stroke → target=-stroke
-    // Right: open=0 → target=0,   closed=stroke → target=+stroke
-    double targets[2] = { -cmd, cmd };
+    // The mirrored joint axes let both sides share the same target.
+    double targets[2] = {cmd, cmd};
 
     auto now = model_->GetWorld()->SimTime();
     double dt = (now - last_time_).Double();
@@ -151,18 +149,18 @@ private:
       joints_[i]->SetForce(0, force);
     }
 
+    const double left_position = joints_[0]->Position(0);
+    const double right_position = joints_[1]->Position(0);
+
     auto fb = std_msgs::msg::Float64();
-    // Report the normalized command coordinate: 0=open, stroke=closed.
-    // The left joint moves in the negative direction while the right joint
-    // moves in the positive direction.
-    fb.data = (
-      -joints_[0]->Position(0) + joints_[1]->Position(0)) / 2.0;
+    // Report the shared opening coordinate: 0=closed, stroke=open.
+    fb.data = (left_position + right_position) / 2.0;
     feedback_pub_->publish(fb);
 
     auto gap_fb = std_msgs::msg::Float64();
-    const double left_position = joints_[0]->Position(0);
-    const double right_position = joints_[1]->Position(0);
-    gap_fb.data = std::abs(left_position - right_position) - 0.01;
+    // Subtract both 5 mm plate halves and never report a negative gap.
+    gap_fb.data = std::max(
+      0.0, left_position + right_position - 0.01);
     gap_feedback_pub_->publish(gap_fb);
   }
 

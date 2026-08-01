@@ -209,7 +209,7 @@
 
   <!-- ========================================================= -->
   <!-- Long Bar: 20x20x428mm, center at y=0 (chassis centerline) -->
-  <!-- Revolute on base_link (y-axis), -90° to +45° rotation      -->
+  <!-- Revolute on base_link (y-axis), initial pose 0° to +135°   -->
   <!-- ========================================================= -->
 
   <link name="gripper_root">
@@ -238,9 +238,10 @@
   <joint name="gripper_root_joint" type="revolute">
     <parent link="base_link"/>
     <child link="gripper_root"/>
-    <origin xyz="0.30 0 0.060" rpy="0 0 0"/>
+    <!-- Absorb the former -90 degree initial command into the joint frame. -->
+    <origin xyz="0.30 0 0.060" rpy="0 -1.5707963267948966 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-1.5707963267948966" upper="0.7853981633974483" effort="100" velocity="3.0"/>
+    <limit lower="0.0" upper="2.356194490192345" effort="100" velocity="3.0"/>
     <dynamics damping="5.0" friction="0.5"/>
   </joint>
 
@@ -307,9 +308,10 @@
   <joint name="gripper_tip_joint" type="revolute">
     <parent link="gripper_extension"/>
     <child link="gripper_tip"/>
-    <origin xyz="0.530 0 0" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-1.5708" upper="1.5708" effort="100" velocity="3.0"/>
+    <!-- Zero is the initial pose; positive rotation follows the working direction. -->
+    <origin xyz="0.530 0 0" rpy="0 1.5707963267948966 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="0.0" upper="3.141592653589793" effort="100" velocity="3.0"/>
     <dynamics damping="0.05" friction="0.02"/>
   </joint>
 
@@ -345,9 +347,10 @@
   <joint name="gripper_left_joint" type="prismatic">
     <parent link="gripper_tip"/>
     <child link="gripper_left"/>
-    <origin xyz="0.060 0.209 -0.030" rpy="0 0 0"/>
+    <!-- Joint position 0 is closed; positive motion opens the gripper. -->
+    <origin xyz="0.060 0 -0.030" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.209" upper="0" effort="50" velocity="0.3"/>
+    <limit lower="0" upper="0.209" effort="50" velocity="0.3"/>
     <dynamics damping="10.0" friction="2.0"/>
   </joint>
 
@@ -378,8 +381,9 @@
   <joint name="gripper_right_joint" type="prismatic">
     <parent link="gripper_tip"/>
     <child link="gripper_right"/>
-    <origin xyz="0.060 -0.209 -0.030" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
+    <!-- Mirror the left axis so both joint coordinates use the same sign. -->
+    <origin xyz="0.060 0 -0.030" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
     <limit lower="0" upper="0.209" effort="50" velocity="0.3"/>
     <dynamics damping="10.0" friction="2.0"/>
   </joint>
@@ -1395,8 +1399,8 @@
       <command_topic>/r2/gripper/rotate_cmd</command_topic>
       <feedback_topic>/r2/gripper/rotate_feedback</feedback_topic>
       <joint_name>gripper_root_joint</joint_name>
-      <min_position>-1.5707963267948966</min_position>
-      <max_position>0.7853981633974483</max_position>
+      <min_position>0.0</min_position>
+      <max_position>2.356194490192345</max_position>
     </plugin>
   </gazebo>
 
@@ -1409,8 +1413,8 @@
       <command_topic>/r2/gripper/tip_rotate_cmd</command_topic>
       <feedback_topic>/r2/gripper/tip_rotate_feedback</feedback_topic>
       <joint_name>gripper_tip_joint</joint_name>
-      <min_position>-1.5708</min_position>
-      <max_position>1.5708</max_position>
+      <min_position>0.0</min_position>
+      <max_position>3.141592653589793</max_position>
     </plugin>
   </gazebo>
 
@@ -1425,6 +1429,7 @@
       <gap_feedback_topic>/r2/gripper/grip_gap_feedback</gap_feedback_topic>
       <left_joint_name>gripper_left_joint</left_joint_name>
       <right_joint_name>gripper_right_joint</right_joint_name>
+      <!-- Opening coordinate: 0.0 is closed and stroke is fully open. -->
       <stroke>0.209</stroke>
     </plugin>
   </gazebo>

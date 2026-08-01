@@ -25,8 +25,8 @@ public:
     feedback_topic_ = sdf->Get<std::string>("feedback_topic", "/r2/gripper/tip_rotate_feedback").first;
     joint_name_ = sdf->Get<std::string>("joint_name", "gripper_tip_joint").first;
 
-    min_pos_ = sdf->Get<double>("min_position", -1.5708).first;
-    max_pos_ = sdf->Get<double>("max_position",  1.5708).first;
+    min_pos_ = sdf->Get<double>("min_position", 0.0).first;
+    max_pos_ = sdf->Get<double>("max_position", 3.141592653589793).first;
     if (min_pos_ > max_pos_) std::swap(min_pos_, max_pos_);
 
     const double sdf_p = sdf->Get<double>("position_p_gain", 8.0).first;
@@ -51,9 +51,8 @@ public:
       return;
     }
 
-    // Start the controller from the physical joint position.  The requested
-    // initial pose is still target_, but it is approached through the motion
-    // profile instead of being applied as a position step on the first tick.
+    // Start the motion profile at the physical joint position. With the
+    // zero-position spawn and zero default target, initialization is motionless.
     profiled_target_ = Clamp(joint_->Position(0), min_pos_, max_pos_);
 
     command_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
@@ -168,11 +167,11 @@ private:
   std::string command_topic_{"/r2/gripper/tip_rotate_cmd"};
   std::string feedback_topic_{"/r2/gripper/tip_rotate_feedback"};
   std::string joint_name_{"gripper_tip_joint"};
-  double min_pos_{-1.5708}, max_pos_{1.5708};
+  double min_pos_{0.0}, max_pos_{3.141592653589793};
   double p_gain_{8.0}, i_gain_{0.0}, d_gain_{0.2};
   double i_max_{1.0}, i_min_{-1.0}, force_limit_{2.0};
   double target_velocity_limit_{0.5};
-  double target_{1.5708}, profiled_target_{0.0}, integral_{0.0};
+  double target_{0.0}, profiled_target_{0.0}, integral_{0.0};
   gazebo::common::Time last_time_{0};
 };
 
