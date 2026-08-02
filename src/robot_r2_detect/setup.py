@@ -14,7 +14,10 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
-        (os.path.join("share", package_name, "model"), glob("model/*")),
+        (
+            os.path.join("share", package_name, "model"),
+            ["model/resnet18_batch3_fp16.engine"],
+        ),
         (
             os.path.join("share", package_name, "features"),
             glob("features/*.npz"),
@@ -28,7 +31,7 @@ setup(
     zip_safe=True,
     maintainer="skysky",
     maintainer_email="skysky@todo.todo",
-    description="KFS and ArUco-guided LED detection nodes.",
+    description="TensorRT KFS and ArUco-guided LED detection nodes.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={

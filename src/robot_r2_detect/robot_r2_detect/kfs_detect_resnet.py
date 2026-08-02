@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""kfs_detect: ResNet KFS classification ROS 2 node.
+"""kfs_detect: TensorRT ResNet KFS classification ROS 2 node.
 
 Subscribes image -> ResNet -> publishes:
   /r2/detection/raw       - raw top-1 classification
@@ -11,7 +11,7 @@ Provides:
 
 from __future__ import annotations
 
-from pathlib import Path, PosixPath
+from pathlib import Path
 
 from robot_r2_detect.kfs_detect import (
     _classify_kfs_model,
@@ -42,9 +42,7 @@ def main(args: list[str] | None = None) -> None:
     import threading
     import time
 
-    import numpy as np
     import rclpy
-    import torch
     from geometry_msgs.msg import PoseStamped
     from rcl_interfaces.msg import SetParametersResult
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -59,13 +57,16 @@ def main(args: list[str] | None = None) -> None:
     from robot_r2_interfaces.srv import GetKfsType
     from sensor_msgs.msg import Image
     from std_msgs.msg import String
-    from torchvision.models import resnet18
 
     from robot_r2_detect.camera_frame import (
         bgr_to_image_message,
         camera_frame_header,
         camera_frame_to_bgr,
         camera_qos,
+    )
+    from robot_r2_detect.resnet_tensorrt import (
+        TensorRTResNetClassifier,
+        validate_model_configuration,
     )
 
     class KfsDetectResnetNode(Node):
@@ -86,6 +87,8 @@ def main(args: list[str] | None = None) -> None:
             self._cached_placements: dict[str, str] | None = None
             self._cached_seed: int | None = None
             self._robot_pose: tuple[float, float, float] | None = None
+            self._classifier_lock = threading.Lock()
+            self._classifier = None
 
             self._declare_parameters()
             self._load_parameters()
@@ -133,7 +136,7 @@ def main(args: list[str] | None = None) -> None:
             )
             self.get_logger().info(
                 f"Loaded ResNet KFS classifier from {self._model_path} "
-                f"on {self._device}"
+                f"with {self._classifier.backend}"
             )
             if self._simulation_state_detection:
                 self.get_logger().warn(
@@ -146,6 +149,16 @@ def main(args: list[str] | None = None) -> None:
 
         def _declare_parameters(self) -> None:
             self.declare_parameter("model_path", "")
+            self.declare_parameter("model_input_size", 224)
+            self.declare_parameter(
+                "model_class_names", ["R1", "Unlabeled", "fake", "true"]
+            )
+            self.declare_parameter(
+                "model_mean", [0.485, 0.456, 0.406]
+            )
+            self.declare_parameter(
+                "model_std", [0.229, 0.224, 0.225]
+            )
             self.declare_parameter("color_topic", "/r2/left_camera/image_raw")
             self.declare_parameter("conf", 0.65)
             self.declare_parameter(
@@ -176,27 +189,34 @@ def main(args: list[str] | None = None) -> None:
                 get_package_share_directory,
             )
 
-            raw = str(self.get_parameter("model_path").value)
-            model_path = Path(raw).expanduser()
-            if not model_path.exists() or raw == "":
-                package_model_dir = (
-                    Path(get_package_share_directory("robot_r2_detect"))
-                    / "model"
-                )
-                if raw == "":
-                    model_path = package_model_dir / "best_resnet.pt"
-                else:
-                    candidate = package_model_dir / model_path.name
-                    if candidate.exists():
-                        model_path = candidate
-
-            if not model_path.exists():
-                raise FileNotFoundError(
-                    f"ResNet model not found: {raw}. "
-                    f"Checked: CWD={Path.cwd()}, {model_path}"
-                )
-
-            self._model_path = model_path
+            self._package_model_dir = (
+                Path(get_package_share_directory("robot_r2_detect"))
+                / "model"
+            )
+            self._model_path = self._resolve_model_path(
+                str(self.get_parameter("model_path").value)
+            )
+            self._model_input_size = int(
+                self.get_parameter("model_input_size").value
+            )
+            self._model_class_names = tuple(
+                str(value)
+                for value in self.get_parameter("model_class_names").value
+            )
+            self._model_mean = tuple(
+                float(value)
+                for value in self.get_parameter("model_mean").value
+            )
+            self._model_std = tuple(
+                float(value)
+                for value in self.get_parameter("model_std").value
+            )
+            validate_model_configuration(
+                self._model_input_size,
+                self._model_class_names,
+                self._model_mean,
+                self._model_std,
+            )
             self._color_topic = str(self.get_parameter("color_topic").value)
             self._viz_topic = str(
                 self.get_parameter("visualization_topic").value
@@ -249,11 +269,40 @@ def main(args: list[str] | None = None) -> None:
                     "default_vote_timeout_sec must be finite and positive"
                 )
 
+        def _resolve_model_path(self, raw: str) -> Path:
+            model_path = Path(raw).expanduser()
+            if raw == "":
+                model_path = (
+                    self._package_model_dir
+                    / "resnet18_batch3_fp16.engine"
+                )
+            elif not model_path.exists():
+                candidate = self._package_model_dir / model_path.name
+                if candidate.exists():
+                    model_path = candidate
+            if not model_path.is_file():
+                raise FileNotFoundError(
+                    f"TensorRT engine not found: {raw!r}. "
+                    f"Checked: CWD={Path.cwd()}, {model_path}"
+                )
+            if model_path.suffix != ".engine":
+                raise ValueError(
+                    f"model_path must point to a .engine file: {model_path}"
+                )
+            return model_path
+
         def _on_parameters_changed(
             self, parameters
         ) -> SetParametersResult:
             visualization_enabled = None
             processing_config = None
+            confidence_threshold = None
+            reload_model = False
+            model_path_raw = str(self._model_path)
+            model_input_size = self._model_input_size
+            model_class_names = self._model_class_names
+            model_mean = self._model_mean
+            model_std = self._model_std
             for parameter in parameters:
                 if parameter.name == "visualization_enabled":
                     if not isinstance(parameter.value, bool):
@@ -284,6 +333,97 @@ def main(args: list[str] | None = None) -> None:
                             ),
                         )
                     processing_config = (target_rate, 1.0 / target_rate)
+                elif parameter.name == "conf":
+                    if isinstance(parameter.value, bool) or not isinstance(
+                        parameter.value, (int, float)
+                    ):
+                        return SetParametersResult(
+                            successful=False,
+                            reason="conf must be a number",
+                        )
+                    confidence_threshold = float(parameter.value)
+                    if (
+                        not math.isfinite(confidence_threshold)
+                        or not 0.0 <= confidence_threshold <= 1.0
+                    ):
+                        return SetParametersResult(
+                            successful=False,
+                            reason="conf must be finite and in [0, 1]",
+                        )
+                elif parameter.name == "model_path":
+                    if not isinstance(parameter.value, str):
+                        return SetParametersResult(
+                            successful=False,
+                            reason="model_path must be a string",
+                        )
+                    model_path_raw = parameter.value
+                    reload_model = True
+                elif parameter.name == "model_input_size":
+                    if isinstance(parameter.value, bool) or not isinstance(
+                        parameter.value, int
+                    ):
+                        return SetParametersResult(
+                            successful=False,
+                            reason="model_input_size must be an integer",
+                        )
+                    model_input_size = parameter.value
+                    reload_model = True
+                elif parameter.name == "model_class_names":
+                    if (
+                        not isinstance(parameter.value, (list, tuple))
+                        or not all(
+                            isinstance(value, str)
+                            for value in parameter.value
+                        )
+                    ):
+                        return SetParametersResult(
+                            successful=False,
+                            reason="model_class_names must be a string array",
+                        )
+                    model_class_names = tuple(parameter.value)
+                    reload_model = True
+                elif parameter.name in ("model_mean", "model_std"):
+                    if not isinstance(parameter.value, (list, tuple)) or any(
+                        isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        for value in parameter.value
+                    ):
+                        return SetParametersResult(
+                            successful=False,
+                            reason=f"{parameter.name} must be a number array",
+                        )
+                    values = tuple(float(value) for value in parameter.value)
+                    if parameter.name == "model_mean":
+                        model_mean = values
+                    else:
+                        model_std = values
+                    reload_model = True
+
+            replacement_classifier = None
+            resolved_model_path = self._model_path
+            if reload_model:
+                try:
+                    resolved_model_path = self._resolve_model_path(
+                        model_path_raw
+                    )
+                    validate_model_configuration(
+                        model_input_size,
+                        model_class_names,
+                        model_mean,
+                        model_std,
+                    )
+                    replacement_classifier = TensorRTResNetClassifier(
+                        resolved_model_path,
+                        model_input_size,
+                        model_class_names,
+                        model_mean,
+                        model_std,
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                    return SetParametersResult(
+                        successful=False,
+                        reason=f"TensorRT model reload failed: {exc}",
+                    )
 
             if visualization_enabled is not None:
                 self._visualization_enabled = visualization_enabled
@@ -296,6 +436,22 @@ def main(args: list[str] | None = None) -> None:
                 self.get_logger().info(
                     "KFS detection target processing rate changed to "
                     f"{processing_config[0]:g} Hz"
+                )
+            if confidence_threshold is not None:
+                self._conf = confidence_threshold
+            if replacement_classifier is not None:
+                with self._classifier_lock:
+                    previous = self._classifier
+                    self._classifier = replacement_classifier
+                    self._model_path = resolved_model_path
+                    self._model_input_size = model_input_size
+                    self._model_class_names = model_class_names
+                    self._model_mean = model_mean
+                    self._model_std = model_std
+                if previous is not None:
+                    previous.close()
+                self.get_logger().info(
+                    f"Reloaded TensorRT classifier from {resolved_model_path}"
                 )
             return SetParametersResult(successful=True)
 
@@ -314,121 +470,31 @@ def main(args: list[str] | None = None) -> None:
             return values
 
         def _load_model(self) -> None:
-            safe_globals = getattr(
-                torch.serialization, "safe_globals", None
+            classifier = TensorRTResNetClassifier(
+                self._model_path,
+                self._model_input_size,
+                self._model_class_names,
+                self._model_mean,
+                self._model_std,
             )
-            if safe_globals is None:
-                # Jetson PyTorch releases may only provide the persistent
-                # allowlist API, not the newer safe_globals context manager.
-                torch.serialization.add_safe_globals([PosixPath])
-                checkpoint = torch.load(
-                    self._model_path,
-                    map_location="cpu",
-                    weights_only=True,
-                )
-            else:
-                with safe_globals([PosixPath]):
-                    checkpoint = torch.load(
-                        self._model_path,
-                        map_location="cpu",
-                        weights_only=True,
-                    )
-            if not isinstance(checkpoint, dict):
-                raise ValueError("ResNet checkpoint must contain a dictionary")
-            if checkpoint.get("arch") != "resnet18":
-                raise ValueError(
-                    "Unsupported ResNet architecture: "
-                    f"{checkpoint.get('arch')!r}"
-                )
+            with self._classifier_lock:
+                previous = self._classifier
+                self._classifier = classifier
+            if previous is not None:
+                previous.close()
 
-            num_classes = int(checkpoint.get("num_classes", 0))
-            class_to_idx = checkpoint.get("class_to_idx")
-            if (
-                num_classes <= 0
-                or not isinstance(class_to_idx, dict)
-                or len(class_to_idx) != num_classes
-            ):
-                raise ValueError("Invalid class metadata in ResNet checkpoint")
+        def _classify_image(self, image) -> tuple[int, str, float]:
+            with self._classifier_lock:
+                if self._classifier is None:
+                    raise RuntimeError("TensorRT classifier is unavailable")
+                return self._classifier.classify(image)
 
-            idx_to_class: dict[int, str] = {}
-            for class_name, class_id in class_to_idx.items():
-                class_id = int(class_id)
-                if (
-                    class_id < 0
-                    or class_id >= num_classes
-                    or class_id in idx_to_class
-                ):
-                    raise ValueError(
-                        "class_to_idx must contain unique contiguous IDs"
-                    )
-                idx_to_class[class_id] = str(class_name)
-            if set(idx_to_class) != set(range(num_classes)):
-                raise ValueError(
-                    "class_to_idx must contain unique contiguous IDs"
-                )
-
-            image_size = int(checkpoint.get("imgsz", 0))
-            mean = tuple(float(value) for value in checkpoint.get("mean", ()))
-            std = tuple(float(value) for value in checkpoint.get("std", ()))
-            if image_size <= 0:
-                raise ValueError("imgsz must be positive")
-            if (
-                len(mean) != 3
-                or len(std) != 3
-                or not all(math.isfinite(value) for value in mean + std)
-                or not all(value > 0.0 for value in std)
-            ):
-                raise ValueError("Invalid normalization metadata")
-
-            model_state = checkpoint.get("model_state")
-            if not isinstance(model_state, dict):
-                raise ValueError("ResNet checkpoint has no model_state")
-
-            model = resnet18(weights=None)
-            model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
-            model.load_state_dict(model_state, strict=True)
-            self._device = torch.device(
-                "cuda" if torch.cuda.is_available() else "cpu"
-            )
-            self._model = model.to(self._device).eval()
-            self._idx_to_class = idx_to_class
-            self._image_size = image_size
-            self._mean = torch.tensor(
-                mean, dtype=torch.float32, device=self._device
-            ).view(1, 3, 1, 1)
-            self._std = torch.tensor(
-                std, dtype=torch.float32, device=self._device
-            ).view(1, 3, 1, 1)
-
-        def _classify_image(self, image: np.ndarray) -> tuple[int, str, float]:
-            rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            interpolation = (
-                cv2.INTER_AREA
-                if max(rgb.shape[:2]) > self._image_size
-                else cv2.INTER_LINEAR
-            )
-            resized = cv2.resize(
-                rgb,
-                (self._image_size, self._image_size),
-                interpolation=interpolation,
-            )
-            tensor = (
-                torch.from_numpy(np.ascontiguousarray(resized))
-                .permute(2, 0, 1)
-                .unsqueeze(0)
-                .to(device=self._device, dtype=torch.float32)
-                .div_(255.0)
-            )
-            tensor = (tensor - self._mean) / self._std
-            with torch.inference_mode():
-                probabilities = torch.softmax(self._model(tensor), dim=1)
-                confidence, class_id = probabilities.max(dim=1)
-            class_id_value = int(class_id.item())
-            return (
-                class_id_value,
-                self._idx_to_class[class_id_value],
-                float(confidence.item()),
-            )
+        def close(self) -> None:
+            with self._classifier_lock:
+                classifier = self._classifier
+                self._classifier = None
+            if classifier is not None:
+                classifier.close()
 
         # ---- cached simulation state ----
 
@@ -781,6 +847,7 @@ def main(args: list[str] | None = None) -> None:
         executor.spin()
     finally:
         executor.shutdown()
+        node.close()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

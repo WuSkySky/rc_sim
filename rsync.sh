@@ -5,7 +5,7 @@ set -euo pipefail
 # ==================== 配置 ====================
 
 ROBOT_USER="jetson"
-ROBOT_HOST="10.42.0.2"
+ROBOT_HOST="192.168.50.1"
 ROBOT_PASSWORD='yahboom'
 REMOTE_WS="/home/jetson/workspaces/rc_sim"
 

@@ -1,6 +1,13 @@
 /**:
   ros__parameters:
+    # Empty selects model/resnet18_batch3_fp16.engine from the installed package.
     model_path: ""
+    # TensorRT engines do not embed class labels or preprocessing metadata.
+    # This order must match the engine output logits exactly.
+    model_input_size: 224
+    model_class_names: ["R1", "Unlabeled", "fake", "true"]
+    model_mean: [0.485, 0.456, 0.406]
+    model_std: [0.229, 0.224, 0.225]
     visualization_enabled: false
     conf: 0.5
     # Warn when one frame takes longer than the 30 Hz camera period.
