@@ -152,8 +152,8 @@ ros2 param set /kfs_detect visualization_enabled true
 ros2 param set /led_detect visualization_enabled true
 ros2 param set /r2/front_camera_controller visualization_enabled true
 ros2 param set /camera_frame_postprocess visualization_enabled true
-ros2 param set /left_camera_driver visualization_enabled true
-ros2 param set /right_camera_driver visualization_enabled true
+ros2 param set /left_mipi_camera visualization_enabled true
+ros2 param set /right_mipi_camera visualization_enabled true
 ```
 
 将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 同时控制

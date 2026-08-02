@@ -19,6 +19,22 @@ from robot_r2_detect.kfs_detect import (
 )
 
 
+def _processing_overrun_message(
+    processing_time_sec: float,
+    processing_config: tuple[float, float],
+) -> str | None:
+    """Build the per-frame overrun warning for a rate/deadline snapshot."""
+    target_rate, deadline_sec = processing_config
+    if processing_time_sec <= deadline_sec:
+        return None
+    return (
+        "KFS detection image processing overrun: "
+        f"{processing_time_sec * 1000.0:.2f} ms > "
+        f"{deadline_sec * 1000.0:.2f} ms "
+        f"(target {target_rate:g} Hz)"
+    )
+
+
 def main(args: list[str] | None = None) -> None:
     import cv2
     import json
@@ -130,12 +146,13 @@ def main(args: list[str] | None = None) -> None:
 
         def _declare_parameters(self) -> None:
             self.declare_parameter("model_path", "")
-            self.declare_parameter("color_topic", "/r2/front_camera/image_raw")
+            self.declare_parameter("color_topic", "/r2/left_camera/image_raw")
             self.declare_parameter("conf", 0.65)
             self.declare_parameter(
                 "visualization_topic", "/r2/detection/debug"
             )
             self.declare_parameter("visualization_enabled", False)
+            self.declare_parameter("target_processing_rate", 30.0)
             self.declare_parameter(
                 "vote_service_name", "/r2/detection/get_type"
             )
@@ -187,6 +204,13 @@ def main(args: list[str] | None = None) -> None:
             self._visualization_enabled = bool(
                 self.get_parameter("visualization_enabled").value
             )
+            target_processing_rate = self._positive_parameter(
+                "target_processing_rate"
+            )
+            self._processing_config = (
+                target_processing_rate,
+                1.0 / target_processing_rate,
+            )
             self._conf = float(self.get_parameter("conf").value)
             if not math.isfinite(self._conf) or not 0.0 <= self._conf <= 1.0:
                 raise ValueError("conf must be finite and in [0, 1]")
@@ -228,20 +252,50 @@ def main(args: list[str] | None = None) -> None:
         def _on_parameters_changed(
             self, parameters
         ) -> SetParametersResult:
+            visualization_enabled = None
+            processing_config = None
             for parameter in parameters:
-                if parameter.name != "visualization_enabled":
-                    continue
-                if not isinstance(parameter.value, bool):
-                    return SetParametersResult(
-                        successful=False,
-                        reason=(
-                            "visualization_enabled must be a boolean"
-                        ),
-                    )
-                self._visualization_enabled = parameter.value
-                state = "enabled" if parameter.value else "disabled"
+                if parameter.name == "visualization_enabled":
+                    if not isinstance(parameter.value, bool):
+                        return SetParametersResult(
+                            successful=False,
+                            reason=(
+                                "visualization_enabled must be a boolean"
+                            ),
+                        )
+                    visualization_enabled = parameter.value
+                elif parameter.name == "target_processing_rate":
+                    if isinstance(parameter.value, bool) or not isinstance(
+                        parameter.value, (int, float)
+                    ):
+                        return SetParametersResult(
+                            successful=False,
+                            reason=(
+                                "target_processing_rate must be a number"
+                            ),
+                        )
+                    target_rate = float(parameter.value)
+                    if not math.isfinite(target_rate) or target_rate <= 0.0:
+                        return SetParametersResult(
+                            successful=False,
+                            reason=(
+                                "target_processing_rate must be finite "
+                                "and positive"
+                            ),
+                        )
+                    processing_config = (target_rate, 1.0 / target_rate)
+
+            if visualization_enabled is not None:
+                self._visualization_enabled = visualization_enabled
+                state = "enabled" if visualization_enabled else "disabled"
                 self.get_logger().info(
                     f"KFS detection visualization {state}"
+                )
+            if processing_config is not None:
+                self._processing_config = processing_config
+                self.get_logger().info(
+                    "KFS detection target processing rate changed to "
+                    f"{processing_config[0]:g} Hz"
                 )
             return SetParametersResult(successful=True)
 
@@ -564,6 +618,8 @@ def main(args: list[str] | None = None) -> None:
         # ---- image callback ----
 
         def _image_cb(self, msg: CameraFrame) -> None:
+            started_at = time.monotonic()
+            processing_config = self._processing_config
             try:
                 image = camera_frame_to_bgr(msg)
                 class_id, class_name, confidence = self._classify_image(image)
@@ -625,6 +681,13 @@ def main(args: list[str] | None = None) -> None:
                 self._pub_viz.publish(
                     bgr_to_image_message(viz, camera_frame_header(msg))
                 )
+
+            overrun_message = _processing_overrun_message(
+                time.monotonic() - started_at,
+                processing_config,
+            )
+            if overrun_message is not None:
+                self.get_logger().warn(overrun_message)
 
         # ---- majority-vote service ----
 

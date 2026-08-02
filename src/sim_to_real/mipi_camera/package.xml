@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>camera_driver</name>
+  <name>mipi_camera</name>
   <version>0.0.0</version>
-  <description>Jetson CSI camera driver for Robot R2.</description>
+  <description>Jetson MIPI CSI camera driver for Robot R2.</description>
   <maintainer email="skysky@example.com">skysky</maintainer>
   <license>TODO: License declaration</license>
 

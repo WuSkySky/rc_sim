@@ -14,27 +14,50 @@ import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from robot_r2_interfaces.msg import CameraFrame, LedDetection
 from robot_r2_interfaces.srv import DetectLed
 from sensor_msgs.msg import Image
 
-from .camera_frame import (
-    bgr_to_image_message,
-    camera_frame_header,
-    camera_frame_to_bgr,
-    camera_qos,
-)
 from .led_detection import (
     ArucoDetector,
     ArucoLedMapper,
     LedDetectionResult,
     LedStateDetector,
     TargetMatchTracker,
+    vision_qos,
 )
 
 
 STABLE_MATCH_FRAMES = 5
 SERVICE_TIMEOUT_SEC = 60.0
+
+
+def image_message_to_bgr(message: Image) -> np.ndarray:
+    """Convert a packed rgb8/bgr8 ROS image into contiguous BGR data."""
+    encoding = message.encoding.lower()
+    if encoding not in ("rgb8", "bgr8"):
+        raise ValueError(f"unsupported image encoding: {message.encoding}")
+    if message.height <= 0 or message.width <= 0:
+        raise ValueError("image height and width must be positive")
+
+    row_size = int(message.width) * 3
+    if message.step < row_size:
+        raise ValueError(
+            f"image step {message.step} is smaller than row size {row_size}"
+        )
+    expected_size = int(message.height) * int(message.step)
+    data = np.frombuffer(message.data, dtype=np.uint8)
+    if data.size != expected_size:
+        raise ValueError(
+            f"image data has {data.size} bytes, expected {expected_size}"
+        )
+
+    rows = data.reshape(int(message.height), int(message.step))
+    image = rows[:, :row_size].reshape(
+        int(message.height), int(message.width), 3
+    )
+    if encoding == "rgb8":
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    return np.ascontiguousarray(image)
 
 
 class LedDetectNode(Node):
@@ -56,20 +79,16 @@ class LedDetectNode(Node):
 
         self._declare_parameters()
         self._load_parameters()
-        image_qos = camera_qos()
 
         self._image_subscription = self.create_subscription(
-            CameraFrame,
-            self._image_topic,
+            Image,
+            self._color_topic,
             self._on_image,
-            image_qos,
+            vision_qos(),
             callback_group=self._image_callback_group,
         )
         self._visualization_publisher = self.create_publisher(
-            Image, self._visualization_topic, image_qos
-        )
-        self._result_publisher = self.create_publisher(
-            LedDetection, self._result_topic, 10
+            Image, self._visualization_topic, vision_qos()
         )
         self._service = self.create_service(
             DetectLed,
@@ -81,16 +100,13 @@ class LedDetectNode(Node):
 
     def _declare_parameters(self) -> None:
         self.declare_parameter(
-            "image_topic", "/r2/left_camera/image_raw"
+            "color_topic", "/image_raw"
         )
         self.declare_parameter(
             "service_name", "/r2/led_detection/detect"
         )
         self.declare_parameter(
-            "result_topic", "/r2/led_detection/result"
-        )
-        self.declare_parameter(
-            "visualization_topic", "/r2/led_detection/debug"
+            "visualization_topic", "/r2/led_detection/viz"
         )
         self.declare_parameter("visualization_enabled", False)
         self.declare_parameter("continuous_detection", False)
@@ -109,14 +125,11 @@ class LedDetectNode(Node):
         self.declare_parameter("target_processing_rate", 10.0)
 
     def _load_parameters(self) -> None:
-        self._image_topic = str(
-            self.get_parameter("image_topic").value
+        self._color_topic = str(
+            self.get_parameter("color_topic").value
         )
         self._service_name = str(
             self.get_parameter("service_name").value
-        )
-        self._result_topic = str(
-            self.get_parameter("result_topic").value
         )
         self._visualization_topic = str(
             self.get_parameter("visualization_topic").value
@@ -159,12 +172,10 @@ class LedDetectNode(Node):
             self.get_parameter("target_processing_rate").value
         )
 
-        if not self._image_topic:
-            raise ValueError("image_topic must not be empty")
+        if not self._color_topic:
+            raise ValueError("color_topic must not be empty")
         if not self._service_name:
             raise ValueError("service_name must not be empty")
-        if not self._result_topic:
-            raise ValueError("result_topic must not be empty")
         if not self._visualization_topic:
             raise ValueError("visualization_topic must not be empty")
         if not aruco_dictionary:
@@ -242,7 +253,7 @@ class LedDetectNode(Node):
             self.get_logger().info(f"LED visualization {state}")
         return SetParametersResult(successful=True)
 
-    def _on_image(self, message: CameraFrame) -> None:
+    def _on_image(self, message: Image) -> None:
         with self._state_condition:
             should_process = (
                 self._continuous_detection or self._service_active
@@ -253,7 +264,7 @@ class LedDetectNode(Node):
         started_at = time.monotonic()
         image: np.ndarray | None = None
         try:
-            image = camera_frame_to_bgr(message)
+            image = image_message_to_bgr(message)
             result = self._state_detector.detect(image)
         except Exception as exc:
             result = LedDetectionResult(
@@ -276,7 +287,6 @@ class LedDetectNode(Node):
                 else:
                     self._service_last_reason = result.reason
             visualization_enabled = self._visualization_enabled
-            continuous_detection = self._continuous_detection
             target = (
                 self._tracker.target_states
                 if self._tracker is not None
@@ -290,20 +300,12 @@ class LedDetectNode(Node):
         if not result.valid:
             self.get_logger().debug(result.reason)
 
-        if continuous_detection:
-            result_message = self._make_result_message(message, result)
-            with self._state_condition:
-                continuous_detection = self._continuous_detection
-            if continuous_detection:
-                self._result_publisher.publish(result_message)
-
         if visualization_enabled and image is not None:
             visualization = self._make_visualization(
                 image, result, target, match_count
             )
-            visualization_message = bgr_to_image_message(
-                visualization,
-                camera_frame_header(message),
+            visualization_message = self._bgr_to_image_message(
+                visualization, message
             )
             with self._state_condition:
                 visualization_enabled = self._visualization_enabled
@@ -443,25 +445,6 @@ class LedDetectNode(Node):
         return "".join("1" if state else "0" for state in states)
 
     @staticmethod
-    def _make_result_message(
-        source: CameraFrame,
-        result: LedDetectionResult,
-    ) -> LedDetection:
-        message = LedDetection()
-        try:
-            message.header = camera_frame_header(source)
-        except ValueError as exc:
-            message.valid = False
-            message.led_states = []
-            message.reason = f"failed to read source frame header: {exc}"
-            return message
-
-        message.valid = result.valid
-        message.led_states = list(result.states) if result.valid else []
-        message.reason = "" if result.valid else result.reason
-        return message
-
-    @staticmethod
     def _make_visualization(
         image: np.ndarray,
         result: LedDetectionResult,
@@ -471,7 +454,9 @@ class LedDetectNode(Node):
         visualization = image.copy()
 
         if result.marker is not None:
-            corners = np.asarray(result.marker.corners, dtype=np.int32)
+            corners = np.asarray(
+                result.marker.corners, dtype=np.int32
+            )
             cv2.polylines(
                 visualization,
                 [corners],
@@ -548,6 +533,23 @@ class LedDetectNode(Node):
             2,
             cv2.LINE_AA,
         )
+
+    @staticmethod
+    def _bgr_to_image_message(
+        image: np.ndarray,
+        source: Image,
+    ) -> Image:
+        image = np.ascontiguousarray(image, dtype=np.uint8)
+        message = Image()
+        message.header = source.header
+        message.height = image.shape[0]
+        message.width = image.shape[1]
+        message.encoding = "bgr8"
+        message.is_bigendian = 0
+        message.step = image.shape[1] * 3
+        message.data = image.tobytes()
+        return message
+
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)

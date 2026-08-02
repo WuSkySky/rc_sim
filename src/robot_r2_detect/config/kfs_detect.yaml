@@ -1,17 +1,12 @@
-kfs_detect:
+/**:
   ros__parameters:
-    feature_path: kfs_shape_templates.npz
-    roi_topic: /r2/kfs/roi
-    visualization_topic: /r2/detection/debug
+    model_path: ""
     visualization_enabled: false
     conf: 0.5
-    max_chamfer_distance: 0.015
-    min_class_margin: 0.004
-    vote_service_name: /r2/detection/get_type
+    # Warn when one frame takes longer than the 30 Hz camera period.
+    target_processing_rate: 30.0
     default_vote_timeout_sec: 10.0
 
-    simulation_status_topic: /simulation/status
-    robot_pose_topic: /r2/pose_feedback
     simulation_team: blue
 
     # Stage-two traversable cell centers and blue Meilin KFS cells.

@@ -13,6 +13,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/KfsRawDetections.msg"
   "msg/KfsProcessedDetection.msg"
   "msg/KfsRoiDetection.msg"
+  "msg/LedDetection.msg"
   "srv/MoveToPose.srv"
   "srv/SetBasePose.srv"
   "srv/SetLift.srv"

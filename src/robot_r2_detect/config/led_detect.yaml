@@ -1,7 +1,9 @@
 led_detect:
   ros__parameters:
-    color_topic: /image_raw
+    image_topic: /r2/left_camera/image_raw
     service_name: /r2/led_detection/detect
+    # Published once per processed frame only while continuous detection is on.
+    result_topic: /r2/led_detection/result
     visualization_topic: /r2/led_detection/debug
     visualization_enabled: false
 
@@ -9,19 +11,19 @@ led_detect:
     # This parameter can be changed at runtime.
     continuous_detection: true
 
-    tag_family: tag36h11
-    # Set to -1 to accept the detected tag with the highest decision margin.
-    target_tag_id: 0
-    # Outer edge length of the AprilTag black border.
-    tag_size_mm: 100.0
+    aruco_dictionary: DICT_4X4_50
+    # Set to -1 to accept the detected marker with the largest image area.
+    target_marker_id: 4
+    # Outer edge length of the ArUco marker.
+    marker_size_mm: 100.0
 
-    # LED positions are relative to the black border's top-left corner.
+    # LED positions are relative to the marker's top-left outer corner.
     # Request and response state arrays use this same index order.
-    led_count: 3
-    led_positions_x_mm: [0.0, 33.333333, 66.666667]
-    led_positions_y_mm: [110.0, 110.0, 110.0]
-    led_radius_mm: 5.0
-    brightness_threshold: 120.0
+    led_count: 1
+    led_positions_x_mm: [0.0]
+    led_positions_y_mm: [170.0]
+    led_radius_mm: 10.0
+    brightness_threshold: 200.0
 
     # Warn when one frame takes longer than the 10 Hz camera period.
     target_processing_rate: 10.0

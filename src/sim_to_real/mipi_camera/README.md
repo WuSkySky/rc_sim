@@ -1,4 +1,4 @@
-# camera_driver
+# mipi_camera
 
 ROS 2 driver for the two IMX219 CSI cameras connected to the Jetson.
 It uses a C++ GStreamer appsink with NVIDIA Argus rather than OpenCV camera
@@ -29,11 +29,11 @@ the IMX219 modes detected on the Jetson:
 - `[1640, 1232, 30]`
 - `[1280, 720, 60]`
 
-Each driver instance publishes generic topics internally:
+Each MIPI camera instance publishes generic topics internally:
 
-- `/r2/camera/image_raw` (`robot_r2_interfaces/CameraFrame`)
-- `/r2/camera/image_raw/debug` (`sensor_msgs/Image`, disabled by default)
-- `/r2/camera/camera_info`
+- `/r2/mipi_camera/image_raw` (`robot_r2_interfaces/CameraFrame`)
+- `/r2/mipi_camera/image_raw/debug` (`sensor_msgs/Image`, disabled by default)
+- `/r2/mipi_camera/camera_info`
 
 The launch file remaps them to:
 
@@ -47,17 +47,21 @@ The launch file remaps them to:
 The `CameraInfo` messages contain the image dimensions but no calibration
 matrix until the cameras have been calibrated.
 
-`camera_driver.launch.py` selects `rmw_fastrtps_cpp` and loads the shared Fast
+`mipi_camera.launch.py` selects `rmw_fastrtps_cpp` and loads the shared Fast
 DDS profile installed by `robot_r2_interfaces`. Image QoS is Best Effort,
 Keep Last 1, Volatile; Data Sharing is `AUTOMATIC`.
+
+```bash
+ros2 launch mipi_camera mipi_camera.launch.py
+```
 
 Debug image publication is controlled by the dynamic
 `visualization_enabled` parameter and is disabled by default. It can be
 changed without restarting either camera node:
 
 ```bash
-ros2 param set /left_camera_driver visualization_enabled true
-ros2 param set /right_camera_driver visualization_enabled true
+ros2 param set /left_mipi_camera visualization_enabled true
+ros2 param set /right_mipi_camera visualization_enabled true
 ```
 
 Normal processing nodes subscribe to the bounded topic.

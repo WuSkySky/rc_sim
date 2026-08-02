@@ -3,22 +3,22 @@
 import numpy as np
 
 from robot_r2_detect.led_detection import (
-    AprilTagLedMapper,
+    ArucoDetection,
+    ArucoLedMapper,
     LedStateDetector,
-    TagDetection,
     TargetMatchTracker,
 )
 
 
-TAG_CORNERS = (
-    (0.0, 0.0),
-    (100.0, 0.0),
-    (100.0, 100.0),
-    (0.0, 100.0),
+MARKER_CORNERS = (
+    (10.0, 10.0),
+    (110.0, 10.0),
+    (110.0, 110.0),
+    (10.0, 110.0),
 )
 
 
-class FakeTagDetector:
+class FakeArucoDetector:
     def __init__(self, detections):
         self._detections = detections
 
@@ -26,24 +26,24 @@ class FakeTagDetector:
         return list(self._detections)
 
 
-def make_tag(tag_id=0, decision_margin=10.0):
-    return TagDetection(
-        tag_id=tag_id,
-        corners=TAG_CORNERS,
-        center=(50.0, 50.0),
-        decision_margin=decision_margin,
+def make_marker(marker_id=4, area_px=10000.0):
+    return ArucoDetection(
+        marker_id=marker_id,
+        corners=MARKER_CORNERS,
+        center=(60.0, 60.0),
+        area_px=area_px,
     )
 
 
-def test_mapper_projects_black_border_relative_positions():
-    mapper = AprilTagLedMapper(
-        tag_size_mm=80.0,
+def test_mapper_projects_marker_relative_positions():
+    mapper = ArucoLedMapper(
+        marker_size_mm=100.0,
         led_positions_mm=[(10.0, 10.0)],
         led_radius_mm=2.0,
     )
 
     rois, homography, reason = mapper.map_rois(
-        TAG_CORNERS, (100, 100)
+        MARKER_CORNERS, (140, 140)
     )
 
     assert homography is not None
@@ -54,14 +54,14 @@ def test_mapper_projects_black_border_relative_positions():
 
 
 def test_mapper_rejects_roi_crossing_image_boundary():
-    mapper = AprilTagLedMapper(
-        tag_size_mm=80.0,
+    mapper = ArucoLedMapper(
+        marker_size_mm=100.0,
         led_positions_mm=[(-10.0, -10.0)],
         led_radius_mm=5.0,
     )
 
     rois, homography, reason = mapper.map_rois(
-        TAG_CORNERS, (100, 100)
+        MARKER_CORNERS, (140, 140)
     )
 
     assert homography is not None
@@ -70,18 +70,18 @@ def test_mapper_rejects_roi_crossing_image_boundary():
 
 
 def test_detector_returns_each_led_state_in_configured_order():
-    mapper = AprilTagLedMapper(
-        tag_size_mm=80.0,
+    mapper = ArucoLedMapper(
+        marker_size_mm=100.0,
         led_positions_mm=[(10.0, 10.0), (30.0, 10.0)],
         led_radius_mm=2.0,
     )
     detector = LedStateDetector(
-        detector=FakeTagDetector([make_tag()]),
+        detector=FakeArucoDetector([make_marker()]),
         mapper=mapper,
-        target_tag_id=0,
+        target_marker_id=4,
         brightness_threshold=120.0,
     )
-    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    image = np.zeros((140, 140, 3), dtype=np.uint8)
     image[18:23, 18:23] = 255
 
     result = detector.detect(image)
@@ -92,31 +92,75 @@ def test_detector_returns_each_led_state_in_configured_order():
     assert result.brightness[1] == 0.0
 
 
-def test_detector_selects_highest_margin_matching_tag():
-    mapper = AprilTagLedMapper(
-        tag_size_mm=80.0,
+def test_detector_selects_largest_matching_marker():
+    mapper = ArucoLedMapper(
+        marker_size_mm=100.0,
         led_positions_mm=[(10.0, 10.0)],
         led_radius_mm=2.0,
     )
-    low_margin = make_tag(tag_id=0, decision_margin=1.0)
-    high_margin = make_tag(tag_id=0, decision_margin=20.0)
+    small_marker = make_marker(marker_id=4, area_px=100.0)
+    large_marker = make_marker(marker_id=4, area_px=400.0)
     detector = LedStateDetector(
-        detector=FakeTagDetector([low_margin, high_margin]),
+        detector=FakeArucoDetector([small_marker, large_marker]),
         mapper=mapper,
-        target_tag_id=0,
+        target_marker_id=4,
         brightness_threshold=120.0,
     )
 
     result = detector.detect(
-        np.zeros((100, 100, 3), dtype=np.uint8)
+        np.zeros((140, 140, 3), dtype=np.uint8)
     )
 
     assert result.valid
-    assert result.tag == high_margin
+    assert result.marker == large_marker
 
 
-def test_target_match_requires_three_consecutive_valid_frames():
-    tracker = TargetMatchTracker([True, False], required_frames=3)
+def test_detector_reports_target_marker_id_mismatch():
+    mapper = ArucoLedMapper(
+        marker_size_mm=100.0,
+        led_positions_mm=[(10.0, 10.0)],
+        led_radius_mm=2.0,
+    )
+    detector = LedStateDetector(
+        detector=FakeArucoDetector([make_marker(marker_id=7)]),
+        mapper=mapper,
+        target_marker_id=4,
+        brightness_threshold=120.0,
+    )
+
+    result = detector.detect(
+        np.zeros((140, 140, 3), dtype=np.uint8)
+    )
+
+    assert not result.valid
+    assert result.states == ()
+    assert "target ArUco marker 4 not found" in result.reason
+    assert "[7]" in result.reason
+
+
+def test_detector_reports_no_marker():
+    mapper = ArucoLedMapper(
+        marker_size_mm=100.0,
+        led_positions_mm=[(10.0, 10.0)],
+        led_radius_mm=2.0,
+    )
+    detector = LedStateDetector(
+        detector=FakeArucoDetector([]),
+        mapper=mapper,
+        target_marker_id=4,
+        brightness_threshold=120.0,
+    )
+
+    result = detector.detect(
+        np.zeros((140, 140, 3), dtype=np.uint8)
+    )
+
+    assert not result.valid
+    assert result.reason == "no matching ArUco marker detected"
+
+
+def test_target_match_requires_five_consecutive_valid_frames():
+    tracker = TargetMatchTracker([True, False])
 
     assert not tracker.update([True, False])
     assert not tracker.update([True, False])
@@ -124,8 +168,10 @@ def test_target_match_requires_three_consecutive_valid_frames():
     assert tracker.count == 0
     assert not tracker.update([True, False])
     assert not tracker.update([True, False])
+    assert not tracker.update([True, False])
+    assert not tracker.update([True, False])
     assert tracker.update([True, False])
-    assert tracker.count == 3
+    assert tracker.count == 5
 
 
 def test_invalid_detection_resets_target_match_count():

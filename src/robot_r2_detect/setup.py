@@ -28,7 +28,7 @@ setup(
     zip_safe=True,
     maintainer="skysky",
     maintainer_email="skysky@todo.todo",
-    description="KFS and AprilTag-guided LED detection nodes.",
+    description="KFS and ArUco-guided LED detection nodes.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={

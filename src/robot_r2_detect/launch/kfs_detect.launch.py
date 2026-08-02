@@ -11,21 +11,21 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    package_share = get_package_share_directory("robot_r2_detect")
     interfaces_share = get_package_share_directory("robot_r2_interfaces")
+    config_directory = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "config")
+    )
     fastdds_profile = os.path.join(
         interfaces_share,
         "config",
         "fastdds_camera.xml",
     )
     detect_config = os.path.join(
-        package_share,
-        "config",
+        config_directory,
         "kfs_detect.yaml",
     )
     roi_config = os.path.join(
-        package_share,
-        "config",
+        config_directory,
         "kfs_roi.yaml",
     )
 
@@ -44,7 +44,7 @@ def generate_launch_description():
                 "FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile
             ),
             DeclareLaunchArgument(
-                "color_topic", default_value="/r2/front_camera/image_raw"
+                "color_topic", default_value="/r2/left_camera/image_raw"
             ),
             DeclareLaunchArgument("conf", default_value="0.5"),
             DeclareLaunchArgument(

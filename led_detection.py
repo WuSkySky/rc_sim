@@ -46,19 +46,26 @@ class ArucoDetector:
         import cv2
 
         if not hasattr(cv2, "aruco"):
-            raise RuntimeError("OpenCV was built without the aruco module")
+            raise RuntimeError(
+                "OpenCV was built without the aruco module"
+            )
         dictionary_id = getattr(cv2.aruco, dictionary_name, None)
         if dictionary_id is None:
             raise ValueError(
                 f"unsupported ArUco dictionary: {dictionary_name}"
             )
-        self._dictionary = cv2.aruco.getPredefinedDictionary(dictionary_id)
+        self._dictionary = cv2.aruco.getPredefinedDictionary(
+            dictionary_id
+        )
         if hasattr(cv2.aruco, "DetectorParameters_create"):
             self._parameters = cv2.aruco.DetectorParameters_create()
         else:
             self._parameters = cv2.aruco.DetectorParameters()
         self._detector = (
-            cv2.aruco.ArucoDetector(self._dictionary, self._parameters)
+            cv2.aruco.ArucoDetector(
+                self._dictionary,
+                self._parameters,
+            )
             if hasattr(cv2.aruco, "ArucoDetector")
             else None
         )
@@ -78,10 +85,12 @@ class ArucoDetector:
                 self._detector.detectMarkers(gray)
             )
         else:
-            marker_corners, marker_ids, _rejected = cv2.aruco.detectMarkers(
-                gray,
-                self._dictionary,
-                parameters=self._parameters,
+            marker_corners, marker_ids, _rejected = (
+                cv2.aruco.detectMarkers(
+                    gray,
+                    self._dictionary,
+                    parameters=self._parameters,
+                )
             )
         if marker_ids is None:
             return []
@@ -90,7 +99,9 @@ class ArucoDetector:
         for raw_corners, raw_id in zip(
             marker_corners, marker_ids.reshape(-1)
         ):
-            points = np.asarray(raw_corners, dtype=np.float32).reshape(4, 2)
+            points = np.asarray(
+                raw_corners, dtype=np.float32
+            ).reshape(4, 2)
             detections.append(
                 ArucoDetection(
                     marker_id=int(raw_id),
@@ -167,7 +178,9 @@ class ArucoLedMapper:
             ],
             dtype=np.float32,
         )
-        destination_points = np.asarray(marker_corners, dtype=np.float32)
+        destination_points = np.asarray(
+            marker_corners, dtype=np.float32
+        )
         homography, mask = cv2.findHomography(
             source_points, destination_points, method=0
         )
@@ -332,7 +345,8 @@ class LedStateDetector:
                     {detection.marker_id for detection in detections}
                 )
                 reason = (
-                    f"target ArUco marker {self._target_marker_id} not found; "
+                    f"target ArUco marker {self._target_marker_id} "
+                    "not found; "
                     f"detected IDs: {detected_ids}"
                 )
             else:
@@ -398,3 +412,23 @@ class TargetMatchTracker:
         else:
             self.count = 0
         return self.count >= self.required_frames
+
+"""QoS profile shared by high-bandwidth, latest-frame-only vision topics."""
+
+from rclpy.qos import (
+    DurabilityPolicy,
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+)
+
+
+def vision_qos() -> QoSProfile:
+    """Return BEST_EFFORT, VOLATILE, KEEP_LAST(1) for image streams."""
+    return QoSProfile(
+        history=HistoryPolicy.KEEP_LAST,
+        depth=1,
+        reliability=ReliabilityPolicy.BEST_EFFORT,
+        durability=DurabilityPolicy.VOLATILE,
+    )
+

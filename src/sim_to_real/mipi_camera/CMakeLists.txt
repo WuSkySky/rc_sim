@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(camera_driver)
+project(mipi_camera)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
@@ -24,18 +24,18 @@ pkg_check_modules(
   gstreamer-app-1.0
 )
 
-add_executable(camera_driver src/camera_driver.cpp)
+add_executable(mipi_camera src/mipi_camera.cpp)
 ament_target_dependencies(
-  camera_driver
+  mipi_camera
   rclcpp
   rcl_interfaces
   robot_r2_interfaces
   sensor_msgs
 )
-target_link_libraries(camera_driver PkgConfig::GSTREAMER)
+target_link_libraries(mipi_camera PkgConfig::GSTREAMER)
 
 install(
-  TARGETS camera_driver
+  TARGETS mipi_camera
   DESTINATION lib/${PROJECT_NAME}
 )
 install(

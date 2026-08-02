@@ -3,6 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -107,6 +108,12 @@ def generate_launch_description():
         package='robot_r2_control',
         executable='stage_two_point_one',
         parameters=[stage_two_point_one_config],
+        remappings=[
+            (
+                '/r2/detection/get_type',
+                LaunchConfiguration('kfs_get_type_service'),
+            ),
+        ],
         output='screen',
     )
 
@@ -114,6 +121,12 @@ def generate_launch_description():
         package='robot_r2_control',
         executable='stage_two_point_two',
         parameters=[stage_two_point_two_config],
+        remappings=[
+            (
+                '/r2/detection/get_type',
+                LaunchConfiguration('kfs_get_type_service'),
+            ),
+        ],
         output='screen',
     )
 
@@ -193,6 +206,7 @@ def generate_launch_description():
         executable='kfs_detect',
         name='kfs_detect',
         output='screen',
+        condition=IfCondition(LaunchConfiguration('start_kfs_detect')),
         parameters=[
             kfs_detect_config,
             {
@@ -228,6 +242,16 @@ def generate_launch_description():
                 'Infer KFS service results from the first simulation status '
                 'and the live robot grid pose'
             ),
+        ),
+        DeclareLaunchArgument(
+            'start_kfs_detect',
+            default_value='true',
+            description='Start the single KFS detection node',
+        ),
+        DeclareLaunchArgument(
+            'kfs_get_type_service',
+            default_value='/r2/detection/get_type',
+            description='KFS detection service used by stage controllers',
         ),
         stage_two_control,
         stage_two_point_one,

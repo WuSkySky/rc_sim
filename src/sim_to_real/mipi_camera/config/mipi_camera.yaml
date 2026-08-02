@@ -10,12 +10,10 @@
     visualization_enabled: false
 
 # Stable aliases bind each node to one physical Jetson MIPI connector.
-left_camera_driver:
+left_mipi_camera:
   ros__parameters:
     device: /dev/mipi_left
-    frame_id: r2_left_camera_optical_frame
 
-right_camera_driver:
+right_mipi_camera:
   ros__parameters:
     device: /dev/mipi_right
-    frame_id: r2_right_camera_optical_frame

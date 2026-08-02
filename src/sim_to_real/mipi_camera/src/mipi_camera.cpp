@@ -46,18 +46,17 @@ std::string mode_to_string(const CameraMode & mode)
 
 }  // namespace
 
-class CameraDriver : public rclcpp::Node
+class MipiCamera : public rclcpp::Node
 {
 public:
-  CameraDriver()
-  : Node("camera_driver")
+  MipiCamera()
+  : Node("mipi_camera")
   {
     device_ = declare_parameter<std::string>("device", "/dev/mipi_right");
     const auto mode_values = declare_parameter<std::vector<int64_t>>(
       "mode", {1280, 720, 60});
     flip_method_ = declare_parameter<int64_t>("flip_method", 0);
-    frame_id_ = declare_parameter<std::string>(
-      "frame_id", "camera_optical_frame");
+    frame_id_ = frame_id_for_node(get_name());
     visualization_enabled_.store(
       declare_parameter<bool>("visualization_enabled", false));
 
@@ -88,7 +87,7 @@ public:
       .best_effort()
       .durability_volatile();
     image_publisher_ = create_publisher<CameraFrame>(
-      "/r2/camera/image_raw", image_qos);
+      "/r2/mipi_camera/image_raw", image_qos);
     image_message_.frame_id_size = static_cast<uint8_t>(frame_id_.size());
     std::memcpy(
       image_message_.frame_id.data(), frame_id_.data(), frame_id_.size());
@@ -98,33 +97,34 @@ public:
     image_message_.data.reserve(CameraFrame::DATA_CAPACITY);
     standard_image_publisher_ =
       create_publisher<sensor_msgs::msg::Image>(
-      "/r2/camera/image_raw/debug", image_qos);
+      "/r2/mipi_camera/image_raw/debug", image_qos);
     standard_image_message_.header.frame_id = frame_id_;
     standard_image_message_.encoding = "bgr8";
     standard_image_message_.is_bigendian = 0U;
     standard_image_message_.data.reserve(CameraFrame::DATA_CAPACITY);
     camera_info_publisher_ =
       create_publisher<sensor_msgs::msg::CameraInfo>(
-      "/r2/camera/camera_info", rclcpp::QoS(10));
+      "/r2/mipi_camera/camera_info", rclcpp::QoS(10));
     parameter_callback_handle_ = add_on_set_parameters_callback(
       std::bind(
-        &CameraDriver::on_parameters_changed, this,
+        &MipiCamera::on_parameters_changed, this,
         std::placeholders::_1));
 
     start_pipeline();
     bus_timer_ = create_wall_timer(
       std::chrono::milliseconds(500),
-      std::bind(&CameraDriver::check_bus, this));
+      std::bind(&MipiCamera::check_bus, this));
 
     RCLCPP_INFO(
       get_logger(),
       "Capturing %s (%s) as Argus sensor-id=%d, %dx%d@%d FPS; "
-      "publishing bounded CameraFrame samples on /r2/camera/image_raw",
+      "publishing bounded CameraFrame samples on "
+      "/r2/mipi_camera/image_raw",
       device_.c_str(), resolved_device_.c_str(), sensor_id_,
       width_, height_, framerate_);
   }
 
-  ~CameraDriver() override
+  ~MipiCamera() override
   {
     shutting_down_.store(true);
     if (sink_ != nullptr && new_sample_handler_ != 0) {
@@ -149,6 +149,17 @@ public:
   }
 
 private:
+  static std::string frame_id_for_node(const std::string & node_name)
+  {
+    if (node_name == "left_mipi_camera") {
+      return "r2_left_camera_optical_frame";
+    }
+    if (node_name == "right_mipi_camera") {
+      return "r2_right_camera_optical_frame";
+    }
+    return "r2_mipi_camera_optical_frame";
+  }
+
   rcl_interfaces::msg::SetParametersResult on_parameters_changed(
     const std::vector<rclcpp::Parameter> & parameters)
   {
@@ -275,7 +286,7 @@ private:
   static GstFlowReturn on_new_sample(
     GstAppSink * sink, gpointer user_data)
   {
-    return static_cast<CameraDriver *>(user_data)->publish_sample(sink);
+    return static_cast<MipiCamera *>(user_data)->publish_sample(sink);
   }
 
   GstFlowReturn publish_sample(GstAppSink * sink)
@@ -518,11 +529,11 @@ int main(int argc, char ** argv)
   rclcpp::init(argc, argv);
   int exit_code = 0;
   try {
-    rclcpp::spin(std::make_shared<CameraDriver>());
+    rclcpp::spin(std::make_shared<MipiCamera>());
   } catch (const std::exception & error) {
     RCLCPP_FATAL(
-      rclcpp::get_logger("camera_driver"),
-      "Camera driver failed: %s", error.what());
+      rclcpp::get_logger("mipi_camera"),
+      "MIPI camera failed: %s", error.what());
     exit_code = 1;
   }
   rclcpp::shutdown();
