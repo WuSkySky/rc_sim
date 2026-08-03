@@ -10,7 +10,8 @@ ros2 launch bringup sim.launch.py
 ```
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责左右 MIPI 相机、左右 KFS 识别和 KFS ROI：
+Fast DDS 配置。real1 负责左右 MIPI 相机、前/左/右三路融合 KFS 识别和 KFS
+ROI。融合节点不会等待未接入的相机，因此只启动一至两路相机时也能正常推理：
 
 ```bash
 source install/setup.bash
@@ -62,7 +63,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 四轮抬升       | `/r2/lift/set`               | `robot_r2_interfaces/srv/SetLift`             | 仿真、实机 |
 | 跨越台阶       | `/r2/step_traverse`          | `robot_r2_interfaces/srv/TraverseStep`        | 仿真、实机 |
 | KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/AlignToKFS`          | 仿真、实机 |
-| KFS 类型检测   | `/r2/detection/get_type`（仿真）<br>`/r2/detection/{left,right}/get_type`（实机） | `robot_r2_interfaces/srv/GetKfsType` | 仿真、实机 |
+| KFS 类型检测   | `/r2/detection/get_type`（仿真）<br>`/r2/detection/{front,left,right}/get_type`（实机） | `robot_r2_interfaces/srv/GetKfsType` | 仿真、实机 |
 | LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
 | KFS 装载     | `/r2/kfs/load`               | `robot_r2_interfaces/srv/LoadKfs`             | 仿真、实机 |
 | KFS 释放     | `/r2/kfs/release`            | `robot_r2_interfaces/srv/ReleaseKfs`          | 仿真、实机 |
@@ -173,8 +174,7 @@ ros2 param set /kfs_roi visualization_enabled true
 # 仿真检测节点：
 ros2 param set /kfs_detect visualization_enabled true
 # 实机检测节点：
-ros2 param set /kfs_detect_left visualization_enabled true
-ros2 param set /kfs_detect_right visualization_enabled true
+ros2 param set /kfs_detect_fused visualization_enabled true
 ros2 param set /led_detect visualization_enabled true
 ros2 param set /r2/front_camera_controller visualization_enabled true
 ros2 param set /camera_frame_postprocess visualization_enabled true
@@ -184,7 +184,7 @@ ros2 param set /right_mipi_camera visualization_enabled true
 
 将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 同时控制
 `/r2/kfs/roi/debug` 和 `/r2/alignment/debug`；仿真 KFS 检测调试图像为
-`/r2/detection/debug`，实机左右检测分别为 `/r2/detection/{left,right}/debug`；
+`/r2/detection/debug`，实机三路检测分别为 `/r2/detection/{front,left,right}/debug`；
 LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后处理以及左右
 实体相机也使用同一个动态参数控制各自的 `/debug` 图像。这些调试话题均使用
 `sensor_msgs/msg/Image`。
@@ -197,8 +197,8 @@ ros2 service call /r2/detection/get_type \
   "{sample_count: 10, timeout_sec: 10.0}"
 ```
 
-上面是仿真服务。实机左右相机分别使用
-`/r2/detection/left/get_type` 和 `/r2/detection/right/get_type`，请求格式相同。
+上面是仿真服务。实机前、左、右相机分别使用
+`/r2/detection/{front,left,right}/get_type`，请求格式相同。
 
 LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：
 

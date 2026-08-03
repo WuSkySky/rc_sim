@@ -25,5 +25,6 @@ led_detect:
     led_radius_mm: 10.0
     brightness_threshold: 200.0
 
-    # Warn when one frame takes longer than the 10 Hz camera period.
-    target_processing_rate: 10.0
+    # Actual processing cap (not only a warning threshold). Incoming frames
+    # above this rate are dropped before CameraFrame conversion and ArUco work.
+    target_processing_rate: 5.0

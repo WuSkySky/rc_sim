@@ -37,6 +37,15 @@ STABLE_MATCH_FRAMES = 5
 SERVICE_TIMEOUT_SEC = 60.0
 
 
+def _advance_rate_limit(
+    now: float, next_allowed: float, period: float
+) -> tuple[bool, float]:
+    """Return whether to process now and the next allowed monotonic time."""
+    if now < next_allowed:
+        return False, next_allowed
+    return True, now + period
+
+
 class LedDetectNode(Node):
     """Detect configurable LEDs and wait for a requested target state."""
 
@@ -53,6 +62,7 @@ class LedDetectNode(Node):
         self._service_last_valid_states: tuple[bool, ...] | None = None
         self._service_last_reason = ""
         self._tracker: TargetMatchTracker | None = None
+        self._next_processing_at = 0.0
 
         self._declare_parameters()
         self._load_parameters()
@@ -106,7 +116,7 @@ class LedDetectNode(Node):
         )
         self.declare_parameter("led_radius_mm", 10.0)
         self.declare_parameter("brightness_threshold", 200.0)
-        self.declare_parameter("target_processing_rate", 10.0)
+        self.declare_parameter("target_processing_rate", 5.0)
 
     def _load_parameters(self) -> None:
         self._image_topic = str(
@@ -200,6 +210,7 @@ class LedDetectNode(Node):
         self._led_count = led_count
         self._target_processing_rate = target_processing_rate
         self._processing_deadline_sec = 1.0 / target_processing_rate
+        self._processing_period_sec = 1.0 / target_processing_rate
         self._state_detector = LedStateDetector(
             detector=ArucoDetector(aruco_dictionary),
             mapper=mapper,
@@ -212,10 +223,27 @@ class LedDetectNode(Node):
     def _on_parameters_changed(self, parameters) -> SetParametersResult:
         continuous_detection = None
         visualization_enabled = None
+        processing_rate = None
         for parameter in parameters:
+            if parameter.name == "target_processing_rate":
+                if isinstance(parameter.value, bool) or not isinstance(
+                    parameter.value, (int, float)
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason="target_processing_rate must be a number",
+                    )
+                processing_rate = float(parameter.value)
+                if not math.isfinite(processing_rate) or processing_rate <= 0:
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            "target_processing_rate must be finite and positive"
+                        ),
+                    )
+                continue
             if parameter.name not in (
-                "continuous_detection",
-                "visualization_enabled",
+                "continuous_detection", "visualization_enabled"
             ):
                 continue
             if not isinstance(parameter.value, bool):
@@ -240,17 +268,34 @@ class LedDetectNode(Node):
                 self._visualization_enabled = visualization_enabled
             state = "enabled" if visualization_enabled else "disabled"
             self.get_logger().info(f"LED visualization {state}")
+        if processing_rate is not None:
+            with self._state_condition:
+                self._target_processing_rate = processing_rate
+                self._processing_deadline_sec = 1.0 / processing_rate
+                self._processing_period_sec = 1.0 / processing_rate
+                self._next_processing_at = 0.0
+            self.get_logger().info(
+                "LED processing rate limit changed to "
+                f"{processing_rate:g} Hz"
+            )
         return SetParametersResult(successful=True)
 
     def _on_image(self, message: CameraFrame) -> None:
+        started_at = time.monotonic()
         with self._state_condition:
             should_process = (
                 self._continuous_detection or self._service_active
             )
-        if not should_process:
-            return
+            allowed, next_processing_at = _advance_rate_limit(
+                started_at,
+                self._next_processing_at,
+                self._processing_period_sec,
+            )
+            if not should_process or not allowed:
+                return
+            # Drop excess frames before CameraFrame conversion and ArUco work.
+            self._next_processing_at = next_processing_at
 
-        started_at = time.monotonic()
         image: np.ndarray | None = None
         try:
             image = camera_frame_to_bgr(message)
@@ -348,6 +393,9 @@ class LedDetectNode(Node):
                     required_frames=STABLE_MATCH_FRAMES,
                 )
                 self._service_active = True
+                # Let a newly-started request consume the next arriving frame
+                # immediately instead of waiting for a previous rate-limit slot.
+                self._next_processing_at = started_at
 
             try:
                 while rclpy.ok():

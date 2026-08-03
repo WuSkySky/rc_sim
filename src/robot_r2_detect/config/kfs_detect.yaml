@@ -12,6 +12,11 @@
     conf: 0.5
     # Warn when one frame takes longer than the 30 Hz camera period.
     target_processing_rate: 30.0
+    # The fused C++ node runs at this maximum batch rate. It consumes the
+    # newest frame from every available camera and never waits for a missing
+    # camera. Frames older than the timeout are ignored.
+    inference_rate: 30.0
+    frame_stale_timeout_sec: 0.5
     default_vote_timeout_sec: 10.0
 
     simulation_team: blue

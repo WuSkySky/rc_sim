@@ -30,11 +30,11 @@ using CameraMode = std::array<int64_t, 3>;
 using CameraFrame = robot_r2_interfaces::msg::CameraFrame;
 
 constexpr std::array<CameraMode, 5> kSupportedModes{{
-  {3280, 2464, 21},
-  {3280, 1848, 28},
   {1920, 1080, 30},
-  {1640, 1232, 30},
   {1280, 720, 60},
+  {1280, 720, 30},
+  {640, 480 ,60},
+  {640, 480, 30},
 }};
 
 std::string mode_to_string(const CameraMode & mode)

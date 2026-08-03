@@ -312,7 +312,15 @@ class LedStateDetector:
     def detect(self, image) -> LedDetectionResult:
         """Return LED states for the largest matching ArUco marker."""
         try:
-            detections = self._detector.detect(image)
+            import cv2
+
+            gray = (
+                cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                if image.ndim == 3
+                else image
+            )
+            # Reuse one grayscale conversion for both ArUco and every LED ROI.
+            detections = self._detector.detect(gray)
         except Exception as exc:
             return LedDetectionResult(
                 valid=False,
@@ -354,7 +362,7 @@ class LedStateDetector:
             )
 
         try:
-            brightness = tuple(roi_mean(image, roi) for roi in rois)
+            brightness = tuple(roi_mean(gray, roi) for roi in rois)
         except Exception as exc:
             return LedDetectionResult(
                 valid=False,

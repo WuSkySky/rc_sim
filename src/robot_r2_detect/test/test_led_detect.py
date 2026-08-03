@@ -1,8 +1,9 @@
 """Tests for LED detection result message construction."""
 
 import numpy as np
+import pytest
 
-from robot_r2_detect.led_detect import LedDetectNode
+from robot_r2_detect.led_detect import LedDetectNode, _advance_rate_limit
 from robot_r2_detect.led_detection import LedDetectionResult
 from robot_r2_interfaces.msg import CameraFrame
 
@@ -64,3 +65,17 @@ def test_invalid_source_header_becomes_invalid_result():
     assert not message.valid
     assert list(message.led_states) == []
     assert "failed to read source frame header" in message.reason
+
+
+def test_rate_limit_drops_frames_until_period_elapsed():
+    allowed, next_allowed = _advance_rate_limit(10.0, 0.0, 0.2)
+    assert allowed
+    assert next_allowed == pytest.approx(10.2)
+
+    allowed, unchanged = _advance_rate_limit(10.1, next_allowed, 0.2)
+    assert not allowed
+    assert unchanged == next_allowed
+
+    allowed, following = _advance_rate_limit(10.2, next_allowed, 0.2)
+    assert allowed
+    assert following == pytest.approx(10.4)

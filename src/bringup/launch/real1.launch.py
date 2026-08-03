@@ -10,11 +10,6 @@ from launch_ros.actions import Node
 MIPI_IMAGE_TOPIC = '/r2/mipi_camera/image_raw'
 MIPI_DEBUG_TOPIC = '/r2/mipi_camera/image_raw/debug'
 MIPI_CAMERA_INFO_TOPIC = '/r2/mipi_camera/camera_info'
-KFS_IMAGE_TOPIC = '/r2/left_camera/image_raw'
-KFS_RAW_TOPIC = '/r2/detection/raw'
-KFS_PROCESSED_TOPIC = '/r2/detection/processed'
-KFS_DEBUG_TOPIC = '/r2/detection/debug'
-KFS_GET_TYPE_SERVICE = '/r2/detection/get_type'
 
 
 def mipi_camera_node(side, config):
@@ -33,21 +28,12 @@ def mipi_camera_node(side, config):
     )
 
 
-def kfs_detect_node(side, config):
-    camera_prefix = f'/r2/{side}_camera'
-    detection_prefix = f'/r2/detection/{side}'
+def fused_kfs_detect_node(config):
     return Node(
-        package='robot_r2_detect',
-        executable='kfs_detect',
-        name=f'kfs_detect_{side}',
+        package='robot_r2_detect_cpp',
+        executable='kfs_detect_fused',
+        name='kfs_detect_fused',
         parameters=[config],
-        remappings=[
-            (KFS_IMAGE_TOPIC, f'{camera_prefix}/image_raw'),
-            (KFS_RAW_TOPIC, f'{detection_prefix}/raw'),
-            (KFS_PROCESSED_TOPIC, f'{detection_prefix}/processed'),
-            (KFS_DEBUG_TOPIC, f'{detection_prefix}/debug'),
-            (KFS_GET_TYPE_SERVICE, f'{detection_prefix}/get_type'),
-        ],
         output='screen',
     )
 
@@ -75,8 +61,7 @@ def generate_launch_description():
         'config',
         'kfs_detect.yaml',
     )
-    left_kfs_detect = kfs_detect_node('left', kfs_detect_config)
-    right_kfs_detect = kfs_detect_node('right', kfs_detect_config)
+    fused_kfs_detect = fused_kfs_detect_node(kfs_detect_config)
 
     kfs_roi_config = os.path.join(
         detect_pkg,
@@ -113,7 +98,6 @@ def generate_launch_description():
         ),
         left_mipi_camera,
         right_mipi_camera,
-        left_kfs_detect,
-        right_kfs_detect,
+        fused_kfs_detect,
         kfs_roi,
     ])
