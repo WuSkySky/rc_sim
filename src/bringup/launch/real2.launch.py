@@ -2,24 +2,43 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     bringup_pkg = get_package_share_directory('bringup')
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
-    mipi_camera_pkg = get_package_share_directory('mipi_camera')
     odin_driver_pkg = get_package_share_directory('odin_ros_driver')
     odin_data_postprocess_pkg = get_package_share_directory(
         'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
+    controller_pkg = get_package_share_directory('robot_r2_controller')
     detect_pkg = get_package_share_directory('robot_r2_detect')
     fastdds_profile = os.path.join(
         interfaces_pkg,
         'config',
         'fastdds_camera.xml',
+    )
+
+    control_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                bringup_pkg,
+                'launch',
+                'control.launch.py',
+            )
+        ),
+        launch_arguments={
+            'kfs_get_type_service': LaunchConfiguration(
+                'kfs_get_type_service'),
+        }.items(),
     )
 
     odin_launch = IncludeLaunchDescription(
@@ -28,26 +47,6 @@ def generate_launch_description():
                 odin_driver_pkg,
                 'launch',
                 'odin1_ros2_no_rviz.launch.py',
-            )
-        )
-    )
-
-    mipi_camera_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                mipi_camera_pkg,
-                'launch',
-                'mipi_camera.launch.py',
-            )
-        )
-    )
-
-    kfs_detect_multi_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                detect_pkg,
-                'launch',
-                'kfs_detect_multi.launch.py',
             )
         )
     )
@@ -76,21 +75,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    control_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                bringup_pkg,
-                'launch',
-                'control.launch.py',
-            )
-        ),
-        launch_arguments={
-            'simulation_state_detection': 'false',
-            'start_kfs_detect': 'false',
-            'kfs_get_type_service': '/r2/detection/front/get_type',
-        }.items(),
-    )
-
     serial_bridge_config = os.path.join(
         serial_pkg,
         'config',
@@ -106,6 +90,37 @@ def generate_launch_description():
         output='screen',
     )
 
+    kfs_alignment_config = os.path.join(
+        controller_pkg,
+        'config',
+        'kfs_alignment.yaml',
+    )
+    kfs_alignment = Node(
+        package='robot_r2_controller',
+        executable='kfs_alignment',
+        parameters=[kfs_alignment_config],
+        output='screen',
+    )
+
+    led_detect_config = os.path.join(
+        detect_pkg,
+        'config',
+        'led_detect.yaml',
+    )
+    led_detect = Node(
+        package='robot_r2_detect',
+        executable='led_detect',
+        name='led_detect',
+        parameters=[led_detect_config],
+        remappings=[
+            (
+                '/r2/left_camera/image_raw',
+                '/r2/front_camera/image_raw',
+            ),
+        ],
+        output='screen',
+    )
+
     return LaunchDescription([
         SetEnvironmentVariable(
             'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
@@ -115,11 +130,16 @@ def generate_launch_description():
             'FASTDDS_DEFAULT_PROFILES_FILE', fastdds_profile),
         SetEnvironmentVariable(
             'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
+        DeclareLaunchArgument(
+            'kfs_get_type_service',
+            default_value='/r2/detection/left/get_type',
+            description='Remote KFS detection service used by control',
+        ),
         odin_launch,
         camera_frame_postprocess,
-        mipi_camera_launch,
-        kfs_detect_multi_launch,
         odometry_postprocess,
         control_launch,
         serial_bridge,
+        kfs_alignment,
+        led_detect,
     ])

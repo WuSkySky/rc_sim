@@ -19,7 +19,8 @@ def generate_launch_description():
     robot_pkg = get_package_share_directory('robot_r2_description')
     robot_prefix = get_package_prefix('robot_r2_description')
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
-    serial_pkg = get_package_share_directory('serial_pkg')
+    controller_pkg = get_package_share_directory('robot_r2_controller')
+    detect_pkg = get_package_share_directory('robot_r2_detect')
     fastdds_profile = os.path.join(
         interfaces_pkg,
         'config',
@@ -65,17 +66,62 @@ def generate_launch_description():
         output='screen',
     )
 
-    serial_bridge_config = os.path.join(
-        serial_pkg,
+    kfs_alignment_config = os.path.join(
+        controller_pkg,
         'config',
-        'serial_bridge.yaml',
+        'kfs_alignment.yaml',
     )
-    serial_bridge = Node(
-        package='serial_pkg',
-        executable='serial_bridge',
+    kfs_alignment = Node(
+        package='robot_r2_controller',
+        executable='kfs_alignment',
+        parameters=[kfs_alignment_config],
+        output='screen',
+    )
+
+    kfs_roi_config = os.path.join(
+        detect_pkg,
+        'config',
+        'kfs_roi.yaml',
+    )
+    kfs_roi = Node(
+        package='robot_r2_detect',
+        executable='kfs_roi',
+        name='kfs_roi',
+        parameters=[kfs_roi_config],
+        output='screen',
+    )
+
+    kfs_detect_config = os.path.join(
+        detect_pkg,
+        'config',
+        'kfs_detect.yaml',
+    )
+    kfs_detect = Node(
+        package='robot_r2_detect',
+        executable='kfs_detect',
+        name='kfs_detect',
         parameters=[
-            serial_bridge_config,
-            {'receive_feedback_enabled': False},
+            kfs_detect_config,
+            {'simulation_state_detection': True},
+        ],
+        output='screen',
+    )
+
+    led_detect_config = os.path.join(
+        detect_pkg,
+        'config',
+        'led_detect.yaml',
+    )
+    led_detect = Node(
+        package='robot_r2_detect',
+        executable='led_detect',
+        name='led_detect',
+        parameters=[led_detect_config],
+        remappings=[
+            (
+                '/r2/left_camera/image_raw',
+                '/r2/front_camera/image_raw',
+            ),
         ],
         output='screen',
     )
@@ -102,6 +148,9 @@ def generate_launch_description():
         field_launch,
         spawn_robot_r2,
         control_launch,
+        kfs_roi,
+        kfs_alignment,
+        kfs_detect,
+        led_detect,
         teleop_control,
-        # serial_bridge,
     ])

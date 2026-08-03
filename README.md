@@ -2,16 +2,36 @@
 
 ## 启动
 
+仿真：
+
 ```bash
 source install/setup.bash
 ros2 launch bringup sim.launch.py
 ```
 
-实车控制与串口：
+实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
+Fast DDS 配置。real1 负责左右 MIPI 相机、左右 KFS 识别和 KFS ROI：
 
 ```bash
 source install/setup.bash
-ros2 launch bringup real.launch.py
+ros2 launch bringup real1.launch.py
+```
+
+real2 负责控制、串口、KFS 对齐、Odin 及 LED 检测：
+
+```bash
+source install/setup.bash
+ros2 launch bringup real2.launch.py
+```
+
+real1 的 ROI 默认使用左相机，real2 的阶段任务默认使用左侧 KFS 识别服务。
+需要改用右侧时分别执行：
+
+```bash
+ros2 launch bringup real1.launch.py \
+  roi_image_topic:=/r2/right_camera/image_raw
+ros2 launch bringup real2.launch.py \
+  kfs_get_type_service:=/r2/detection/right/get_type
 ```
 
 ## ROS 2 服务
@@ -42,7 +62,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 四轮抬升       | `/r2/lift/set`               | `robot_r2_interfaces/srv/SetLift`             | 仿真、实机 |
 | 跨越台阶       | `/r2/step_traverse`          | `robot_r2_interfaces/srv/TraverseStep`        | 仿真、实机 |
 | KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/AlignToKFS`          | 仿真、实机 |
-| KFS 类型检测   | `/r2/detection/get_type`     | `robot_r2_interfaces/srv/GetKfsType`          | 仿真、实机 |
+| KFS 类型检测   | `/r2/detection/get_type`（仿真）<br>`/r2/detection/{left,right}/get_type`（实机） | `robot_r2_interfaces/srv/GetKfsType` | 仿真、实机 |
 | LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
 | KFS 装载     | `/r2/kfs/load`               | `robot_r2_interfaces/srv/LoadKfs`             | 仿真、实机 |
 | KFS 释放     | `/r2/kfs/release`            | `robot_r2_interfaces/srv/ReleaseKfs`          | 仿真、实机 |
@@ -109,10 +129,10 @@ ros2 service call /r2/set_base_pose \
   "{x: 1.5, y: -0.5, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 1.5708}"
 ```
 
-该服务由 `real.launch.py` 中的 `map_odom_tf_publisher` 提供。它会更新
-`map -> odom`，从而校正 `/r2/pose_feedback` 和底盘位置伺服使用的地图位姿；
-不会清空 Odin 发布的原始里程计数据。调用时必须已经存在
-`odom -> base_link` TF，否则服务会返回失败。
+该服务由 `real2.launch.py` 启动的 `odometry_postprocess` 提供。它根据 Odin
+里程计和外参更新 `map -> odom`，从而校正 `/r2/pose_feedback` 和底盘位置伺服
+使用的地图位姿；不会清空 Odin 发布的原始里程计数据。尚未收到 Odin 里程计时，
+服务会返回失败。
 
 四轮抬升：
 
@@ -130,7 +150,8 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 
 ### KFS 与视觉
 
-KFS 视觉对齐会根据前相机中的红蓝区域横向移动底盘：
+KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
+前相机；实机 ROI 由 real1 发布，默认使用左 MIPI 相机，也可在启动时切换为右相机：
 
 ```bash
 ros2 service call /r2/align_to_kfs \
@@ -141,14 +162,19 @@ ros2 service call /r2/align_to_kfs \
 `pixel_tolerance` 是允许的图像横向像素误差，`timeout_sec` 是整个对齐过程的
 最大等待时间。两项都填写 `0.0` 时使用 `kfs_alignment.yaml` 中的默认值。
 返回值中的 `success` 表示是否连续稳定达到容差，`final_offset_x` 是最后一次
-有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于前相机视野内。
+有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于当前 ROI 输入相机
+的视野内。
 
 可视化默认关闭。所有可能发布调试图像的节点统一使用动态参数
 `visualization_enabled`，可在运行时开启或关闭：
 
 ```bash
 ros2 param set /kfs_roi visualization_enabled true
+# 仿真检测节点：
 ros2 param set /kfs_detect visualization_enabled true
+# 实机检测节点：
+ros2 param set /kfs_detect_left visualization_enabled true
+ros2 param set /kfs_detect_right visualization_enabled true
 ros2 param set /led_detect visualization_enabled true
 ros2 param set /r2/front_camera_controller visualization_enabled true
 ros2 param set /camera_frame_postprocess visualization_enabled true
@@ -157,10 +183,11 @@ ros2 param set /right_mipi_camera visualization_enabled true
 ```
 
 将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 同时控制
-`/r2/kfs/roi/debug` 和 `/r2/alignment/debug`；检测与 LED 节点分别控制
-`/r2/detection/debug` 和 `/r2/led_detection/debug`。仿真前相机、Odin
-后处理以及左右实体相机也使用同一个动态参数控制各自的 `/debug` 图像。这些
-调试话题均使用 `sensor_msgs/msg/Image`。
+`/r2/kfs/roi/debug` 和 `/r2/alignment/debug`；仿真 KFS 检测调试图像为
+`/r2/detection/debug`，实机左右检测分别为 `/r2/detection/{left,right}/debug`；
+LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后处理以及左右
+实体相机也使用同一个动态参数控制各自的 `/debug` 图像。这些调试话题均使用
+`sensor_msgs/msg/Image`。
 
 KFS 类型检测：
 
@@ -169,6 +196,9 @@ ros2 service call /r2/detection/get_type \
   robot_r2_interfaces/srv/GetKfsType \
   "{sample_count: 10, timeout_sec: 10.0}"
 ```
+
+上面是仿真服务。实机左右相机分别使用
+`/r2/detection/left/get_type` 和 `/r2/detection/right/get_type`，请求格式相同。
 
 LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：
 

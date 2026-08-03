@@ -24,11 +24,6 @@ def generate_launch_description():
         config_directory,
         "kfs_detect.yaml",
     )
-    roi_config = os.path.join(
-        config_directory,
-        "kfs_roi.yaml",
-    )
-
     return LaunchDescription(
         [
             SetEnvironmentVariable(
@@ -53,23 +48,15 @@ def generate_launch_description():
 
             Node(
                 package="robot_r2_detect",
-                executable="kfs_roi",
-                name="kfs_roi",
-                output="screen",
-                parameters=[
-                    roi_config,
-                    {
-                        "color_topic": LaunchConfiguration(
-                            "color_topic"
-                        ),
-                    },
-                ],
-            ),
-            Node(
-                package="robot_r2_detect",
                 executable="kfs_detect",
                 name="kfs_detect",
                 output="screen",
+                remappings=[
+                    (
+                        "/r2/left_camera/image_raw",
+                        LaunchConfiguration("color_topic"),
+                    ),
+                ],
                 parameters=[
                     detect_config,
                     {

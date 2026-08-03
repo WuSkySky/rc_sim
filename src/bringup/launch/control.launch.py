@@ -3,16 +3,13 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
-from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     control_pkg = get_package_share_directory('robot_r2_control')
     controller_pkg = get_package_share_directory('robot_r2_controller')
-    detect_pkg = get_package_share_directory('robot_r2_detect')
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
     fastdds_profile = os.path.join(
         interfaces_pkg,
@@ -56,11 +53,6 @@ def generate_launch_description():
         'config',
         'chassis_lift.yaml',
     )
-    kfs_alignment_config = os.path.join(
-        controller_pkg,
-        'config',
-        'kfs_alignment.yaml',
-    )
     kfs_lift_config = os.path.join(
         controller_pkg,
         'config',
@@ -81,22 +73,6 @@ def generate_launch_description():
         'config',
         'kfs_gripper_grip.yaml',
     )
-    kfs_detect_config = os.path.join(
-        detect_pkg,
-        'config',
-        'kfs_detect.yaml',
-    )
-    kfs_roi_config = os.path.join(
-        detect_pkg,
-        'config',
-        'kfs_roi.yaml',
-    )
-    led_detect_config = os.path.join(
-        detect_pkg,
-        'config',
-        'led_detect.yaml',
-    )
-
     stage_two_control = Node(
         package='robot_r2_control',
         executable='stage_two_control',
@@ -158,21 +134,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    kfs_alignment = Node(
-        package='robot_r2_controller',
-        executable='kfs_alignment',
-        parameters=[kfs_alignment_config],
-        output='screen',
-    )
-
-    kfs_roi = Node(
-        package='robot_r2_detect',
-        executable='kfs_roi',
-        name='kfs_roi',
-        output='screen',
-        parameters=[kfs_roi_config],
-    )
-
     kfs_lift = Node(
         package='robot_r2_controller',
         executable='kfs_lift',
@@ -201,31 +162,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    kfs_detect = Node(
-        package='robot_r2_detect',
-        executable='kfs_detect',
-        name='kfs_detect',
-        output='screen',
-        condition=IfCondition(LaunchConfiguration('start_kfs_detect')),
-        parameters=[
-            kfs_detect_config,
-            {
-                'simulation_state_detection': ParameterValue(
-                    LaunchConfiguration('simulation_state_detection'),
-                    value_type=bool,
-                ),
-            }
-        ],
-    )
-
-    led_detect = Node(
-        package='robot_r2_detect',
-        executable='led_detect',
-        name='led_detect',
-        output='screen',
-        parameters=[led_detect_config],
-    )
-
     return LaunchDescription([
         SetEnvironmentVariable(
             'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
@@ -235,19 +171,6 @@ def generate_launch_description():
             'FASTDDS_DEFAULT_PROFILES_FILE', fastdds_profile),
         SetEnvironmentVariable(
             'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
-        DeclareLaunchArgument(
-            'simulation_state_detection',
-            default_value='true',
-            description=(
-                'Infer KFS service results from the first simulation status '
-                'and the live robot grid pose'
-            ),
-        ),
-        DeclareLaunchArgument(
-            'start_kfs_detect',
-            default_value='true',
-            description='Start the single KFS detection node',
-        ),
         DeclareLaunchArgument(
             'kfs_get_type_service',
             default_value='/r2/detection/get_type',
@@ -260,12 +183,8 @@ def generate_launch_description():
         step_traverse,
         chassis_pose_servo,
         chassis_lift,
-        kfs_roi,
-        kfs_alignment,
         kfs_lift,
         kfs_gripper_rotate,
         kfs_gripper_tip_rotate,
         kfs_gripper_grip,
-        kfs_detect,
-        led_detect,
     ])

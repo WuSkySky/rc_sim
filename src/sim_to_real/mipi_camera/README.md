@@ -19,9 +19,9 @@ independently of Robot R2:
 The configured device is resolved from its udev symlink to the current
 `/dev/videoN` target, then mapped to Argus `sensor-id=N`.
 
-The launch file starts both physical cameras. The common `mode` parameter is
-one `[width, height, framerate]` array shared by both nodes. It must be one of
-the IMX219 modes detected on the Jetson:
+The real1 bringup starts both physical camera nodes. The common `mode`
+parameter is one `[width, height, framerate]` array shared by both nodes. It
+must be one of the IMX219 modes detected on the Jetson:
 
 - `[3280, 2464, 21]`
 - `[3280, 1848, 28]`
@@ -35,7 +35,7 @@ Each MIPI camera instance publishes generic topics internally:
 - `/r2/mipi_camera/image_raw/debug` (`sensor_msgs/Image`, disabled by default)
 - `/r2/mipi_camera/camera_info`
 
-The launch file remaps them to:
+The real1 bringup remaps them to:
 
 - `/r2/left_camera/image_raw`
 - `/r2/left_camera/image_raw/debug`
@@ -47,12 +47,12 @@ The launch file remaps them to:
 The `CameraInfo` messages contain the image dimensions but no calibration
 matrix until the cameras have been calibrated.
 
-`mipi_camera.launch.py` selects `rmw_fastrtps_cpp` and loads the shared Fast
-DDS profile installed by `robot_r2_interfaces`. Image QoS is Best Effort,
-Keep Last 1, Volatile; Data Sharing is `AUTOMATIC`.
+`real1.launch.py` selects `rmw_fastrtps_cpp`, loads the shared Fast DDS profile
+installed by `robot_r2_interfaces`, and directly starts the two driver nodes.
+Image QoS is Best Effort, Keep Last 1, Volatile; Data Sharing is `AUTOMATIC`.
 
 ```bash
-ros2 launch mipi_camera mipi_camera.launch.py
+ros2 launch bringup real1.launch.py
 ```
 
 Debug image publication is controlled by the dynamic
