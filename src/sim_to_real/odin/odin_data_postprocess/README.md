@@ -1,11 +1,11 @@
 # odin_data_postprocess
 
-Odin 里程计数据的 ROS 2 后处理节点，包括：
+Odin 数据的 ROS 2 后处理节点，包括：
 
 - 将 Odin 的普通去畸变图像转换为 bounded `CameraFrame`；
-- 发布校正后的 `odom -> base_link` TF；
-- 将 `map -> base_link` 转发到 `/r2/pose_feedback`；
-- 发布可通过服务重设的 `map -> odom` TF。
+- 由单个 `odometry_postprocess` 节点发布校正后的
+  `map -> odom -> base_link` TF 和静态 `base_link -> odin_link` TF；
+- 发布 `/r2/pose_feedback`，并通过服务重设 `map` 中的机器人位姿。
 
 `camera_frame_postprocess` 订阅 `/odin1/image/undistorted`，发布
 `/r2/front_camera/image_raw`。普通调试图像默认关闭，可在运行时动态开启
@@ -16,13 +16,13 @@ Odin 里程计数据的 ROS 2 后处理节点，包括：
 ros2 param set /camera_frame_postprocess visualization_enabled true
 ```
 
-## `map_odom_tf_publisher` 调试
+## `odometry_postprocess` 调试
 
 以下命令均在工作区根目录执行。
 
 ### 构建并加载环境
 
-新增了自定义服务接口，首次使用前需要同时构建接口包和节点包：
+首次使用前需要同时构建接口包和节点包：
 
 ```bash
 colcon build --symlink-install --packages-select \
@@ -32,12 +32,12 @@ source install/setup.bash
 
 ### 单独启动节点
 
-运行前需要确保系统中已经存在 `odom -> base_link` TF：
+单独运行节点：
 
 ```bash
-ros2 run odin_data_postprocess map_odom_tf_publisher \
+ros2 run odin_data_postprocess odometry_postprocess \
   --ros-args \
-  --params-file src/sim_to_real/odin/odin_data_postprocess/config/map_odom_tf_publisher.yaml
+  --params-file src/sim_to_real/odin/odin_data_postprocess/config/odometry_postprocess.yaml
 ```
 
 也可以启动完整实机系统，新节点已接入 `real.launch.py`：
@@ -47,13 +47,13 @@ ros2 launch bringup real.launch.py
 ```
 
 实机启动使用 Odin 配置中的 `use_host_ros_time: 1`，使 Odin 里程计和
-`map_odom_tf_publisher` 使用相同的主机 ROS 时间。不要改回未经对齐的设备时间，
+`odometry_postprocess` 使用相同的主机 ROS 时间。不要改回未经对齐的设备时间，
 否则 `map -> odom -> base_link` 可能因时间戳差距过大而无法组合查询。
 
 ### 检查节点、服务和 TF
 
 ```bash
-ros2 node info /map_odom_tf_publisher
+ros2 node info /odometry_postprocess
 ros2 service type /r2/set_base_pose
 ros2 topic echo /r2/pose_feedback --once
 ros2 run tf2_ros tf2_echo map odom
@@ -97,3 +97,10 @@ ros2 service call /r2/set_base_pose \
 
 该节点面向 Odin 的 `custom_map_mode: 0` 里程计模式使用。不要与其他
 `map -> odom` 发布者或 Odin 重定位模式同时启用。
+
+节点默认以 50 Hz 发布 TF 和位姿反馈。外参、默认位姿和发布频率均可在
+运行时修改；例如：
+
+```bash
+ros2 param set /odometry_postprocess publish_rate 50.0
+```

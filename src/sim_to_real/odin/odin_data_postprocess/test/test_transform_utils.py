@@ -37,6 +37,33 @@ def test_transform_composed_with_inverse_is_identity():
     _assert_vector_close(result_rotation, (0.0, 0.0, 0.0, 1.0))
 
 
+def test_sensor_offset_is_removed_from_odometry_pose():
+    odom_to_base_translation = (2.0, -1.0, 0.4)
+    odom_to_base_rotation = quaternion_from_rpy(0.0, 0.0, 0.6)
+    base_to_sensor_translation = (0.3, -0.1, 0.2)
+    base_to_sensor_rotation = quaternion_from_rpy(0.0, 0.1, -0.2)
+    odom_to_sensor_translation, odom_to_sensor_rotation = compose_transforms(
+        odom_to_base_translation,
+        odom_to_base_rotation,
+        base_to_sensor_translation,
+        base_to_sensor_rotation,
+    )
+    sensor_to_base_translation, sensor_to_base_rotation = invert_transform(
+        base_to_sensor_translation,
+        base_to_sensor_rotation,
+    )
+
+    result_translation, result_rotation = compose_transforms(
+        odom_to_sensor_translation,
+        odom_to_sensor_rotation,
+        sensor_to_base_translation,
+        sensor_to_base_rotation,
+    )
+
+    _assert_vector_close(result_translation, odom_to_base_translation)
+    _assert_vector_close(result_rotation, odom_to_base_rotation)
+
+
 def test_map_to_odom_places_base_at_target_pose():
     odom_to_base_translation = (2.0, -1.0, 0.5)
     odom_to_base_rotation = quaternion_from_rpy(0.1, 0.2, -0.4)

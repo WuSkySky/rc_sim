@@ -3,7 +3,7 @@
   ros__parameters:
     # [width, height, framerate]. Supported modes:
     # [3280, 2464, 21], [3280, 1848, 28], [1920, 1080, 30], [1640, 1232, 30], [1280, 720, 60].
-    mode: [1920, 1080, 30]
+    mode: [1280, 720, 60]
 
     # NVIDIA nvvidconv flip method, 0 means no rotation or mirroring.
     flip_method: 0

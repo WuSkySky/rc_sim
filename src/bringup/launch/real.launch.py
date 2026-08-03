@@ -64,39 +64,15 @@ def generate_launch_description():
         output='screen',
     )
 
-    odometry_tf_config = os.path.join(
+    odometry_config = os.path.join(
         odin_data_postprocess_pkg,
         'config',
-        'odometry_tf_publisher.yaml',
+        'odometry_postprocess.yaml',
     )
-    odometry_tf_publisher = Node(
+    odometry_postprocess = Node(
         package='odin_data_postprocess',
-        executable='odometry_tf_publisher',
-        parameters=[odometry_tf_config],
-        output='screen',
-    )
-
-    odometry_pose_config = os.path.join(
-        odin_data_postprocess_pkg,
-        'config',
-        'odometry_pose_republisher.yaml',
-    )
-    odometry_pose_republisher = Node(
-        package='odin_data_postprocess',
-        executable='odometry_pose_republisher',
-        parameters=[odometry_pose_config],
-        output='screen',
-    )
-
-    map_odom_tf_config = os.path.join(
-        odin_data_postprocess_pkg,
-        'config',
-        'map_odom_tf_publisher.yaml',
-    )
-    map_odom_tf_publisher = Node(
-        package='odin_data_postprocess',
-        executable='map_odom_tf_publisher',
-        parameters=[map_odom_tf_config],
+        executable='odometry_postprocess',
+        parameters=[odometry_config],
         output='screen',
     )
 
@@ -143,9 +119,7 @@ def generate_launch_description():
         camera_frame_postprocess,
         mipi_camera_launch,
         kfs_detect_multi_launch,
-        odometry_tf_publisher,
-        odometry_pose_republisher,
-        map_odom_tf_publisher,
+        odometry_postprocess,
         control_launch,
         serial_bridge,
     ])

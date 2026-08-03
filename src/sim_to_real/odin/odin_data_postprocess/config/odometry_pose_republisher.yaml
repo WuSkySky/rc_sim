@@ -1,6 +1,0 @@
-odometry_pose_republisher:
-  ros__parameters:
-    output_pose_topic: /r2/pose_feedback
-    fixed_frame: map
-    base_frame: base_link
-    publish_rate: 100.0

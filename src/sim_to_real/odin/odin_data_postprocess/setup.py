@@ -18,10 +18,8 @@ setup(
         (
             os.path.join('share', package_name, 'config'),
             [
-                'config/map_odom_tf_publisher.yaml',
                 'config/camera_frame_postprocess.yaml',
-                'config/odometry_pose_republisher.yaml',
-                'config/odometry_tf_publisher.yaml',
+                'config/odometry_postprocess.yaml',
             ],
         ),
     ],
@@ -36,12 +34,8 @@ setup(
         'console_scripts': [
             'camera_frame_postprocess = '
             'odin_data_postprocess.camera_frame_postprocess:main',
-            'map_odom_tf_publisher = '
-            'odin_data_postprocess.map_odom_tf_publisher:main',
-            'odometry_pose_republisher = '
-            'odin_data_postprocess.odometry_pose_republisher:main',
-            'odometry_tf_publisher = '
-            'odin_data_postprocess.odometry_tf_publisher:main',
+            'odometry_postprocess = '
+            'odin_data_postprocess.odometry_postprocess:main',
         ],
     },
 )
