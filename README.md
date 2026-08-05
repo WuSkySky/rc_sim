@@ -10,28 +10,28 @@ ros2 launch bringup sim.launch.py
 ```
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责左右 MIPI 相机、前/左/右三路融合 KFS 识别和 KFS
-ROI。融合节点不会等待未接入的相机，因此只启动一至两路相机时也能正常推理：
+Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 及 LED 检测：
 
 ```bash
 source install/setup.bash
 ros2 launch bringup real1.launch.py
 ```
 
-real2 负责控制、串口、KFS 对齐、Odin 及 LED 检测：
+real2 负责左右 MIPI 相机、前/左/右三路融合 KFS 识别和 KFS
+ROI。融合节点不会等待未接入的相机，因此只启动一至两路相机时也能正常推理：
 
 ```bash
 source install/setup.bash
 ros2 launch bringup real2.launch.py
 ```
 
-real1 的 ROI 默认使用左相机，real2 的阶段任务默认使用左侧 KFS 识别服务。
+real2 的 ROI 默认使用左相机，real1 的阶段任务默认使用左侧 KFS 识别服务。
 需要改用右侧时分别执行：
 
 ```bash
-ros2 launch bringup real1.launch.py \
-  roi_image_topic:=/r2/right_camera/image_raw
 ros2 launch bringup real2.launch.py \
+  roi_image_topic:=/r2/right_camera/image_raw
+ros2 launch bringup real1.launch.py \
   kfs_get_type_service:=/r2/detection/right/get_type
 ```
 
@@ -130,7 +130,7 @@ ros2 service call /r2/set_base_pose \
   "{x: 1.5, y: -0.5, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 1.5708}"
 ```
 
-该服务由 `real2.launch.py` 启动的 `odometry_postprocess` 提供。它根据 Odin
+该服务由 `real1.launch.py` 启动的 `odometry_postprocess` 提供。它根据 Odin
 里程计和外参更新 `map -> odom`，从而校正 `/r2/pose_feedback` 和底盘位置伺服
 使用的地图位姿；不会清空 Odin 发布的原始里程计数据。尚未收到 Odin 里程计时，
 服务会返回失败。
@@ -152,7 +152,7 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 ### KFS 与视觉
 
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
-前相机；实机 ROI 由 real1 发布，默认使用左 MIPI 相机，也可在启动时切换为右相机：
+前相机；实机 ROI 由 real2 发布，默认使用左 MIPI 相机，也可在启动时切换为右相机：
 
 ```bash
 ros2 service call /r2/align_to_kfs \

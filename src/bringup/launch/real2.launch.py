@@ -2,24 +2,45 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    IncludeLaunchDescription,
-    SetEnvironmentVariable,
-)
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+MIPI_IMAGE_TOPIC = '/r2/mipi_camera/image_raw'
+MIPI_DEBUG_TOPIC = '/r2/mipi_camera/image_raw/debug'
+MIPI_CAMERA_INFO_TOPIC = '/r2/mipi_camera/camera_info'
+
+
+def mipi_camera_node(side, config):
+    camera_prefix = f'/r2/{side}_camera'
+    return Node(
+        package='mipi_camera',
+        executable='mipi_camera',
+        name=f'{side}_mipi_camera',
+        parameters=[config],
+        remappings=[
+            (MIPI_IMAGE_TOPIC, f'{camera_prefix}/image_raw'),
+            (MIPI_DEBUG_TOPIC, f'{camera_prefix}/image_raw/debug'),
+            (MIPI_CAMERA_INFO_TOPIC, f'{camera_prefix}/camera_info'),
+        ],
+        output='screen',
+    )
+
+
+def fused_kfs_detect_node(config):
+    return Node(
+        package='robot_r2_detect_cpp',
+        executable='kfs_detect_fused',
+        name='kfs_detect_fused',
+        parameters=[config],
+        output='screen',
+    )
+
+
 def generate_launch_description():
-    bringup_pkg = get_package_share_directory('bringup')
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
-    odin_driver_pkg = get_package_share_directory('odin_ros_driver')
-    odin_data_postprocess_pkg = get_package_share_directory(
-        'odin_data_postprocess')
-    serial_pkg = get_package_share_directory('serial_pkg')
-    controller_pkg = get_package_share_directory('robot_r2_controller')
+    mipi_camera_pkg = get_package_share_directory('mipi_camera')
     detect_pkg = get_package_share_directory('robot_r2_detect')
     fastdds_profile = os.path.join(
         interfaces_pkg,
@@ -27,95 +48,35 @@ def generate_launch_description():
         'fastdds_camera.xml',
     )
 
-    control_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                bringup_pkg,
-                'launch',
-                'control.launch.py',
-            )
-        ),
-        launch_arguments={
-            'kfs_get_type_service': LaunchConfiguration(
-                'kfs_get_type_service'),
-        }.items(),
-    )
-
-    odin_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                odin_driver_pkg,
-                'launch',
-                'odin1_ros2_no_rviz.launch.py',
-            )
-        )
-    )
-
-    camera_frame_config = os.path.join(
-        odin_data_postprocess_pkg,
+    mipi_camera_config = os.path.join(
+        mipi_camera_pkg,
         'config',
-        'camera_frame_postprocess.yaml',
+        'mipi_camera.yaml',
     )
-    camera_frame_postprocess = Node(
-        package='odin_data_postprocess',
-        executable='camera_frame_postprocess',
-        parameters=[camera_frame_config],
-        output='screen',
-    )
+    left_mipi_camera = mipi_camera_node('left', mipi_camera_config)
+    right_mipi_camera = mipi_camera_node('right', mipi_camera_config)
 
-    odometry_config = os.path.join(
-        odin_data_postprocess_pkg,
-        'config',
-        'odometry_postprocess.yaml',
-    )
-    odometry_postprocess = Node(
-        package='odin_data_postprocess',
-        executable='odometry_postprocess',
-        parameters=[odometry_config],
-        output='screen',
-    )
-
-    serial_bridge_config = os.path.join(
-        serial_pkg,
-        'config',
-        'serial_bridge.yaml',
-    )
-    serial_bridge = Node(
-        package='serial_pkg',
-        executable='serial_bridge',
-        parameters=[
-            serial_bridge_config,
-            {'receive_feedback_enabled': True},
-        ],
-        output='screen',
-    )
-
-    kfs_alignment_config = os.path.join(
-        controller_pkg,
-        'config',
-        'kfs_alignment.yaml',
-    )
-    kfs_alignment = Node(
-        package='robot_r2_controller',
-        executable='kfs_alignment',
-        parameters=[kfs_alignment_config],
-        output='screen',
-    )
-
-    led_detect_config = os.path.join(
+    kfs_detect_config = os.path.join(
         detect_pkg,
         'config',
-        'led_detect.yaml',
+        'kfs_detect.yaml',
     )
-    led_detect = Node(
+    fused_kfs_detect = fused_kfs_detect_node(kfs_detect_config)
+
+    kfs_roi_config = os.path.join(
+        detect_pkg,
+        'config',
+        'kfs_roi.yaml',
+    )
+    kfs_roi = Node(
         package='robot_r2_detect',
-        executable='led_detect',
-        name='led_detect',
-        parameters=[led_detect_config],
+        executable='kfs_roi',
+        name='kfs_roi',
+        parameters=[kfs_roi_config],
         remappings=[
             (
-                '/r2/left_camera/image_raw',
                 '/r2/front_camera/image_raw',
+                LaunchConfiguration('roi_image_topic'),
             ),
         ],
         output='screen',
@@ -131,15 +92,12 @@ def generate_launch_description():
         SetEnvironmentVariable(
             'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         DeclareLaunchArgument(
-            'kfs_get_type_service',
-            default_value='/r2/detection/left/get_type',
-            description='Remote KFS detection service used by control',
+            'roi_image_topic',
+            default_value='/r2/left_camera/image_raw',
+            description='MIPI image topic used by the single KFS ROI node',
         ),
-        odin_launch,
-        camera_frame_postprocess,
-        odometry_postprocess,
-        control_launch,
-        serial_bridge,
-        kfs_alignment,
-        led_detect,
+        left_mipi_camera,
+        right_mipi_camera,
+        fused_kfs_detect,
+        kfs_roi,
     ])

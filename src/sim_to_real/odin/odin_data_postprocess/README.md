@@ -40,10 +40,10 @@ ros2 run odin_data_postprocess odometry_postprocess \
   --params-file src/sim_to_real/odin/odin_data_postprocess/config/odometry_postprocess.yaml
 ```
 
-也可以在 real2 主机上启动完整的定位、控制与串口系统：
+也可以在 real1 主机上启动完整的定位、控制与串口系统：
 
 ```bash
-ros2 launch bringup real2.launch.py
+ros2 launch bringup real1.launch.py
 ```
 
 实机启动使用 Odin 配置中的 `use_host_ros_time: 1`，使 Odin 里程计和
