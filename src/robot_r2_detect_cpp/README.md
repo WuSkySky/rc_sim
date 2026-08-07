@@ -1,4 +1,23 @@
-# Fused KFS classifier
+# C++ KFS vision nodes
+
+`kfs_roi` extracts the red or blue KFS panel used by alignment. It applies
+strict HSV filtering, a configurable morphological opening, largest-component
+selection, and independent row/column projection thresholds. The node
+preserves the `/r2/kfs/roi` result interface and publishes only ROI
+visualization on `/r2/kfs/roi/debug`.
+
+All ROI thresholds support runtime updates. Their defaults are stored in
+`robot_r2_detect/config/kfs_roi.yaml`; camera selection remains a launch
+remapping of `/r2/front_camera/image_raw`. `column_threshold_ratio` and
+`row_threshold_ratio` independently tune the X and Y bounds.
+
+When visualization is enabled, `/r2/kfs/roi/debug` is a six-stage `3x2`
+composite containing the annotated source, raw HSV union, morphological-open
+mask, largest component, axis thresholds/bounds, and final cropped ROI. Each
+tile is half the source width and height, so the composite remains about 1.5
+times the source width and the same height.
+
+## Fused classifier
 
 `kfs_detect_fused` replaces the three Python TensorRT classifier processes in
 the real-camera launch. It keeps the existing per-camera image, raw result,

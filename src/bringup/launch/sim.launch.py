@@ -84,7 +84,7 @@ def generate_launch_description():
         'kfs_roi.yaml',
     )
     kfs_roi = Node(
-        package='robot_r2_detect',
+        package='robot_r2_detect_cpp',
         executable='kfs_roi',
         name='kfs_roi',
         parameters=[kfs_roi_config],

@@ -9,6 +9,25 @@ source install/setup.bash
 ros2 launch bringup sim.launch.py
 ```
 
+### 实车网络连接
+
+两台 Jetson 的 SSH 用户均为 `jetson`。两台机器的主机名目前相同，因此连接和
+部署时使用下面的固定 IP，不使用主机名区分设备。
+
+| 角色 | 有线 IP（交换机） | 有线 SSH | 无线热点 | 热点侧 IP | 无线 SSH |
+| --- | --- | --- | --- | --- | --- |
+| real1 | `10.42.0.2/24` | `ssh jetson@10.42.0.2` | `Jetson_Orin_Hot1` | `192.168.50.1/24` | `ssh jetson@192.168.50.1` |
+| real2 | `10.42.0.3/24` | `ssh jetson@10.42.0.3` | `Jetson_Orin_Hot2` | `192.168.50.2/24` | `ssh jetson@192.168.50.2` |
+
+两台实机共同运行 ROS 2 时，使用有线交换机连接。开发电脑配置在
+`10.42.0.0/24` 网段（当前使用 `10.42.0.1/24`），两台 Jetson 分别保持上述
+`.2` 和 `.3` 地址，即可通过交换机进行 ROS 2 节点发现、Topic 和 Service
+通信。
+
+无线热点用于单机维护：电脑连接目标 Jetson 的热点后，通过对应的
+`192.168.50.x` 地址 SSH。两个热点属于独立接入点，不用于替代两台 Jetson
+之间的有线 ROS 2 网络。
+
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
 Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 及 LED 检测：
 
@@ -182,8 +201,8 @@ ros2 param set /left_mipi_camera visualization_enabled true
 ros2 param set /right_mipi_camera visualization_enabled true
 ```
 
-将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 同时控制
-`/r2/kfs/roi/debug` 和 `/r2/alignment/debug`；仿真 KFS 检测调试图像为
+将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的六阶段调试图像发布在
+`/r2/kfs/roi/debug`；仿真 KFS 检测调试图像为
 `/r2/detection/debug`，实机三路检测分别为 `/r2/detection/{front,left,right}/debug`；
 LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后处理以及左右
 实体相机也使用同一个动态参数控制各自的 `/debug` 图像。这些调试话题均使用
