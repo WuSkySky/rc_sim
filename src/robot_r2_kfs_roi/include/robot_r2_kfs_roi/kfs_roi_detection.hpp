@@ -2,7 +2,7 @@
 
 #include <opencv2/core.hpp>
 
-namespace robot_r2_detect_cpp {
+namespace robot_r2_kfs_roi {
 
 struct HsvRange {
   cv::Vec3b lower;
@@ -46,4 +46,4 @@ void validate_kfs_roi_config(const KfsRoiConfig &config);
 KfsRoiResult extract_kfs_roi(const cv::Mat &bgr_image,
                              const KfsRoiConfig &config);
 
-}  // namespace robot_r2_detect_cpp
+}  // namespace robot_r2_kfs_roi

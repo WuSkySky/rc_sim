@@ -1,5 +1,19 @@
 # rc_sim
 
+## 编译
+
+普通开发电脑没有 Jetson 的 CUDA/TensorRT 环境时，跳过融合检测包；纯 OpenCV
+的 KFS ROI 节点仍会由 `robot_r2_kfs_roi` 正常构建：
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-ignore robot_r2_detect_cpp
+source install/setup.bash
+```
+
+Jetson 上具有 CUDA/TensorRT 开发环境，使用正常的全量构建命令，不跳过
+`robot_r2_detect_cpp`。
+
 ## 启动
 
 仿真：
@@ -36,16 +50,16 @@ source install/setup.bash
 ros2 launch bringup real1.launch.py
 ```
 
-real2 负责左右 MIPI 相机、前/左/右三路融合 KFS 识别和 KFS
-ROI。融合节点不会等待未接入的相机，因此只启动一至两路相机时也能正常推理：
+real2 负责前置海康 USB3 相机、左右 MIPI 相机、前/左/右三路融合 KFS 识别和
+KFS ROI。融合节点不会等待未接入的相机，因此只有部分相机在线时也能正常推理：
 
 ```bash
 source install/setup.bash
 ros2 launch bringup real2.launch.py
 ```
 
-real2 的 ROI 默认使用左相机，real1 的阶段任务默认使用左侧 KFS 识别服务。
-需要改用右侧时分别执行：
+real2 的 ROI 默认使用前置海康相机，real1 的阶段任务默认使用左侧 KFS 识别
+服务。需要改用右侧时分别执行：
 
 ```bash
 ros2 launch bringup real2.launch.py \
@@ -197,6 +211,7 @@ ros2 param set /kfs_detect_fused visualization_enabled true
 ros2 param set /led_detect visualization_enabled true
 ros2 param set /r2/front_camera_controller visualization_enabled true
 ros2 param set /camera_frame_postprocess visualization_enabled true
+ros2 param set /front_hik_camera visualization_enabled true
 ros2 param set /left_mipi_camera visualization_enabled true
 ros2 param set /right_mipi_camera visualization_enabled true
 ```
@@ -204,9 +219,9 @@ ros2 param set /right_mipi_camera visualization_enabled true
 将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的六阶段调试图像发布在
 `/r2/kfs/roi/debug`；仿真 KFS 检测调试图像为
 `/r2/detection/debug`，实机三路检测分别为 `/r2/detection/{front,left,right}/debug`；
-LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后处理以及左右
-实体相机也使用同一个动态参数控制各自的 `/debug` 图像。这些调试话题均使用
-`sensor_msgs/msg/Image`。
+LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后处理、前置
+海康相机以及左右 MIPI 相机也使用同一个动态参数控制各自的 `/debug` 图像。
+这些调试话题均使用 `sensor_msgs/msg/Image`。
 
 KFS 类型检测：
 

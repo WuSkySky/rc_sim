@@ -1,4 +1,4 @@
-#include "robot_r2_detect_cpp/kfs_roi_detection.hpp"
+#include "robot_r2_kfs_roi/kfs_roi_detection.hpp"
 
 #include <gtest/gtest.h>
 #include <opencv2/imgproc.hpp>
@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <stdexcept>
 
-namespace robot_r2_detect_cpp {
+namespace robot_r2_kfs_roi {
 namespace {
 
 KfsRoiConfig default_config() {
@@ -195,4 +195,4 @@ TEST(KfsRoiDetection, RejectsEmptyImageAndInvalidConfiguration) {
 }
 
 }  // namespace
-}  // namespace robot_r2_detect_cpp
+}  // namespace robot_r2_kfs_roi

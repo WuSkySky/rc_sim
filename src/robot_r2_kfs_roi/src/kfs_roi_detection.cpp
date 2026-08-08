@@ -1,4 +1,4 @@
-#include "robot_r2_detect_cpp/kfs_roi_detection.hpp"
+#include "robot_r2_kfs_roi/kfs_roi_detection.hpp"
 
 #include <opencv2/imgproc.hpp>
 
@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace robot_r2_detect_cpp {
+namespace robot_r2_kfs_roi {
 namespace {
 
 void validate_hsv_range(const HsvRange &range, const std::string &name) {
@@ -179,4 +179,4 @@ KfsRoiResult extract_kfs_roi(const cv::Mat &bgr_image,
   return result;
 }
 
-}  // namespace robot_r2_detect_cpp
+}  // namespace robot_r2_kfs_roi

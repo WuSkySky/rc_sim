@@ -18,7 +18,9 @@
 | 控制节点 | `rclpy`、`rcl_interfaces`、`geometry_msgs`、`std_msgs`、`robot_r2_interfaces` |
 | Gazebo 模型/插件 | `gazebo_dev`、`gazebo_ros`、`rclcpp`、`rcl_interfaces`、`geometry_msgs`、`sensor_msgs`、`std_msgs` |
 | Python 视觉 | `rclpy`、`rcl_interfaces`、`sensor_msgs`、`std_msgs`、`geometry_msgs`、`robot_r2_interfaces`、`launch`、`launch_ros` |
+| OpenCV KFS ROI | `rclcpp`、`rcl_interfaces`、`robot_r2_interfaces`、`sensor_msgs`、`std_msgs`、OpenCV |
 | CUDA/TensorRT 视觉 | `rclcpp`、`robot_r2_interfaces`、`sensor_msgs`、`std_msgs`、`ament_index_cpp` |
+| 海康 USB3 相机 | `rclcpp`、`rcl_interfaces`、`sensor_msgs`、`robot_r2_interfaces`、随包 MVS SDK |
 | MIPI 相机 | `rclcpp`、`rcl_interfaces`、`sensor_msgs`、`robot_r2_interfaces` |
 | Odin 后处理 | `rclpy`、`geometry_msgs`、`nav_msgs`、`sensor_msgs`、`tf2_ros` |
 | Odin 驱动 | `rclcpp`、`sensor_msgs`、`nav_msgs`、`geometry_msgs`、`visualization_msgs`、`cv_bridge`、`image_transport`、`pcl_conversions`、`message_filters`、`tf2*` |
@@ -103,6 +105,13 @@ TensorRT engine 与 TensorRT 版本、设备架构和系统环境相关，不能
 - GStreamer appsink 和 base plugins
 - 两个相机设备，例如 `/dev/mipi_left`、`/dev/mipi_right`
 
+### 海康 USB3 相机
+
+`hik_camera` 随包提供 x86_64 和 aarch64 版 MVS 运行库，构建时只安装目标架构
+对应的版本。相机使用前需将包内的 `80-drivers-SDK-2bdf.rules` 安装到
+`/etc/udev/rules.d/`，重新加载 udev 规则并重新插拔设备；运行用户需要属于
+`plugdev` 组。SDK 来源和第三方声明见包内 `NOTICE`。
+
 ### Odin
 
 Odin 驱动还需要仓库内的 ARM 预编译 SDK：
@@ -129,6 +138,16 @@ python3 -m pip install --user ttkbootstrap
 ```
 
 ## 编译
+
+普通开发电脑跳过 Jetson 专用的 CUDA/TensorRT 包：
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-ignore robot_r2_detect_cpp
+source install/setup.bash
+```
+
+Jetson 使用正常的全量构建：
 
 ```bash
 source /opt/ros/humble/setup.bash

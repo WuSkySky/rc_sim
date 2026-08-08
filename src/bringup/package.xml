@@ -11,6 +11,7 @@
   <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>hik_camera</exec_depend>
   <exec_depend>mipi_camera</exec_depend>
   <exec_depend>odin_data_postprocess</exec_depend>
   <exec_depend>odin_ros_driver</exec_depend>
@@ -20,6 +21,7 @@
   <exec_depend>robot_r2_detect_cpp</exec_depend>
   <exec_depend>robot_r2_description</exec_depend>
   <exec_depend>robot_r2_interfaces</exec_depend>
+  <exec_depend>robot_r2_kfs_roi</exec_depend>
   <exec_depend>serial_pkg</exec_depend>
 
   <export>

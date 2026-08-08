@@ -12,6 +12,7 @@ def generate_launch_description():
     interfaces_share = get_package_share_directory("robot_r2_interfaces")
     camera_share = get_package_share_directory("mipi_camera")
     detect_share = get_package_share_directory("robot_r2_detect")
+    roi_share = get_package_share_directory("robot_r2_kfs_roi")
 
     fastdds_profile = os.path.join(
         interfaces_share,
@@ -24,7 +25,7 @@ def generate_launch_description():
         "mipi_camera.yaml",
     )
     roi_config = os.path.join(
-        detect_share,
+        roi_share,
         "config",
         "kfs_roi.yaml",
     )
@@ -70,7 +71,7 @@ def generate_launch_description():
                 output="screen",
             ),
             Node(
-                package="robot_r2_detect_cpp",
+                package="robot_r2_kfs_roi",
                 executable="kfs_roi",
                 name="kfs_roi",
                 parameters=[roi_config],

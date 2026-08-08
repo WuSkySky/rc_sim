@@ -1,0 +1,9 @@
+This package is derived from the ros2_hik_camera package in FYT2024_vision:
+https://github.com/jiayudw/FYT2024_vision
+
+Original camera-driver commit:
+211f077e53a360ea9e78d90ce8db6e51b830a46b
+
+The HIKROBOT MVS headers and prebuilt libraries under third_party/mvs are
+third-party components owned by their respective copyright holders. See
+CLIENT_MVS_Linux_license_notice.txt for the notices shipped with MVS Linux.

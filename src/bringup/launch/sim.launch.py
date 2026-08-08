@@ -21,6 +21,7 @@ def generate_launch_description():
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
     controller_pkg = get_package_share_directory('robot_r2_controller')
     detect_pkg = get_package_share_directory('robot_r2_detect')
+    roi_pkg = get_package_share_directory('robot_r2_kfs_roi')
     fastdds_profile = os.path.join(
         interfaces_pkg,
         'config',
@@ -79,12 +80,12 @@ def generate_launch_description():
     )
 
     kfs_roi_config = os.path.join(
-        detect_pkg,
+        roi_pkg,
         'config',
         'kfs_roi.yaml',
     )
     kfs_roi = Node(
-        package='robot_r2_detect_cpp',
+        package='robot_r2_kfs_roi',
         executable='kfs_roi',
         name='kfs_roi',
         parameters=[kfs_roi_config],

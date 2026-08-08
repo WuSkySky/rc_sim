@@ -1,4 +1,4 @@
-#include "robot_r2_detect_cpp/kfs_roi_detection.hpp"
+#include "robot_r2_kfs_roi/kfs_roi_detection.hpp"
 
 #include <opencv2/imgproc.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace robot_r2_detect_cpp {
+namespace robot_r2_kfs_roi {
 namespace {
 
 using CameraFrame = robot_r2_interfaces::msg::CameraFrame;
@@ -557,11 +557,11 @@ std::shared_ptr<rclcpp::Node> make_kfs_roi_node() {
   return std::make_shared<KfsRoiNode>();
 }
 
-}  // namespace robot_r2_detect_cpp
+}  // namespace robot_r2_kfs_roi
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(robot_r2_detect_cpp::make_kfs_roi_node());
+  rclcpp::spin(robot_r2_kfs_roi::make_kfs_roi_node());
   rclcpp::shutdown();
   return 0;
 }
