@@ -48,6 +48,11 @@ install(
   RENAME rotate_90_servo_test
 )
 install(
+  PROGRAMS robot_r2_tests/odin_xy_calibration.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME odin_xy_calibration_test
+)
+install(
   DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
 )

@@ -11,6 +11,7 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
   <depend>rclpy</depend>
   <depend>robot_r2_interfaces</depend>
@@ -21,6 +22,7 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <exec_depend>rmw_fastrtps_cpp</exec_depend>
 
   <export>

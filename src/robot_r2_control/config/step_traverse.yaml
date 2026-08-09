@@ -12,6 +12,7 @@ step_traverse:
     a1: 0.05
     a2: 0.42
     a3: 0.35
+    up_pre_lift_clearance: 0.05
     b1: 0.23
     b2: 0.42
     b3: 0.10

@@ -19,8 +19,8 @@ class GripperTipRotateServiceController(Node):
         self.declare_parameter('command_topic', '/r2/gripper/tip_rotate_cmd')
         self.declare_parameter('feedback_topic', '/r2/gripper/tip_rotate_feedback')
         self.declare_parameter('service_name', '/r2/gripper/set_tip_rotate')
-        self.declare_parameter('min_position', 0.0)
-        self.declare_parameter('max_position', math.pi)
+        self.declare_parameter('min_position', -math.pi)
+        self.declare_parameter('max_position', 0.0)
         self.declare_parameter('default_tolerance', 0.01)
         self.declare_parameter('default_timeout_sec', 10.0)
 

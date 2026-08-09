@@ -34,16 +34,16 @@ class KfsLoaderController(Node):
         self.declare_parameter(
             'front_pickup_root_position', 1.1471975511965977)
         self.declare_parameter(
-            'front_pickup_tip_position', 1.1471975511965977)
+            'front_pickup_tip_position', -1.1471975511965977)
         self.declare_parameter(
             'top_pickup_root_position', 1.7395202484681462)
         self.declare_parameter(
-            'top_pickup_tip_position', 0.16872392167324968)
+            'top_pickup_tip_position', -0.16872392167324968)
         self.declare_parameter('tip_front_limit_position', 0.0)
-        self.declare_parameter('tip_rear_limit_position', math.pi)
+        self.declare_parameter('tip_rear_limit_position', -math.pi)
         self.declare_parameter('root_initial_position', 0.0)
         self.declare_parameter('release_root_position', math.pi / 4.0)
-        self.declare_parameter('release_tip_position', math.pi / 4.0)
+        self.declare_parameter('release_tip_position', -math.pi / 4.0)
 
         service_name = self.get_parameter('service_name').value
         release_service_name = self.get_parameter(

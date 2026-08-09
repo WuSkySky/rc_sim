@@ -13,17 +13,17 @@ kfs_loader_control:
     # Root and tip commands are expressed from the vertical initial pose.
     # These paired commands preserve the previous front-pickup geometry.
     front_pickup_root_position: 1.1471975511965977
-    front_pickup_tip_position: 1.1471975511965977
+    front_pickup_tip_position: -1.1471975511965977
     # With base_link 0.199 m above the ground, the root axis is at 0.259 m.
     # The root angle puts the tip axis at 0.170 m. The paired tip angle keeps
     # the gripper opening pointed downward.
     top_pickup_root_position: 1.7395202484681462
-    top_pickup_tip_position: 0.16872392167324968
+    top_pickup_tip_position: -0.16872392167324968
     # TRANSFER method: after gripping, both axes return to the zero initial
     # pose concurrently. The gripper remains closed afterward.
     tip_front_limit_position: 0.0
-    tip_rear_limit_position: 3.141592653589793
+    tip_rear_limit_position: -3.141592653589793
     root_initial_position: 0.0
     # Release pose keeps the gripper opening facing world +x.
     release_root_position: 0.7853981633974483
-    release_tip_position: 0.7853981633974483
+    release_tip_position: -0.7853981633974483

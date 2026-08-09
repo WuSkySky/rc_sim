@@ -19,6 +19,7 @@ setup(
                 'config/stage_two_point_two.yaml',
                 'config/kfs_loader.yaml',
                 'config/step_traverse.yaml',
+                'config/gui_control.yaml',
             ]),
     ],
     install_requires=['setuptools', 'pynput'],

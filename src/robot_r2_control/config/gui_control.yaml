@@ -1,0 +1,29 @@
+gui_control:
+  ros__parameters:
+    lift_min: 0.0
+    lift_max: 0.376
+
+    kfs_lift_min: 0.0
+    kfs_lift_max: 0.42
+    root_rotate_min: 0.0
+    root_rotate_max: 2.356194490192345
+    tip_rotate_min: -3.141592653589793
+    tip_rotate_max: 0.0
+    grip_min: 0.0
+    grip_max: 0.209
+    weapon_rotate_min: 0.0
+    weapon_rotate_max: 3.490658503988659
+    weapon_grip_min: 0.0
+    weapon_grip_max: 0.03
+
+    motion_publish_rate: 20.0
+    manual_linear_speed: 0.2
+    manual_angular_speed: 1.0
+
+    velocity_test_linear_speed: 0.2
+    velocity_test_angular_speed: 1.57
+    velocity_test_duration_sec: 1.0
+
+    pose_test_linear_distance: 0.3
+    pose_test_yaw: 1.57
+    move_timeout_sec: 20.0

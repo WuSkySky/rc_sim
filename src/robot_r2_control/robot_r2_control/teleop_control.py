@@ -117,12 +117,12 @@ class WasdTeleop(Node):
             )
 
             if 'i' in active:
-                self.tip_rotate_target += self.bar_rotate_speed * dt
-            if 'k' in active:
                 self.tip_rotate_target -= self.bar_rotate_speed * dt
+            if 'k' in active:
+                self.tip_rotate_target += self.bar_rotate_speed * dt
             self.tip_rotate_target = max(
-                0.0,
-                min(3.141592653589793, self.tip_rotate_target),
+                -3.141592653589793,
+                min(0.0, self.tip_rotate_target),
             )
 
             if 'o' in active:

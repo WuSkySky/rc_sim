@@ -4,6 +4,7 @@ import time
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -15,6 +16,7 @@ class StepTraverseController(Node):
         super().__init__('step_traverse')
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
+        self.config_lock = threading.Lock()
         self.pose_condition = threading.Condition()
         self.current_pose = None
 
@@ -30,6 +32,7 @@ class StepTraverseController(Node):
         self.declare_parameter('a1', 0.2)
         self.declare_parameter('a2', 0.2)
         self.declare_parameter('a3', 0.2)
+        self.declare_parameter('up_pre_lift_clearance', 0.05)
         self.declare_parameter('b1', 0.2)
         self.declare_parameter('b2', 0.2)
         self.declare_parameter('b3', 0.2)
@@ -60,6 +63,8 @@ class StepTraverseController(Node):
         self.a1 = self._distance_parameter('a1')
         self.a2 = self._distance_parameter('a2')
         self.a3 = self._distance_parameter('a3')
+        self.up_pre_lift_clearance = self._distance_parameter(
+            'up_pre_lift_clearance')
         self.b1 = self._distance_parameter('b1')
         self.b2 = self._distance_parameter('b2')
         self.b3 = self._distance_parameter('b3')
@@ -92,6 +97,7 @@ class StepTraverseController(Node):
             self.handle_traverse_step,
             callback_group=self.callback_group,
         )
+        self.add_on_set_parameters_callback(self.on_parameters_changed)
 
     def _positive_parameter(self, name):
         value = float(self.get_parameter(name).value)
@@ -111,6 +117,35 @@ class StepTraverseController(Node):
         if not math.isfinite(front) or not math.isfinite(rear):
             raise ValueError(f'{prefix} lift values must be finite')
         return front, rear
+
+    def on_parameters_changed(self, parameters):
+        clearance = None
+        for parameter in parameters:
+            if parameter.name != 'up_pre_lift_clearance':
+                continue
+            value = parameter.value
+            if (
+                isinstance(value, bool) or
+                not isinstance(value, (int, float))
+            ):
+                return SetParametersResult(
+                    successful=False,
+                    reason='up_pre_lift_clearance must be numeric',
+                )
+            clearance = float(value)
+            if not math.isfinite(clearance) or clearance < 0.0:
+                return SetParametersResult(
+                    successful=False,
+                    reason=(
+                        'up_pre_lift_clearance must be finite and '
+                        'non-negative'
+                    ),
+                )
+
+        if clearance is not None:
+            with self.config_lock:
+                self.up_pre_lift_clearance = clearance
+        return SetParametersResult(successful=True)
 
     def on_pose_feedback(self, msg):
         pose = msg.pose
@@ -228,6 +263,13 @@ class StepTraverseController(Node):
             raise RuntimeError(f'SetLift failed: {response.message}')
 
     def run_up_step(self, start_pose, distance_to_step):
+        with self.config_lock:
+            pre_lift_clearance = self.up_pre_lift_clearance
+
+        self.move_from_start(
+            start_pose,
+            distance_to_step - pre_lift_clearance,
+        )
         self.set_lift(self.lift_all)
 
         cumulative_distance = distance_to_step + self.a1

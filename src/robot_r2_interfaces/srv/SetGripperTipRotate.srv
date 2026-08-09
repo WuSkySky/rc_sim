@@ -1,4 +1,4 @@
-# Rotation in radians: 0.0 is the initial pose and working rotation is positive.
+# Rotation in radians: 0.0 is the initial pose and working rotation is negative.
 float64 position
 float64 tolerance
 float64 timeout_sec

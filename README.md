@@ -23,6 +23,17 @@ source install/setup.bash
 ros2 launch bringup sim.launch.py
 ```
 
+需要使用机构和底盘图形控制时，在已启动仿真或实机控制节点的电脑上另开终端：
+
+```bash
+source install/setup.bash
+ros2 launch bringup gui_control.launch.py
+```
+
+GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘，松开时
+停止；窗口失去焦点也会立即停止键盘控制。底盘测试区提供定时速度测试和基于
+当前 `/r2/pose_feedback` 的相对位置伺服测试。
+
 ### 实车网络连接
 
 两台 Jetson 的 SSH 用户均为 `jetson`。两台机器的主机名目前相同，因此连接和
@@ -259,7 +270,7 @@ ros2 service call /r2/kfs/release robot_r2_interfaces/srv/ReleaseKfs "{}"
 末端角度和开合位置；升降及开合单位为米，角度单位为弧度。`tolerance` 和
 `timeout_sec` 填写 `0.0` 时使用对应控制器配置中的默认值。夹爪开合位置
 `0.0` 表示闭合，正值表示打开，`0.209` 表示完全打开。末端旋转以初始姿态
-为 `0 rad`，沿工作旋转方向使用正值，范围为 `0–π rad`。
+为 `0 rad`，沿工作旋转方向使用负值，范围为 `-π–0 rad`。
 
 ```bash
 ros2 service call /r2/kfs_lift robot_r2_interfaces/srv/SetKfsLift \
@@ -271,7 +282,7 @@ ros2 service call /r2/gripper/set_rotate \
 
 ros2 service call /r2/gripper/set_tip_rotate \
   robot_r2_interfaces/srv/SetGripperTipRotate \
-  "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
+  "{position: -1.5708, tolerance: 0.0, timeout_sec: 0.0}"
 
 ros2 service call /r2/gripper/set_grip \
   robot_r2_interfaces/srv/SetGripperGrip \
@@ -312,7 +323,7 @@ ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
 | 4   | 17~20 | `rear_lift`       | 后轮抬升目标位置     | 后轮抬升实际位置     | m     |
 | 5   | 21~24 | `kfs_lift`        | KFS 升降目标位置   | KFS 升降实际位置   | m     |
 | 6   | 25~28 | `kfs_root_rotate` | KFS 根部目标角度   | KFS 根部实际角度   | rad   |
-| 7   | 29~32 | `kfs_tip_rotate`  | KFS 末端目标角度（0 初始，正向旋转） | KFS 末端实际角度（0 初始） | rad   |
+| 7   | 29~32 | `kfs_tip_rotate`  | KFS 末端目标角度（0 初始，工作方向为负） | KFS 末端实际角度（0 初始） | rad   |
 | 8   | 33~36 | `kfs_grip`        | KFS 夹爪目标开度（0 闭合） | KFS 夹爪实际开度（0 闭合） | m     |
 | 9   | 37~40 | `weapon_rotate`   | 武器目标角度       | 武器实际角度       | rad   |
 | 10  | 41~44 | `weapon_grip`     | 武器目标开合位置     | 武器实际开合位置     | m     |
