@@ -54,7 +54,7 @@ GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘�
 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 及 LED 检测：
+Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 后摄像头及 LED 检测：
 
 ```bash
 source install/setup.bash
@@ -62,7 +62,10 @@ ros2 launch bringup real1.launch.py
 ```
 
 real2 负责前置海康 USB3 相机、左右 MIPI 相机、前/左/右三路融合 KFS 识别和
-KFS ROI。融合节点不会等待未接入的相机，因此只有部分相机在线时也能正常推理：
+KFS ROI。前置海康相机默认发布自定义 `/r2/front_camera/image_raw`，
+ROI 节点默认直接使用该话题。两个节点的标准调试图均默认关闭，可通过
+`visualization_enabled` 动态开启。融合节点不会等待未接入的相机，因此只有部分相机
+在线时也能正常推理：
 
 ```bash
 source install/setup.bash
@@ -196,7 +199,9 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 ### KFS 与视觉
 
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
-前相机；实机 ROI 由 real2 发布，默认使用左 MIPI 相机，也可在启动时切换为右相机：
+前相机；实机的前置海康相机和 ROI 节点都由 real2 启动，ROI 默认使用
+`/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
+`/r2/kfs/roi`：
 
 ```bash
 ros2 service call /r2/align_to_kfs \
@@ -230,7 +235,7 @@ ros2 param set /right_mipi_camera visualization_enabled true
 将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的六阶段调试图像发布在
 `/r2/kfs/roi/debug`；仿真 KFS 检测调试图像为
 `/r2/detection/debug`，实机三路检测分别为 `/r2/detection/{front,left,right}/debug`；
-LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后处理、前置
+LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后摄像头后处理、前置
 海康相机以及左右 MIPI 相机也使用同一个动态参数控制各自的 `/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
 

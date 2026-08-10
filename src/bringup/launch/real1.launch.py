@@ -115,7 +115,7 @@ def generate_launch_description():
         remappings=[
             (
                 '/r2/left_camera/image_raw',
-                '/r2/front_camera/image_raw',
+                '/r2/rear_camera/image_raw',
             ),
         ],
         output='screen',

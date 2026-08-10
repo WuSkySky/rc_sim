@@ -15,6 +15,11 @@ from robot_r2_interfaces.msg import CameraFrame
 from sensor_msgs.msg import Image
 
 
+INPUT_IMAGE_TOPIC = '/odin1/image/undistorted'
+OUTPUT_IMAGE_TOPIC = '/r2/rear_camera/image_raw'
+DEBUG_IMAGE_TOPIC = '/r2/rear_camera/image_raw/debug'
+
+
 def image_qos() -> QoSProfile:
     return QoSProfile(
         history=HistoryPolicy.KEEP_LAST,
@@ -29,50 +34,27 @@ class CameraFramePostprocess(Node):
 
     def __init__(self) -> None:
         super().__init__('camera_frame_postprocess')
-        self.declare_parameter(
-            'input_image_topic',
-            '/odin1/image/undistorted',
-        )
-        self.declare_parameter(
-            'output_image_topic',
-            '/r2/front_camera/image_raw',
-        )
-        self.declare_parameter(
-            'standard_image_topic',
-            '/r2/front_camera/image_raw/debug',
-        )
         self.declare_parameter('visualization_enabled', False)
 
-        input_topic = str(
-            self.get_parameter('input_image_topic').value)
-        output_topic = str(
-            self.get_parameter('output_image_topic').value)
-        standard_topic = str(
-            self.get_parameter('standard_image_topic').value)
         self._visualization_enabled = bool(
             self.get_parameter('visualization_enabled').value)
-        if not input_topic or not output_topic:
-            raise ValueError(
-                'input_image_topic and output_image_topic must not be empty')
-        if not standard_topic:
-            raise ValueError('standard_image_topic must not be empty')
 
         qos = image_qos()
         self._frame = CameraFrame()
         self._sequence = 0
         self._publisher = self.create_publisher(
             CameraFrame,
-            output_topic,
+            OUTPUT_IMAGE_TOPIC,
             qos,
         )
         self._standard_publisher = self.create_publisher(
             Image,
-            standard_topic,
+            DEBUG_IMAGE_TOPIC,
             qos,
         )
         self._subscription = self.create_subscription(
             Image,
-            input_topic,
+            INPUT_IMAGE_TOPIC,
             self._on_image,
             qos,
         )
@@ -80,7 +62,8 @@ class CameraFramePostprocess(Node):
             self._on_parameters_changed)
 
         self.get_logger().info(
-            f'Converting Odin images from {input_topic} to {output_topic}')
+            f'Converting Odin images from {INPUT_IMAGE_TOPIC} '
+            f'to {OUTPUT_IMAGE_TOPIC}')
 
     def _on_parameters_changed(self, parameters) -> SetParametersResult:
         for parameter in parameters:
