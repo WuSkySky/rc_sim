@@ -116,6 +116,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
 | KFS 装载     | `/r2/kfs/load`               | `robot_r2_interfaces/srv/LoadKfs`             | 仿真、实机 |
 | KFS 释放     | `/r2/kfs/release`            | `robot_r2_interfaces/srv/ReleaseKfs`          | 仿真、实机 |
+| KFS 弹出     | `/r2/kfs/pop`                | `robot_r2_interfaces/srv/PopKfs`              | 仿真、实机 |
 | KFS 夹爪升降   | `/r2/kfs_lift`               | `robot_r2_interfaces/srv/SetKfsLift`          | 仿真、实机 |
 | KFS 夹爪根部旋转 | `/r2/gripper/set_rotate`     | `robot_r2_interfaces/srv/SetGripperRotate`    | 仿真、实机 |
 | KFS 夹爪末端旋转 | `/r2/gripper/set_tip_rotate` | `robot_r2_interfaces/srv/SetGripperTipRotate` | 仿真、实机 |
@@ -287,10 +288,34 @@ ros2 service call /r2/kfs/load robot_r2_interfaces/srv/LoadKfs \
   "{mode: 0, load_method: 0}"
 ```
 
+装载、释放和弹出动作由 `robot_r2_control/config/kfs_loader.yaml` 中的六条轨迹配置：
+`front_standard_sequence`、`front_transfer_sequence`、
+`top_standard_sequence`、`top_transfer_sequence`、`release_sequence` 和
+`pop_sequence`。
+每连续六个数表示一个同步步骤，字段顺序为根部位置、末端位置、夹爪位置以及
+三者各自的容差。每一步会同时向三个电机发送目标，全部到达后才执行下一步；
+无需运动的电机重复填写上一目标值。
+
+轨迹支持运行时整体替换。以下示例把前方转移动作改为一个步骤：
+
+```bash
+ros2 param set /kfs_loader_control front_transfer_sequence \
+  "[0.0, 0.0, 0.145, 0.01, 0.01, 0.005]"
+```
+
+轨迹数组必须非空且长度为六的倍数。动态更新在下一次装载、释放或弹出调用时
+生效，不会改变正在执行的动作。
+
 释放 KFS：
 
 ```bash
 ros2 service call /r2/kfs/release robot_r2_interfaces/srv/ReleaseKfs "{}"
+```
+
+弹出 KFS：
+
+```bash
+ros2 service call /r2/kfs/pop robot_r2_interfaces/srv/PopKfs "{}"
 ```
 
 以下服务用于直接调试 KFS 夹爪机构。`position` 分别表示升降位置、根部角度、

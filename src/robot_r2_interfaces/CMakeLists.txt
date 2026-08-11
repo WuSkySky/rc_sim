@@ -23,6 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetGripperGrip.srv"
   "srv/LoadKfs.srv"
   "srv/ReleaseKfs.srv"
+  "srv/PopKfs.srv"
   "srv/GetKfsType.srv"
   "srv/DetectLed.srv"
   "srv/StageTwo.srv"

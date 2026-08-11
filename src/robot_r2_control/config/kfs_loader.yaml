@@ -1,29 +1,59 @@
 kfs_loader_control:
   ros__parameters:
-    service_name: /r2/kfs/load
-    release_service_name: /r2/kfs/release
-    grip_service: /r2/gripper/set_grip
-    root_rotate_service: /r2/gripper/set_rotate
-    tip_rotate_service: /r2/gripper/set_tip_rotate
     service_timeout_sec: 10.0
-    # The opening coordinate is 0.0 m when closed and 0.209 m when open.
-    # Command 0.145 m gives approximately 0.280 m clear gap.
-    kfs_grip_position: 0.145
-    grip_open_position: 0.209
-    # Root and tip commands are expressed from the vertical initial pose.
-    # These paired commands preserve the previous front-pickup geometry.
-    front_pickup_root_position: 1.1471975511965977
-    front_pickup_tip_position: -1.1471975511965977
-    # With base_link 0.199 m above the ground, the root axis is at 0.259 m.
-    # The root angle puts the tip axis at 0.170 m. The paired tip angle keeps
-    # the gripper opening pointed downward.
-    top_pickup_root_position: 1.7395202484681462
-    top_pickup_tip_position: -0.16872392167324968
-    # TRANSFER method: after gripping, both axes return to the zero initial
-    # pose concurrently. The gripper remains closed afterward.
-    tip_front_limit_position: 0.0
-    tip_rear_limit_position: -3.141592653589793
-    root_initial_position: 0.0
-    # Release pose keeps the gripper opening facing world +x.
-    release_root_position: 0.7853981633974483
-    release_tip_position: -0.7853981633974483
+
+    # Each step contains:
+    # root_position, tip_position, grip_position,
+    # root_tolerance, tip_tolerance, grip_tolerance.
+    # All three motors are commanded concurrently in every step.
+    front_standard_sequence: [
+      # Move to the front pickup pose with the gripper open.
+      1.1471975511965977, -1.1471975511965977, 0.209, 0.01, 0.01, 0.005,
+      # Grip the KFS.
+      1.1471975511965977, -1.1471975511965977, 0.145, 0.01, 0.01, 0.005,
+      # Return the tip first, then return the root.
+      1.1471975511965977, -3.141592653589793, 0.145, 0.01, 0.01, 0.005,
+      0.0, -3.141592653589793, 0.145, 0.01, 0.01, 0.005,
+      # Release into the storage area.
+      0.0, -3.141592653589793, 0.209, 0.01, 0.01, 0.005
+    ]
+
+    front_transfer_sequence: [
+      1.1471975511965977, -1.1471975511965977, 0.209, 0.01, 0.01, 0.005,
+      1.1471975511965977, -1.1471975511965977, 0.145, 0.01, 0.01, 0.005,
+      # Return both rotation axes while keeping the KFS gripped.
+      0.0, 0.0, 0.145, 0.01, 0.01, 0.005
+    ]
+
+    top_standard_sequence: [
+      # Move to the top pickup pose with the gripper open.
+      1.7395202484681462, -0.16872392167324968, 0.209, 0.01, 0.01, 0.005,
+      # Grip the KFS.
+      1.7395202484681462, -0.16872392167324968, 0.145, 0.01, 0.01, 0.005,
+      # Return the root first, then return the tip.
+      0.0, -0.16872392167324968, 0.145, 0.01, 0.01, 0.005,
+      0.0, -3.141592653589793, 0.145, 0.01, 0.01, 0.005,
+      # Release into the storage area.
+      0.0, -3.141592653589793, 0.209, 0.01, 0.01, 0.005
+    ]
+
+    top_transfer_sequence: [
+      1.7395202484681462, -0.16872392167324968, 0.209, 0.01, 0.01, 0.005,
+      1.7395202484681462, -0.16872392167324968, 0.145, 0.01, 0.01, 0.005,
+      # Return both rotation axes while keeping the KFS gripped.
+      0.0, 0.0, 0.145, 0.01, 0.01, 0.005
+    ]
+
+    release_sequence: [
+      # Move the gripped KFS to the release pose.
+      0.7853981633974483, -0.7853981633974483, 0.145, 0.01, 0.01, 0.005,
+      # Open the gripper, then return to the initial pose.
+      0.7853981633974483, -0.7853981633974483, 0.209, 0.01, 0.01, 0.005,
+      0.0, 0.0, 0.209, 0.01, 0.01, 0.005
+    ]
+
+    pop_sequence: [
+      # Keep both rotation axes at zero, then pulse the gripper closed/open.
+      0.0, 0.0, 0.0, 0.01, 0.01, 0.005,
+      0.0, 0.0, 0.209, 0.01, 0.01, 0.005
+    ]
