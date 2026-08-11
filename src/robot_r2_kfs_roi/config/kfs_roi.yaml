@@ -12,4 +12,4 @@ kfs_roi:
     column_threshold_ratio: 0.7
     row_threshold_ratio: 0.7
     morphology_kernel_size: 5
-    min_component_area_px: 100
+    min_mask_area_px: 100

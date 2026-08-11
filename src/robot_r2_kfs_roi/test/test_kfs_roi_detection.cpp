@@ -20,7 +20,7 @@ KfsRoiConfig default_config() {
   config.column_threshold_ratio = 0.8;
   config.row_threshold_ratio = 0.8;
   config.morphology_kernel_size = 3;
-  config.min_component_area_px = 100;
+  config.min_mask_area_px = 100;
   return config;
 }
 
@@ -57,7 +57,7 @@ TEST(KfsRoiDetection, UsesIndependentColumnAndRowProjections) {
   EXPECT_EQ(result.roi.rows, 70);
   EXPECT_FALSE(result.raw_mask.empty());
   EXPECT_FALSE(result.opened_mask.empty());
-  EXPECT_EQ(result.component_area, 4233);
+  EXPECT_EQ(result.mask_area, 4233);
   EXPECT_EQ(result.max_column_length, 81);
   EXPECT_EQ(result.max_row_length, 60);
   EXPECT_DOUBLE_EQ(result.column_threshold, 64.8);
@@ -143,7 +143,7 @@ TEST(KfsRoiDetection, RejectsColorsOutsideStrictThresholds) {
   }
 }
 
-TEST(KfsRoiDetection, RemovesNoiseAndKeepsLargestComponent) {
+TEST(KfsRoiDetection, RemovesIsolatedNoiseBeforeProjection) {
   cv::Mat image = cv::Mat::zeros(100, 120, CV_8UC3);
   const cv::Vec3b blue = bgr_from_hsv(115, 255, 255);
   const cv::Vec3b red = bgr_from_hsv(3, 255, 255);
@@ -161,10 +161,9 @@ TEST(KfsRoiDetection, RemovesNoiseAndKeepsLargestComponent) {
   EXPECT_EQ(result.y2, 59);
   EXPECT_EQ(cv::countNonZero(result.raw_mask), 1827);
   EXPECT_EQ(cv::countNonZero(result.opened_mask), 1825);
-  EXPECT_EQ(cv::countNonZero(result.mask), 1600);
 }
 
-TEST(KfsRoiDetection, RejectsComponentBelowMinimumArea) {
+TEST(KfsRoiDetection, RejectsMaskBelowMinimumArea) {
   cv::Mat image = cv::Mat::zeros(30, 30, CV_8UC3);
   fill(image, cv::Rect(5, 5, 9, 9), bgr_from_hsv(115, 255, 255));
 
@@ -172,8 +171,8 @@ TEST(KfsRoiDetection, RejectsComponentBelowMinimumArea) {
 
   EXPECT_FALSE(result.valid);
   EXPECT_TRUE(result.roi.empty());
-  EXPECT_EQ(result.component_area, 81);
-  EXPECT_EQ(cv::countNonZero(result.mask), 81);
+  EXPECT_EQ(result.mask_area, 81);
+  EXPECT_EQ(cv::countNonZero(result.opened_mask), 81);
 }
 
 TEST(KfsRoiDetection, RejectsEmptyImageAndInvalidConfiguration) {
@@ -184,7 +183,7 @@ TEST(KfsRoiDetection, RejectsEmptyImageAndInvalidConfiguration) {
   config.morphology_kernel_size = 2;
   EXPECT_THROW(validate_kfs_roi_config(config), std::invalid_argument);
   config = default_config();
-  config.min_component_area_px = 0;
+  config.min_mask_area_px = 0;
   EXPECT_THROW(validate_kfs_roi_config(config), std::invalid_argument);
   config = default_config();
   config.column_threshold_ratio = 1.1;

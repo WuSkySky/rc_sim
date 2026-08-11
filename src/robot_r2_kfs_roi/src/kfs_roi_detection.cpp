@@ -86,8 +86,8 @@ void validate_kfs_roi_config(const KfsRoiConfig &config) {
     throw std::invalid_argument(
         "morphology_kernel_size must be a positive odd integer");
   }
-  if (config.min_component_area_px <= 0) {
-    throw std::invalid_argument("min_component_area_px must be positive");
+  if (config.min_mask_area_px <= 0) {
+    throw std::invalid_argument("min_mask_area_px must be positive");
   }
 }
 
@@ -123,37 +123,15 @@ KfsRoiResult extract_kfs_roi(const cv::Mat &bgr_image,
       cv::MORPH_RECT,
       cv::Size(config.morphology_kernel_size, config.morphology_kernel_size));
   cv::morphologyEx(combined_mask, result.opened_mask, cv::MORPH_OPEN, kernel);
-  result.mask = cv::Mat::zeros(combined_mask.size(), CV_8UC1);
-
-  cv::Mat labels;
-  cv::Mat stats;
-  cv::Mat centroids;
-  const int label_count = cv::connectedComponentsWithStats(
-      result.opened_mask, labels, stats, centroids, 8, CV_32S);
-  if (label_count <= 1) {
-    return result;
-  }
-
-  int largest_label = 1;
-  int largest_area = stats.at<int>(1, cv::CC_STAT_AREA);
-  for (int label = 2; label < label_count; ++label) {
-    const int area = stats.at<int>(label, cv::CC_STAT_AREA);
-    if (area > largest_area) {
-      largest_label = label;
-      largest_area = area;
-    }
-  }
-
-  cv::compare(labels, cv::Scalar(largest_label), result.mask, cv::CMP_EQ);
-  result.component_area = largest_area;
-  if (largest_area < config.min_component_area_px) {
+  result.mask_area = cv::countNonZero(result.opened_mask);
+  if (result.mask_area < config.min_mask_area_px) {
     return result;
   }
 
   const AxisBounds horizontal = find_axis_bounds(
-      result.mask, true, config.column_threshold_ratio);
+      result.opened_mask, true, config.column_threshold_ratio);
   const AxisBounds vertical =
-      find_axis_bounds(result.mask, false, config.row_threshold_ratio);
+      find_axis_bounds(result.opened_mask, false, config.row_threshold_ratio);
   result.max_column_length = horizontal.max_length;
   result.max_row_length = vertical.max_length;
   result.column_threshold = horizontal.threshold;

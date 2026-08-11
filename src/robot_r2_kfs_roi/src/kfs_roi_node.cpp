@@ -227,25 +227,25 @@ cv::Mat make_visualization(const cv::Mat &image,
                    cv::Scalar(0, 0, 255), cv::MARKER_CROSS, 18, 2);
   }
 
-  cv::Mat axis_view = mask_to_bgr(result.mask);
-  std::vector<bool> valid_columns(result.mask.cols, false);
-  std::vector<bool> valid_rows(result.mask.rows, false);
+  cv::Mat axis_view = mask_to_bgr(result.opened_mask);
+  std::vector<bool> valid_columns(result.opened_mask.cols, false);
+  std::vector<bool> valid_rows(result.opened_mask.rows, false);
   if (result.max_column_length > 0) {
-    for (int column = 0; column < result.mask.cols; ++column) {
+    for (int column = 0; column < result.opened_mask.cols; ++column) {
       valid_columns[column] =
-          cv::countNonZero(result.mask.col(column)) >=
+          cv::countNonZero(result.opened_mask.col(column)) >=
           result.column_threshold;
     }
   }
   if (result.max_row_length > 0) {
-    for (int row = 0; row < result.mask.rows; ++row) {
-      valid_rows[row] = cv::countNonZero(result.mask.row(row)) >=
+    for (int row = 0; row < result.opened_mask.rows; ++row) {
+      valid_rows[row] = cv::countNonZero(result.opened_mask.row(row)) >=
                         result.row_threshold;
     }
   }
-  for (int row = 0; row < result.mask.rows; ++row) {
-    for (int column = 0; column < result.mask.cols; ++column) {
-      if (result.mask.at<std::uint8_t>(row, column) == 0) {
+  for (int row = 0; row < result.opened_mask.rows; ++row) {
+    for (int column = 0; column < result.opened_mask.cols; ++column) {
+      if (result.opened_mask.at<std::uint8_t>(row, column) == 0) {
         continue;
       }
       if (valid_columns[column] && valid_rows[row]) {
@@ -273,14 +273,14 @@ cv::Mat make_visualization(const cv::Mat &image,
   }
 
   std::string source_label = "1 Source | ROI not found";
-  std::string roi_label = "6 ROI | invalid";
+  std::string roi_label = "5 ROI | invalid";
   if (result.valid) {
     std::ostringstream source_stream;
     source_stream << "1 Source | offset=(" << std::showpos
                   << result.center_offset_x << ',' << result.center_offset_y
                   << std::noshowpos << ")";
     source_label = source_stream.str();
-    roi_label = cv::format("6 ROI | %dx%d", result.roi.cols,
+    roi_label = cv::format("5 ROI | %dx%d", result.roi.cols,
                            result.roi.rows);
   }
 
@@ -288,10 +288,8 @@ cv::Mat make_visualization(const cv::Mat &image,
       {source_view, source_label},
       {mask_to_bgr(result.raw_mask), "2 HSV union"},
       {mask_to_bgr(result.opened_mask), "3 Morphological open"},
-      {mask_to_bgr(result.mask),
-       cv::format("4 Largest component | area=%d", result.component_area)},
       {axis_view,
-       cv::format("5 Axes | X %.1f/%d Y %.1f/%d",
+       cv::format("4 Axes | area=%d X %.1f/%d Y %.1f/%d", result.mask_area,
                   result.column_threshold, result.max_column_length,
                   result.row_threshold, result.max_row_length)},
       {make_roi_panel(image, result), roi_label},
@@ -304,7 +302,7 @@ cv::Mat make_visualization(const cv::Mat &image,
   for (std::size_t index = 0; index < stages.size(); ++index) {
     cv::Mat tile;
     const int interpolation =
-        index == 0 || index == 5 ? cv::INTER_AREA : cv::INTER_NEAREST;
+        index == 0 || index == 4 ? cv::INTER_AREA : cv::INTER_NEAREST;
     cv::resize(stages[index].first, tile, cv::Size(tile_width, tile_height),
                0.0, 0.0, interpolation);
     draw_stage_label(tile, stages[index].second);
@@ -335,7 +333,7 @@ class KfsRoiNode final : public rclcpp::Node {
     declare_parameter<double>("column_threshold_ratio", 0.7);
     declare_parameter<double>("row_threshold_ratio", 0.7);
     declare_parameter<std::int64_t>("morphology_kernel_size", 5);
-    declare_parameter<std::int64_t>("min_component_area_px", 100);
+    declare_parameter<std::int64_t>("min_mask_area_px", 100);
 
     config_ = read_config();
     validate_node_config(config_);
@@ -381,9 +379,8 @@ class KfsRoiNode final : public rclcpp::Node {
     config.roi.morphology_kernel_size = positive_int(
         get_parameter("morphology_kernel_size").as_int(),
         "morphology_kernel_size");
-    config.roi.min_component_area_px = positive_int(
-        get_parameter("min_component_area_px").as_int(),
-        "min_component_area_px");
+    config.roi.min_mask_area_px = positive_int(
+        get_parameter("min_mask_area_px").as_int(), "min_mask_area_px");
     return config;
   }
 
@@ -434,8 +431,8 @@ class KfsRoiNode final : public rclcpp::Node {
     } else if (name == "morphology_kernel_size") {
       config.roi.morphology_kernel_size =
           positive_int(parameter.as_int(), name);
-    } else if (name == "min_component_area_px") {
-      config.roi.min_component_area_px =
+    } else if (name == "min_mask_area_px") {
+      config.roi.min_mask_area_px =
           positive_int(parameter.as_int(), name);
     }
   }
