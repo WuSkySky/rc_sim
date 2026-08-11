@@ -1,15 +1,12 @@
 kfs_alignment:
   ros__parameters:
-    roi_topic: /r2/kfs/roi
-    cmd_vel_topic: /r2/cmd_vel
-    align_service: /r2/align_to_kfs
     pixel_tolerance: 20
     stable_cycles: 10
     default_timeout_sec: 10.0
 
     # PID for lateral (linear.y) alignment
-    kp: 0.008
-    ki: 0.0003
-    kd: 0.001
+    kp: 0.004
+    ki: 0.00015
+    kd: 0.0005
     integral_limit: 0.5
-    output_limit: 1.0
+    output_limit: 0.1

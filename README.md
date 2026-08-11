@@ -47,11 +47,13 @@ GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘�
 两台实机共同运行 ROS 2 时，使用有线交换机连接。开发电脑配置在
 `10.42.0.0/24` 网段（当前使用 `10.42.0.1/24`），两台 Jetson 分别保持上述
 `.2` 和 `.3` 地址，即可通过交换机进行 ROS 2 节点发现、Topic 和 Service
-通信。
+通信。Jetson1（real1）固定使用 `10.42.0.2`，Jetson2（real2）固定使用
+`10.42.0.3`；两台机器均使用 ROS 2 Humble 和 `ROS_DOMAIN_ID=99`。
 
-无线热点用于单机维护：电脑连接目标 Jetson 的热点后，通过对应的
-`192.168.50.x` 地址 SSH。两个热点属于独立接入点，不用于替代两台 Jetson
-之间的有线 ROS 2 网络。
+网络连接和远程调试必须优先使用上述有线地址。未经操作者明确同意，不得切换
+开发电脑的 Wi-Fi，也不得连接任一 Jetson 热点。无线热点只用于经过明确授权的
+单机维护：电脑连接目标 Jetson 的热点后，通过对应的 `192.168.50.x` 地址 SSH。
+两个热点属于独立接入点，不用于替代两台 Jetson 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
 Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 后摄像头及 LED 检测：
@@ -201,7 +203,18 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
 前相机；实机的前置海康相机和 ROI 节点都由 real2 启动，ROI 默认使用
 `/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
-`/r2/kfs/roi`：
+`/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、边界和中心偏差，
+不包含图像像素：
+
+使用 `kfs_alignment.yaml` 中的默认容差和超时时间执行对齐：
+
+```bash
+ros2 service call /r2/align_to_kfs \
+  robot_r2_interfaces/srv/AlignToKFS \
+  "{pixel_tolerance: 0.0, timeout_sec: 0.0}"
+```
+
+也可以在单次调用中指定横向像素容差和超时时间：
 
 ```bash
 ros2 service call /r2/align_to_kfs \
@@ -214,6 +227,17 @@ ros2 service call /r2/align_to_kfs \
 返回值中的 `success` 表示是否连续稳定达到容差，`final_offset_x` 是最后一次
 有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于当前 ROI 输入相机
 的视野内。
+
+对齐容差、稳定帧数、默认超时、PID 和速度限幅均支持运行时动态修改。例如：
+
+```bash
+ros2 param set /kfs_alignment output_limit 0.05
+ros2 param set /kfs_alignment pixel_tolerance 10
+```
+
+参数修改会整体校验后原子生效；无效值会被拒绝。服务请求中的容差或超时为
+`0.0` 时，正在执行的任务会使用对应参数的最新值；请求中显式指定的正数不受
+后续参数修改影响。
 
 可视化默认关闭。所有可能发布调试图像的节点统一使用动态参数
 `visualization_enabled`，可在运行时开启或关闭：

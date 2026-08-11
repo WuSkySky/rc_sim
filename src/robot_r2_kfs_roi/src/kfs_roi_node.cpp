@@ -161,43 +161,6 @@ std_msgs::msg::Header make_header(const CameraFrame &frame) {
   return header;
 }
 
-void fill_identity(CameraFrame &target, const CameraFrame &source) {
-  target.sequence = source.sequence;
-  target.stamp_sec = source.stamp_sec;
-  target.stamp_nanosec = source.stamp_nanosec;
-  target.encoding = CameraFrame::ENCODING_BGR8;
-  target.is_bigendian = 0;
-  target.layout_version = CameraFrame::LAYOUT_VERSION;
-  target.frame_id_size = source.frame_id_size;
-  target.frame_id = source.frame_id;
-}
-
-void clear_frame(CameraFrame &target, const CameraFrame &source) {
-  fill_identity(target, source);
-  target.width = 0;
-  target.height = 0;
-  target.step = 0;
-  target.data_size = 0;
-  target.data.clear();
-}
-
-void fill_frame(CameraFrame &target, const CameraFrame &source,
-                const cv::Mat &bgr) {
-  if (bgr.empty() || bgr.type() != CV_8UC3 || !bgr.isContinuous()) {
-    throw std::invalid_argument("ROI output must be packed 8-bit BGR");
-  }
-  const std::size_t data_size = bgr.total() * bgr.elemSize();
-  if (data_size > CameraFrame::DATA_CAPACITY) {
-    throw std::invalid_argument("ROI output exceeds CameraFrame capacity");
-  }
-  fill_identity(target, source);
-  target.width = static_cast<std::uint32_t>(bgr.cols);
-  target.height = static_cast<std::uint32_t>(bgr.rows);
-  target.step = static_cast<std::uint32_t>(bgr.cols * 3);
-  target.data_size = static_cast<std::uint32_t>(data_size);
-  target.data.assign(bgr.data, bgr.data + data_size);
-}
-
 sensor_msgs::msg::Image make_image(const cv::Mat &bgr,
                                    const std_msgs::msg::Header &header) {
   if (bgr.empty() || bgr.type() != CV_8UC3) {
@@ -358,20 +321,20 @@ class KfsRoiNode final : public rclcpp::Node {
     declare_parameter<double>("target_processing_rate", 30.0);
     declare_parameter<bool>("visualization_enabled", false);
     declare_parameter<std::vector<std::int64_t>>(
-        "blue_hsv_lower", {105, 100, 80});
+        "blue_hsv_lower", {95, 60, 20});
     declare_parameter<std::vector<std::int64_t>>(
-        "blue_hsv_upper", {125, 255, 255});
+        "blue_hsv_upper", {135, 255, 255});
     declare_parameter<std::vector<std::int64_t>>(
-        "red_low_hsv_lower", {0, 100, 80});
+        "red_low_hsv_lower", {0, 60, 20});
     declare_parameter<std::vector<std::int64_t>>(
-        "red_low_hsv_upper", {6, 255, 255});
+        "red_low_hsv_upper", {15, 255, 255});
     declare_parameter<std::vector<std::int64_t>>(
-        "red_high_hsv_lower", {174, 100, 80});
+        "red_high_hsv_lower", {165, 60, 20});
     declare_parameter<std::vector<std::int64_t>>(
         "red_high_hsv_upper", {179, 255, 255});
-    declare_parameter<double>("column_threshold_ratio", 0.8);
-    declare_parameter<double>("row_threshold_ratio", 0.8);
-    declare_parameter<std::int64_t>("morphology_kernel_size", 3);
+    declare_parameter<double>("column_threshold_ratio", 0.7);
+    declare_parameter<double>("row_threshold_ratio", 0.7);
+    declare_parameter<std::int64_t>("morphology_kernel_size", 5);
     declare_parameter<std::int64_t>("min_component_area_px", 100);
 
     config_ = read_config();
@@ -522,15 +485,15 @@ class KfsRoiNode final : public rclcpp::Node {
                                           const cv::Mat &image,
                                           const KfsRoiResult &result) {
     KfsRoiDetection message;
+    message.header = make_header(source);
+    message.sequence = source.sequence;
     message.valid = result.valid;
     message.image_width = image.cols;
     message.image_height = image.rows;
     if (!result.valid) {
-      clear_frame(message.roi, source);
       return message;
     }
 
-    fill_frame(message.roi, source, result.roi);
     message.x1 = result.x1;
     message.y1 = result.y1;
     message.x2 = result.x2;

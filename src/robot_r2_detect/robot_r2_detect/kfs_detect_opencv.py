@@ -26,6 +26,7 @@ def main(args: list[str] | None = None) -> None:
     from rclpy.executors import MultiThreadedExecutor
     from rclpy.node import Node
     from robot_r2_interfaces.msg import (
+        CameraFrame,
         KfsProcessedDetection,
         KfsRawBox,
         KfsRawDetections,
@@ -36,7 +37,6 @@ def main(args: list[str] | None = None) -> None:
     from std_msgs.msg import String
 
     from robot_r2_detect.camera_frame import (
-        camera_frame_header,
         camera_frame_to_bgr,
         camera_qos,
     )
@@ -63,6 +63,7 @@ def main(args: list[str] | None = None) -> None:
             self._cached_placements: dict[str, str] | None = None
             self._cached_seed: int | None = None
             self._robot_pose: tuple[float, float, float] | None = None
+            self._source_frames: dict[int, CameraFrame] = {}
 
             self._declare_parameters()
             self._load_parameters()
@@ -74,6 +75,13 @@ def main(args: list[str] | None = None) -> None:
                 self._conf,
             )
 
+            self._source_subscription = self.create_subscription(
+                CameraFrame,
+                "/r2/front_camera/image_raw",
+                self._on_source_frame,
+                image_qos,
+                callback_group=self._roi_callback_group,
+            )
             self._roi_subscription = self.create_subscription(
                 KfsRoiDetection,
                 self._roi_topic,
@@ -488,13 +496,17 @@ def main(args: list[str] | None = None) -> None:
             )
             return response
 
+        def _on_source_frame(self, msg: CameraFrame) -> None:
+            self._source_frames[int(msg.sequence)] = msg
+            while len(self._source_frames) > 4:
+                del self._source_frames[next(iter(self._source_frames))]
+
         def _on_roi(self, msg: KfsRoiDetection) -> None:
             if not msg.valid:
                 self._publish_empty(msg)
                 return
             try:
-                self._validate_roi_geometry(msg)
-                roi = camera_frame_to_bgr(msg.roi)
+                roi = self._roi_image(msg)
                 result = self._matcher.match(roi)
             except (cv2.error, KeyError, TypeError, ValueError) as exc:
                 self.get_logger().error(
@@ -504,7 +516,7 @@ def main(args: list[str] | None = None) -> None:
                 return
 
             raw_message = KfsRawDetections()
-            raw_message.header = camera_frame_header(msg.roi)
+            raw_message.header = msg.header
             raw_message.boxes = [
                 KfsRawBox(
                     class_name=result.class_name,
@@ -534,15 +546,23 @@ def main(args: list[str] | None = None) -> None:
             self._processed_publisher.publish(processed)
             if self._visualization_enabled:
                 self._publish_visualization(
-                    camera_frame_header(msg.roi),
+                    msg.header,
                     roi,
                     result,
                 )
 
         @staticmethod
-        def _validate_roi_geometry(msg: KfsRoiDetection) -> None:
+        def _validate_roi_geometry(
+            msg: KfsRoiDetection,
+            source: CameraFrame,
+        ) -> None:
             if msg.image_width <= 0 or msg.image_height <= 0:
                 raise ValueError("source image dimensions are invalid")
+            if (
+                int(source.width) != msg.image_width
+                or int(source.height) != msg.image_height
+            ):
+                raise ValueError("ROI result does not match its source frame")
             if (
                 msg.x1 < 0
                 or msg.y1 < 0
@@ -552,27 +572,30 @@ def main(args: list[str] | None = None) -> None:
                 or msg.y2 >= msg.image_height
             ):
                 raise ValueError("ROI coordinates are outside source image")
-            if (
-                int(msg.roi.width) != msg.x2 - msg.x1 + 1
-                or int(msg.roi.height) != msg.y2 - msg.y1 + 1
-            ):
+
+        def _roi_image(self, msg: KfsRoiDetection) -> np.ndarray:
+            source = self._source_frames.pop(int(msg.sequence), None)
+            if source is None:
                 raise ValueError(
-                    "ROI image dimensions do not match its coordinates"
+                    f"source camera frame {msg.sequence} is unavailable"
                 )
+            self._validate_roi_geometry(msg, source)
+            image = camera_frame_to_bgr(source)
+            return image[msg.y1 : msg.y2 + 1, msg.x1 : msg.x2 + 1]
 
         @staticmethod
         def _make_processed_message(
             msg: KfsRoiDetection,
         ) -> KfsProcessedDetection:
             processed = KfsProcessedDetection()
-            processed.header = camera_frame_header(msg.roi)
+            processed.header = msg.header
             processed.image_width = msg.image_width
             processed.image_height = msg.image_height
             return processed
 
         def _publish_empty(self, msg: KfsRoiDetection) -> None:
             raw = KfsRawDetections()
-            raw.header = camera_frame_header(msg.roi)
+            raw.header = msg.header
             raw.boxes = []
             self._raw_publisher.publish(raw)
             self._processed_publisher.publish(

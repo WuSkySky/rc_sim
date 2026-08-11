@@ -88,6 +88,12 @@ def generate_launch_description():
                 executable="kfs_detect",
                 name="kfs_detect",
                 parameters=[detect_config],
+                remappings=[
+                    (
+                        "/r2/front_camera/image_raw",
+                        "/r2/left_camera/image_raw",
+                    ),
+                ],
                 output="screen",
             ),
         ]

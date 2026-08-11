@@ -1,8 +1,8 @@
 /**:
   ros__parameters:
     acquisition_frame_rate_hz: 30.0
-    exposure_time_us: 3000.0
-    gain_db: 32.0
+    exposure_time_us: 12000.0
+    gain_db: 12.0
     visualization_enabled: false
     frame_timeout_ms: 1000
     max_consecutive_failures: 5

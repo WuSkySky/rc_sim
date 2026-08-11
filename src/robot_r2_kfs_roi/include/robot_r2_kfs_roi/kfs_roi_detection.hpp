@@ -10,13 +10,13 @@ struct HsvRange {
 };
 
 struct KfsRoiConfig {
-  HsvRange blue{cv::Vec3b(105, 100, 80), cv::Vec3b(125, 255, 255)};
-  HsvRange red_low{cv::Vec3b(0, 100, 80), cv::Vec3b(6, 255, 255)};
-  HsvRange red_high{cv::Vec3b(174, 100, 80),
+  HsvRange blue{cv::Vec3b(95, 60, 20), cv::Vec3b(135, 255, 255)};
+  HsvRange red_low{cv::Vec3b(0, 60, 20), cv::Vec3b(15, 255, 255)};
+  HsvRange red_high{cv::Vec3b(165, 60, 20),
                     cv::Vec3b(179, 255, 255)};
-  double column_threshold_ratio{0.8};
-  double row_threshold_ratio{0.8};
-  int morphology_kernel_size{3};
+  double column_threshold_ratio{0.7};
+  double row_threshold_ratio{0.7};
+  int morphology_kernel_size{5};
   int min_component_area_px{100};
 };
 
