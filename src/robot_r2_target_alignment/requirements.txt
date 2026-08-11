@@ -1,0 +1,2 @@
+# Ultralytics provides YOLO11 model loading and inference.
+ultralytics>=8.3.59

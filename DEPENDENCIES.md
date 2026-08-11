@@ -127,7 +127,8 @@ src/sim_to_real/odin/odin_ros_driver/lib/liblydHostApi_arm.*
 以下依赖不是所有启动路径都需要：
 
 - `ttkbootstrap`：`rc2026_field/field_gui.py` 图形界面
-- `ultralytics`：旧版 YOLO 路径，当前 TensorRT 融合节点不依赖
+- `ultralytics`：`robot_r2_target_alignment` 的 YOLO11 检测，以及旧版 YOLO 路径；
+  当前 KFS TensorRT 融合节点不依赖
 - `PyYAML`：部分场地/Odin launch 和配置工具使用
 - `pytest`、`ament_flake8`、`ament_pep257`、`ament_copyright`：测试和代码检查
 
@@ -135,6 +136,13 @@ src/sim_to_real/odin/odin_ros_driver/lib/liblydHostApi_arm.*
 
 ```bash
 python3 -m pip install --user ttkbootstrap
+```
+
+YOLO11 目标对齐包需要时安装：
+
+```bash
+python3 -m pip install --user -r \
+  src/robot_r2_target_alignment/requirements.txt
 ```
 
 ## 编译

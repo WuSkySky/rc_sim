@@ -6,3 +6,22 @@
 /.codex
 /venv
 **/COLCON_IGNORE
+
+# ROS 2 build artifacts
+/build/
+/install/
+/log/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+*.egg-info/
+.eggs/
+.coverage
+.coverage.*
+htmlcov/
+.cache/

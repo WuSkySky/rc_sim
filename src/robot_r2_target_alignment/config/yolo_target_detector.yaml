@@ -1,0 +1,26 @@
+/**:
+  ros__parameters:
+    model:
+      # Installed from src/robot_r2_detect/model/duantou.pt.
+      path: package://robot_r2_detect/model/duantou.pt
+      input_size: 640
+      # Ultralytics CUDA device index. Use "cpu" only for CPU fallback.
+      device: "0"
+      half: false
+
+    inference:
+      confidence: 0.5
+      iou: 0.7
+      max_detections: 20
+      rate_hz: 15.0
+
+    target:
+      # Comma-separated values. Empty filters accept all model classes.
+      # When both are set, a detection must match both filters.
+      class_names: ""
+      class_ids: ""
+      max_track_distance_ratio: 0.2
+      switch_confidence_margin: 0.15
+
+    visualization:
+      enabled: true

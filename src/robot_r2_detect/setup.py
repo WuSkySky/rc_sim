@@ -16,10 +16,7 @@ setup(
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
         (
             os.path.join("share", package_name, "model"),
-            [
-                "model/resnet18_batch3_fp16.engine",
-                "model/r2_yolo26n_cls_31.pt",
-            ],
+            glob("model/*.pt") + glob("model/*.engine"),
         ),
         (
             os.path.join("share", package_name, "features"),
