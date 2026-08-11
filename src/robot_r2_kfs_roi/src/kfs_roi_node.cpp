@@ -198,17 +198,20 @@ void draw_stage_label(cv::Mat &tile, const std::string &label) {
 
 cv::Mat make_roi_panel(const cv::Mat &image, const KfsRoiResult &result) {
   cv::Mat panel(image.size(), CV_8UC3, cv::Scalar(24, 24, 24));
-  if (!result.valid || result.roi.empty()) {
+  if (!result.valid) {
     return panel;
   }
 
+  const cv::Mat roi = image(cv::Rect(result.x1, 0,
+                                     result.x2 - result.x1 + 1,
+                                     image.rows));
   const double scale = std::min(
-      static_cast<double>(panel.cols) / result.roi.cols,
-      static_cast<double>(panel.rows) / result.roi.rows);
-  const int width = std::max(1, static_cast<int>(result.roi.cols * scale));
-  const int height = std::max(1, static_cast<int>(result.roi.rows * scale));
+      static_cast<double>(panel.cols) / roi.cols,
+      static_cast<double>(panel.rows) / roi.rows);
+  const int width = std::max(1, static_cast<int>(roi.cols * scale));
+  const int height = std::max(1, static_cast<int>(roi.rows * scale));
   cv::Mat resized;
-  cv::resize(result.roi, resized, cv::Size(width, height), 0.0, 0.0,
+  cv::resize(roi, resized, cv::Size(width, height), 0.0, 0.0,
              scale < 1.0 ? cv::INTER_AREA : cv::INTER_LINEAR);
   const int x = (panel.cols - width) / 2;
   const int y = (panel.rows - height) / 2;
@@ -219,69 +222,40 @@ cv::Mat make_roi_panel(const cv::Mat &image, const KfsRoiResult &result) {
 cv::Mat make_visualization(const cv::Mat &image,
                            const KfsRoiResult &result) {
   cv::Mat source_view = image.clone();
-  if (result.valid) {
-    cv::rectangle(source_view, cv::Point(result.x1, result.y1),
-                  cv::Point(result.x2, result.y2), cv::Scalar(0, 255, 0), 2);
-    cv::drawMarker(source_view,
-                   cv::Point(result.center_u, result.center_v),
-                   cv::Scalar(0, 0, 255), cv::MARKER_CROSS, 18, 2);
-  }
-
   cv::Mat axis_view = mask_to_bgr(result.opened_mask);
-  std::vector<bool> valid_columns(result.opened_mask.cols, false);
-  std::vector<bool> valid_rows(result.opened_mask.rows, false);
-  if (result.max_column_length > 0) {
-    for (int column = 0; column < result.opened_mask.cols; ++column) {
-      valid_columns[column] =
-          cv::countNonZero(result.opened_mask.col(column)) >=
-          result.column_threshold;
-    }
-  }
-  if (result.max_row_length > 0) {
-    for (int row = 0; row < result.opened_mask.rows; ++row) {
-      valid_rows[row] = cv::countNonZero(result.opened_mask.row(row)) >=
-                        result.row_threshold;
-    }
-  }
-  for (int row = 0; row < result.opened_mask.rows; ++row) {
-    for (int column = 0; column < result.opened_mask.cols; ++column) {
-      if (result.opened_mask.at<std::uint8_t>(row, column) == 0) {
-        continue;
-      }
-      if (valid_columns[column] && valid_rows[row]) {
-        axis_view.at<cv::Vec3b>(row, column) = cv::Vec3b(0, 180, 0);
-      } else if (valid_columns[column]) {
-        axis_view.at<cv::Vec3b>(row, column) = cv::Vec3b(0, 255, 255);
-      } else if (valid_rows[row]) {
-        axis_view.at<cv::Vec3b>(row, column) = cv::Vec3b(255, 255, 0);
-      }
-    }
-  }
   if (result.valid) {
-    cv::line(axis_view, cv::Point(result.x1, 0),
-             cv::Point(result.x1, axis_view.rows - 1),
-             cv::Scalar(0, 0, 255), 2);
-    cv::line(axis_view, cv::Point(result.x2, 0),
-             cv::Point(result.x2, axis_view.rows - 1),
-             cv::Scalar(0, 0, 255), 2);
-    cv::line(axis_view, cv::Point(0, result.y1),
-             cv::Point(axis_view.cols - 1, result.y1),
-             cv::Scalar(255, 0, 255), 2);
-    cv::line(axis_view, cv::Point(0, result.y2),
-             cv::Point(axis_view.cols - 1, result.y2),
-             cv::Scalar(255, 0, 255), 2);
+    const auto draw_geometry = [&result](cv::Mat &view) {
+      cv::line(view, cv::Point(result.x1, 0),
+               cv::Point(result.x1, view.rows - 1),
+               cv::Scalar(0, 255, 0), 2);
+      cv::line(view, cv::Point(result.x2, 0),
+               cv::Point(result.x2, view.rows - 1),
+               cv::Scalar(0, 255, 0), 2);
+      cv::line(view, cv::Point(result.center_u, 0),
+               cv::Point(result.center_u, view.rows - 1),
+               cv::Scalar(0, 0, 255), 1);
+      cv::drawMarker(view,
+                     cv::Point(result.x1, result.left_bottom_y),
+                     cv::Scalar(255, 0, 255), cv::MARKER_CROSS, 18, 2);
+      cv::drawMarker(view,
+                     cv::Point(result.x2, result.right_bottom_y),
+                     cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 18, 2);
+    };
+    draw_geometry(source_view);
+    draw_geometry(axis_view);
   }
 
   std::string source_label = "1 Source | ROI not found";
-  std::string roi_label = "5 ROI | invalid";
+  std::string roi_label = "5 Horizontal ROI | invalid";
   if (result.valid) {
     std::ostringstream source_stream;
-    source_stream << "1 Source | offset=(" << std::showpos
-                  << result.center_offset_x << ',' << result.center_offset_y
-                  << std::noshowpos << ")";
+    source_stream << "1 Source | offset_x=" << std::showpos
+                  << result.center_offset_x << std::noshowpos
+                  << " bottom_y=(" << result.left_bottom_y << ','
+                  << result.right_bottom_y << ')';
     source_label = source_stream.str();
-    roi_label = cv::format("5 ROI | %dx%d", result.roi.cols,
-                           result.roi.rows);
+    roi_label = cv::format("5 Horizontal ROI | %dx%d",
+                           result.x2 - result.x1 + 1, image.rows);
   }
 
   const std::vector<std::pair<cv::Mat, std::string>> stages{
@@ -289,9 +263,8 @@ cv::Mat make_visualization(const cv::Mat &image,
       {mask_to_bgr(result.raw_mask), "2 HSV union"},
       {mask_to_bgr(result.opened_mask), "3 Morphological open"},
       {axis_view,
-       cv::format("4 Axes | area=%d X %.1f/%d Y %.1f/%d", result.mask_area,
-                  result.column_threshold, result.max_column_length,
-                  result.row_threshold, result.max_row_length)},
+       cv::format("4 Columns | area=%d threshold=%.1f/%d", result.mask_area,
+                  result.column_threshold, result.max_column_length)},
       {make_roi_panel(image, result), roi_label},
   };
 
@@ -331,7 +304,6 @@ class KfsRoiNode final : public rclcpp::Node {
     declare_parameter<std::vector<std::int64_t>>(
         "red_high_hsv_upper", {179, 255, 255});
     declare_parameter<double>("column_threshold_ratio", 0.7);
-    declare_parameter<double>("row_threshold_ratio", 0.7);
     declare_parameter<std::int64_t>("morphology_kernel_size", 5);
     declare_parameter<std::int64_t>("min_mask_area_px", 100);
 
@@ -374,8 +346,6 @@ class KfsRoiNode final : public rclcpp::Node {
                   "red_high_hsv_upper")};
     config.roi.column_threshold_ratio =
         get_parameter("column_threshold_ratio").as_double();
-    config.roi.row_threshold_ratio =
-        get_parameter("row_threshold_ratio").as_double();
     config.roi.morphology_kernel_size = positive_int(
         get_parameter("morphology_kernel_size").as_int(),
         "morphology_kernel_size");
@@ -426,8 +396,6 @@ class KfsRoiNode final : public rclcpp::Node {
           hsv_value(parameter.as_integer_array(), name);
     } else if (name == "column_threshold_ratio") {
       config.roi.column_threshold_ratio = parameter.as_double();
-    } else if (name == "row_threshold_ratio") {
-      config.roi.row_threshold_ratio = parameter.as_double();
     } else if (name == "morphology_kernel_size") {
       config.roi.morphology_kernel_size =
           positive_int(parameter.as_int(), name);
@@ -492,13 +460,11 @@ class KfsRoiNode final : public rclcpp::Node {
     }
 
     message.x1 = result.x1;
-    message.y1 = result.y1;
     message.x2 = result.x2;
-    message.y2 = result.y2;
+    message.left_bottom_y = result.left_bottom_y;
+    message.right_bottom_y = result.right_bottom_y;
     message.center_u = result.center_u;
-    message.center_v = result.center_v;
     message.center_offset_x = result.center_offset_x;
-    message.center_offset_y = result.center_offset_y;
     return message;
   }
 

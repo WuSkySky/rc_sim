@@ -112,7 +112,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 四轮抬升       | `/r2/lift/set`               | `robot_r2_interfaces/srv/SetLift`             | 仿真、实机 |
 | 跨越台阶       | `/r2/step_traverse`          | `robot_r2_interfaces/srv/TraverseStep`        | 仿真、实机 |
 | KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/AlignToKFS`          | 仿真、实机 |
-| KFS 类型检测   | `/r2/detection/get_type`（仿真）<br>`/r2/detection/{front,left,right}/get_type`（实机） | `robot_r2_interfaces/srv/GetKfsType` | 仿真、实机 |
+| KFS 类型检测   | `/r2/detection/{front,left,right}/get_type` | `robot_r2_interfaces/srv/GetKfsType` | 仅实机 |
 | LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
 | KFS 装载     | `/r2/kfs/load`               | `robot_r2_interfaces/srv/LoadKfs`             | 仿真、实机 |
 | KFS 释放     | `/r2/kfs/release`            | `robot_r2_interfaces/srv/ReleaseKfs`          | 仿真、实机 |
@@ -203,8 +203,8 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
 前相机；实机的前置海康相机和 ROI 节点都由 real2 启动，ROI 默认使用
 `/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
-`/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、边界和中心偏差，
-不包含图像像素：
+`/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、左右边界、左右
+边界列的最下方掩膜点和横向中心偏差，不包含图像像素：
 
 使用 `kfs_alignment.yaml` 中的默认容差和超时时间执行对齐：
 
@@ -244,8 +244,6 @@ ros2 param set /kfs_alignment pixel_tolerance 10
 
 ```bash
 ros2 param set /kfs_roi visualization_enabled true
-# 仿真检测节点：
-ros2 param set /kfs_detect visualization_enabled true
 # 实机检测节点：
 ros2 param set /kfs_detect_fused visualization_enabled true
 ros2 param set /led_detect visualization_enabled true
@@ -256,23 +254,23 @@ ros2 param set /left_mipi_camera visualization_enabled true
 ros2 param set /right_mipi_camera visualization_enabled true
 ```
 
-将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的六阶段调试图像发布在
-`/r2/kfs/roi/debug`；仿真 KFS 检测调试图像为
-`/r2/detection/debug`，实机三路检测分别为 `/r2/detection/{front,left,right}/debug`；
+将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的五阶段调试图像发布在
+`/r2/kfs/roi/debug`；实机三路检测分别为
+`/r2/detection/{front,left,right}/debug`；
 LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后摄像头后处理、前置
 海康相机以及左右 MIPI 相机也使用同一个动态参数控制各自的 `/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
 
-KFS 类型检测：
+实机 KFS 类型检测，以前相机为例：
 
 ```bash
-ros2 service call /r2/detection/get_type \
+ros2 service call /r2/detection/front/get_type \
   robot_r2_interfaces/srv/GetKfsType \
   "{sample_count: 10, timeout_sec: 10.0}"
 ```
 
-上面是仿真服务。实机前、左、右相机分别使用
-`/r2/detection/{front,left,right}/get_type`，请求格式相同。
+前、左、右相机分别使用 `/r2/detection/{front,left,right}/get_type`，请求格式相同。
+仿真启动文件不再启动 KFS 类型检测节点。
 
 LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：
 

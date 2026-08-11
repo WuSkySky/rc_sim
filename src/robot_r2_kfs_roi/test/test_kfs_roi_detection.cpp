@@ -18,7 +18,6 @@ KfsRoiConfig default_config() {
   config.red_high = {cv::Vec3b(174, 100, 80),
                      cv::Vec3b(179, 255, 255)};
   config.column_threshold_ratio = 0.8;
-  config.row_threshold_ratio = 0.8;
   config.morphology_kernel_size = 3;
   config.min_mask_area_px = 100;
   return config;
@@ -36,7 +35,7 @@ void fill(cv::Mat &image, const cv::Rect &rect, const cv::Vec3b &color) {
   image(rect).setTo(cv::Scalar(color[0], color[1], color[2]));
 }
 
-TEST(KfsRoiDetection, UsesIndependentColumnAndRowProjections) {
+TEST(KfsRoiDetection, UsesColumnProjectionAndFindsBottomPoints) {
   cv::Mat image = cv::Mat::zeros(100, 120, CV_8UC3);
   const cv::Vec3b blue = bgr_from_hsv(115, 255, 255);
   fill(image, cv::Rect(20, 15, 60, 70), blue);
@@ -46,52 +45,49 @@ TEST(KfsRoiDetection, UsesIndependentColumnAndRowProjections) {
 
   ASSERT_TRUE(result.valid);
   EXPECT_EQ(result.x1, 20);
-  EXPECT_EQ(result.y1, 15);
   EXPECT_EQ(result.x2, 79);
-  EXPECT_EQ(result.y2, 84);
+  EXPECT_EQ(result.left_bottom_y, 84);
+  EXPECT_EQ(result.right_bottom_y, 84);
   EXPECT_EQ(result.center_u, 49);
-  EXPECT_EQ(result.center_v, 49);
   EXPECT_EQ(result.center_offset_x, -11);
-  EXPECT_EQ(result.center_offset_y, -1);
-  EXPECT_EQ(result.roi.cols, 60);
-  EXPECT_EQ(result.roi.rows, 70);
   EXPECT_FALSE(result.raw_mask.empty());
   EXPECT_FALSE(result.opened_mask.empty());
   EXPECT_EQ(result.mask_area, 4233);
   EXPECT_EQ(result.max_column_length, 81);
-  EXPECT_EQ(result.max_row_length, 60);
   EXPECT_DOUBLE_EQ(result.column_threshold, 64.8);
-  EXPECT_DOUBLE_EQ(result.row_threshold, 48.0);
 }
 
-TEST(KfsRoiDetection, RowThresholdChangesOnlyVerticalBounds) {
+TEST(KfsRoiDetection, VerticalExtentDoesNotChangeHorizontalBounds) {
   cv::Mat image = cv::Mat::zeros(100, 120, CV_8UC3);
   const cv::Vec3b blue = bgr_from_hsv(115, 255, 255);
   fill(image, cv::Rect(20, 20, 60, 60), blue);
   fill(image, cv::Rect(30, 10, 40, 10), blue);
   fill(image, cv::Rect(30, 80, 40, 10), blue);
 
-  KfsRoiConfig strict_rows = default_config();
-  strict_rows.column_threshold_ratio = 0.7;
-  strict_rows.row_threshold_ratio = 0.8;
-  const KfsRoiResult strict_result =
-      extract_kfs_roi(image, strict_rows);
+  KfsRoiConfig config = default_config();
+  config.column_threshold_ratio = 0.7;
+  const KfsRoiResult result = extract_kfs_roi(image, config);
 
-  KfsRoiConfig relaxed_rows = strict_rows;
-  relaxed_rows.row_threshold_ratio = 0.6;
-  const KfsRoiResult relaxed_result =
-      extract_kfs_roi(image, relaxed_rows);
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.x1, 20);
+  EXPECT_EQ(result.x2, 79);
+  EXPECT_EQ(result.left_bottom_y, 79);
+  EXPECT_EQ(result.right_bottom_y, 79);
+}
 
-  ASSERT_TRUE(strict_result.valid);
-  ASSERT_TRUE(relaxed_result.valid);
-  EXPECT_EQ(strict_result.x1, 20);
-  EXPECT_EQ(strict_result.x2, 79);
-  EXPECT_EQ(relaxed_result.x1, strict_result.x1);
-  EXPECT_EQ(relaxed_result.x2, strict_result.x2);
-  EXPECT_EQ(strict_result.y1, 20);
-  EXPECT_EQ(strict_result.y2, 79);
-  EXPECT_EQ(relaxed_result.y1, 10);
-  EXPECT_EQ(relaxed_result.y2, 89);
+TEST(KfsRoiDetection, FindsIndependentLeftAndRightBottomPoints) {
+  cv::Mat image = cv::Mat::zeros(100, 120, CV_8UC3);
+  const cv::Vec3b blue = bgr_from_hsv(115, 255, 255);
+  fill(image, cv::Rect(20, 10, 30, 60), blue);
+  fill(image, cv::Rect(50, 20, 30, 60), blue);
+
+  const KfsRoiResult result = extract_kfs_roi(image, default_config());
+
+  ASSERT_TRUE(result.valid);
+  EXPECT_EQ(result.x1, 20);
+  EXPECT_EQ(result.x2, 79);
+  EXPECT_EQ(result.left_bottom_y, 69);
+  EXPECT_EQ(result.right_bottom_y, 79);
 }
 
 TEST(KfsRoiDetection, AcceptsBothRedHueRanges) {
@@ -104,9 +100,9 @@ TEST(KfsRoiDetection, AcceptsBothRedHueRanges) {
 
     ASSERT_TRUE(result.valid);
     EXPECT_EQ(result.x1, 10);
-    EXPECT_EQ(result.y1, 5);
     EXPECT_EQ(result.x2, 39);
-    EXPECT_EQ(result.y2, 34);
+    EXPECT_EQ(result.left_bottom_y, 34);
+    EXPECT_EQ(result.right_bottom_y, 34);
   }
 }
 
@@ -156,9 +152,9 @@ TEST(KfsRoiDetection, RemovesIsolatedNoiseBeforeProjection) {
 
   ASSERT_TRUE(result.valid);
   EXPECT_EQ(result.x1, 20);
-  EXPECT_EQ(result.y1, 20);
   EXPECT_EQ(result.x2, 59);
-  EXPECT_EQ(result.y2, 59);
+  EXPECT_EQ(result.left_bottom_y, 59);
+  EXPECT_EQ(result.right_bottom_y, 59);
   EXPECT_EQ(cv::countNonZero(result.raw_mask), 1827);
   EXPECT_EQ(cv::countNonZero(result.opened_mask), 1825);
 }
@@ -170,7 +166,6 @@ TEST(KfsRoiDetection, RejectsMaskBelowMinimumArea) {
   const KfsRoiResult result = extract_kfs_roi(image, default_config());
 
   EXPECT_FALSE(result.valid);
-  EXPECT_TRUE(result.roi.empty());
   EXPECT_EQ(result.mask_area, 81);
   EXPECT_EQ(cv::countNonZero(result.opened_mask), 81);
 }
@@ -187,9 +182,6 @@ TEST(KfsRoiDetection, RejectsEmptyImageAndInvalidConfiguration) {
   EXPECT_THROW(validate_kfs_roi_config(config), std::invalid_argument);
   config = default_config();
   config.column_threshold_ratio = 1.1;
-  EXPECT_THROW(validate_kfs_roi_config(config), std::invalid_argument);
-  config = default_config();
-  config.row_threshold_ratio = 0.0;
   EXPECT_THROW(validate_kfs_roi_config(config), std::invalid_argument);
 }
 

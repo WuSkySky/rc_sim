@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -26,41 +27,49 @@ cv::Scalar as_scalar(const cv::Vec3b &value) {
   return cv::Scalar(value[0], value[1], value[2]);
 }
 
-struct AxisBounds {
+struct ColumnBounds {
   int first{-1};
   int last{-1};
   int max_length{0};
   double threshold{0.0};
 };
 
-AxisBounds find_axis_bounds(const cv::Mat &mask, bool use_columns,
-                            double threshold_ratio) {
-  AxisBounds bounds;
-  const int axis_length = use_columns ? mask.cols : mask.rows;
-  const auto projection_length = [&mask, use_columns](const int index) {
-    return use_columns ? cv::countNonZero(mask.col(index))
-                       : cv::countNonZero(mask.row(index));
-  };
-
-  for (int index = 0; index < axis_length; ++index) {
-    bounds.max_length =
-        std::max(bounds.max_length, projection_length(index));
+ColumnBounds find_column_bounds(const cv::Mat &mask, double threshold_ratio,
+                                int &mask_area) {
+  ColumnBounds bounds;
+  cv::Mat column_sums;
+  cv::reduce(mask, column_sums, 0, cv::REDUCE_SUM, CV_32S);
+  mask_area = 0;
+  for (int column = 0; column < mask.cols; ++column) {
+    const int length = column_sums.at<int>(0, column) / 255;
+    mask_area += length;
+    bounds.max_length = std::max(bounds.max_length, length);
   }
   if (bounds.max_length <= 0) {
     return bounds;
   }
 
   bounds.threshold = bounds.max_length * threshold_ratio;
-  for (int index = 0; index < axis_length; ++index) {
-    if (projection_length(index) < bounds.threshold) {
+  for (int column = 0; column < mask.cols; ++column) {
+    const int length = column_sums.at<int>(0, column) / 255;
+    if (length < bounds.threshold) {
       continue;
     }
     if (bounds.first < 0) {
-      bounds.first = index;
+      bounds.first = column;
     }
-    bounds.last = index;
+    bounds.last = column;
   }
   return bounds;
+}
+
+int find_bottom_y(const cv::Mat &mask, int column) {
+  for (int row = mask.rows - 1; row >= 0; --row) {
+    if (mask.at<std::uint8_t>(row, column) != 0) {
+      return row;
+    }
+  }
+  return -1;
 }
 
 }  // namespace
@@ -74,12 +83,6 @@ void validate_kfs_roi_config(const KfsRoiConfig &config) {
       config.column_threshold_ratio > 1.0) {
     throw std::invalid_argument(
         "column_threshold_ratio must be finite and in (0, 1]");
-  }
-  if (!std::isfinite(config.row_threshold_ratio) ||
-      config.row_threshold_ratio <= 0.0 ||
-      config.row_threshold_ratio > 1.0) {
-    throw std::invalid_argument(
-        "row_threshold_ratio must be finite and in (0, 1]");
   }
   if (config.morphology_kernel_size <= 0 ||
       config.morphology_kernel_size % 2 == 0) {
@@ -123,37 +126,28 @@ KfsRoiResult extract_kfs_roi(const cv::Mat &bgr_image,
       cv::MORPH_RECT,
       cv::Size(config.morphology_kernel_size, config.morphology_kernel_size));
   cv::morphologyEx(combined_mask, result.opened_mask, cv::MORPH_OPEN, kernel);
-  result.mask_area = cv::countNonZero(result.opened_mask);
+  const ColumnBounds horizontal = find_column_bounds(
+      result.opened_mask, config.column_threshold_ratio, result.mask_area);
   if (result.mask_area < config.min_mask_area_px) {
     return result;
   }
+  if (horizontal.first < 0 || horizontal.last < horizontal.first) {
+    return result;
+  }
 
-  const AxisBounds horizontal = find_axis_bounds(
-      result.opened_mask, true, config.column_threshold_ratio);
-  const AxisBounds vertical =
-      find_axis_bounds(result.opened_mask, false, config.row_threshold_ratio);
   result.max_column_length = horizontal.max_length;
-  result.max_row_length = vertical.max_length;
   result.column_threshold = horizontal.threshold;
-  result.row_threshold = vertical.threshold;
-  if (horizontal.first < 0 || horizontal.last < horizontal.first ||
-      vertical.first < 0 || vertical.last < vertical.first) {
+  result.x1 = horizontal.first;
+  result.x2 = horizontal.last;
+  result.left_bottom_y = find_bottom_y(result.opened_mask, result.x1);
+  result.right_bottom_y = find_bottom_y(result.opened_mask, result.x2);
+  if (result.left_bottom_y < 0 || result.right_bottom_y < 0) {
     return result;
   }
 
   result.valid = true;
-  result.x1 = horizontal.first;
-  result.y1 = vertical.first;
-  result.x2 = horizontal.last;
-  result.y2 = vertical.last;
   result.center_u = (result.x1 + result.x2) / 2;
-  result.center_v = (result.y1 + result.y2) / 2;
   result.center_offset_x = result.center_u - bgr_image.cols / 2;
-  result.center_offset_y = result.center_v - bgr_image.rows / 2;
-  result.roi = bgr_image(cv::Rect(result.x1, result.y1,
-                                  result.x2 - result.x1 + 1,
-                                  result.y2 - result.y1 + 1))
-                   .clone();
   return result;
 }
 

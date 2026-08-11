@@ -16,18 +16,7 @@ setup(
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
         (
             os.path.join("share", package_name, "model"),
-            [
-                "model/resnet18_batch3_fp16.engine",
-                "model/r2_yolo26n_cls_31.pt",
-            ],
-        ),
-        (
-            os.path.join("share", package_name, "features"),
-            glob("features/*.npz"),
-        ),
-        (
-            os.path.join("share", package_name, "reference"),
-            glob("reference/*.png"),
+            ["model/resnet18_batch3_fp16.engine"],
         ),
     ],
     install_requires=["setuptools"],
@@ -39,7 +28,6 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "kfs_detect = robot_r2_detect.kfs_detect_yolo:main",
             "led_detect = robot_r2_detect.led_detect:main",
         ],
     },

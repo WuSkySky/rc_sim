@@ -11,12 +11,37 @@ Provides:
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
-from robot_r2_detect.kfs_detect import (
-    _classify_kfs_model,
-    _select_most_frequent_class,
-)
+
+def _classify_kfs_model(model_name: str) -> str:
+    if "FakeKFS" in model_name:
+        return "fake"
+    if "TrueKFS" in model_name:
+        return "r2"
+    if "R1KFS" in model_name:
+        return "r1"
+    return ""
+
+
+def _select_most_frequent_class(samples: list[str]) -> str:
+    """Return the most frequent class, preferring the latest on ties."""
+    if not samples:
+        raise ValueError("at least one class sample is required")
+
+    counts = Counter(samples)
+    highest_count = max(counts.values())
+    tied_classes = {
+        class_name
+        for class_name, count in counts.items()
+        if count == highest_count
+    }
+    return next(
+        class_name
+        for class_name in reversed(samples)
+        if class_name in tied_classes
+    )
 
 
 def _processing_overrun_message(

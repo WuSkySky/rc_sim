@@ -92,22 +92,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    kfs_detect_config = os.path.join(
-        detect_pkg,
-        'config',
-        'kfs_detect.yaml',
-    )
-    kfs_detect = Node(
-        package='robot_r2_detect',
-        executable='kfs_detect',
-        name='kfs_detect',
-        parameters=[
-            kfs_detect_config,
-            {'simulation_state_detection': True},
-        ],
-        output='screen',
-    )
-
     led_detect_config = os.path.join(
         detect_pkg,
         'config',
@@ -151,7 +135,6 @@ def generate_launch_description():
         control_launch,
         kfs_roi,
         kfs_alignment,
-        kfs_detect,
         led_detect,
         teleop_control,
     ])

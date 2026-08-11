@@ -10,6 +10,5 @@ kfs_roi:
     red_high_hsv_lower: [165, 60, 20]
     red_high_hsv_upper: [179, 255, 255]
     column_threshold_ratio: 0.7
-    row_threshold_ratio: 0.7
     morphology_kernel_size: 5
     min_mask_area_px: 100

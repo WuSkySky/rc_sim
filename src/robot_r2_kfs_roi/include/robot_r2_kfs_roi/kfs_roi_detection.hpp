@@ -15,7 +15,6 @@ struct KfsRoiConfig {
   HsvRange red_high{cv::Vec3b(165, 60, 20),
                     cv::Vec3b(179, 255, 255)};
   double column_threshold_ratio{0.7};
-  double row_threshold_ratio{0.7};
   int morphology_kernel_size{5};
   int min_mask_area_px{100};
 };
@@ -24,20 +23,15 @@ struct KfsRoiResult {
   bool valid{false};
   cv::Mat raw_mask;
   cv::Mat opened_mask;
-  cv::Mat roi;
   int mask_area{0};
   int max_column_length{0};
-  int max_row_length{0};
   double column_threshold{0.0};
-  double row_threshold{0.0};
   int x1{0};
-  int y1{0};
   int x2{0};
-  int y2{0};
+  int left_bottom_y{0};
+  int right_bottom_y{0};
   int center_u{0};
-  int center_v{0};
   int center_offset_x{0};
-  int center_offset_y{0};
 };
 
 void validate_kfs_roi_config(const KfsRoiConfig &config);

@@ -1,3 +1,2 @@
 numpy>=1.23
-ultralytics>=8.3.59
 # TensorRT is supplied by JetPack (apt package python3-libnvinfer).
