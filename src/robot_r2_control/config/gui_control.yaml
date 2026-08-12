@@ -27,3 +27,6 @@ gui_control:
     pose_test_linear_distance: 0.3
     pose_test_yaw: 1.57
     move_timeout_sec: 20.0
+
+    kfs_alignment_pixel_tolerance: 10.0
+    kfs_alignment_timeout_sec: 3.0

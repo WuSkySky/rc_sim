@@ -18,14 +18,6 @@ setup(
             os.path.join("share", package_name, "model"),
             glob("model/*.pt") + glob("model/*.engine"),
         ),
-        (
-            os.path.join("share", package_name, "features"),
-            glob("features/*.npz"),
-        ),
-        (
-            os.path.join("share", package_name, "reference"),
-            glob("reference/*.png"),
-        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -36,7 +28,6 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "kfs_detect = robot_r2_detect.kfs_detect_yolo:main",
             "led_detect = robot_r2_detect.led_detect:main",
         ],
     },

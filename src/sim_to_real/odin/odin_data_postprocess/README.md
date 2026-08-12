@@ -8,9 +8,10 @@ Odin 数据的 ROS 2 后处理节点，包括：
 - 发布 `/r2/pose_feedback`，并通过服务重设 `map` 中的机器人位姿。
 
 `camera_frame_postprocess` 订阅 `/odin1/image/undistorted`，发布
-`/r2/front_camera/image_raw`。普通调试图像默认关闭，可在运行时动态开启
+`/r2/rear_camera/image_raw`，该图像在实车上表示 Odin 后摄像头。普通调试图像
+默认关闭，可在运行时动态开启
 `visualization_enabled`，开启后会额外发布
-`/r2/front_camera/image_raw/debug`：
+`/r2/rear_camera/image_raw/debug`：
 
 ```bash
 ros2 param set /camera_frame_postprocess visualization_enabled true

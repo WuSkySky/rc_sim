@@ -1,11 +1,13 @@
 # KFS ROI
 
 `robot_r2_kfs_roi` provides the CPU-only OpenCV `kfs_roi` node used by
-simulation, YOLO testing, and real-camera ROI extraction.
+simulation and real-camera ROI extraction.
 
-The node subscribes to `/r2/front_camera/image_raw`, publishes detections on
-`/r2/kfs/roi`, and optionally publishes a six-stage visualization on
-`/r2/kfs/roi/debug`. Camera selection remains a launch remapping.
+The node subscribes to `/r2/front_camera/image_raw`, publishes the qualified
+left/right columns, their lowest mask pixels, and the horizontal center offset
+on `/r2/kfs/roi`, and optionally publishes a five-stage visualization on
+`/r2/kfs/roi/debug`. The detection message never contains image pixels. Camera
+selection remains a launch remapping.
 
 All thresholds support validated runtime parameter updates. Their defaults
 are installed from `config/kfs_roi.yaml`.

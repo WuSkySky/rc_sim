@@ -1,4 +1,32 @@
-from robot_r2_detect.kfs_detect_resnet import _processing_overrun_message
+import pytest
+
+from robot_r2_detect.kfs_detect_resnet import (
+    _classify_kfs_model,
+    _processing_overrun_message,
+    _select_most_frequent_class,
+)
+
+
+@pytest.mark.parametrize(
+    ("model_name", "expected"),
+    [
+        ("BlueFakeKFS03", "fake"),
+        ("RedTrueKFS08", "r2"),
+        ("BlueR1KFS", "r1"),
+        ("Unknown", ""),
+    ],
+)
+def test_classify_simulation_model_name(model_name, expected):
+    assert _classify_kfs_model(model_name) == expected
+
+
+def test_vote_prefers_latest_class_on_tie():
+    assert _select_most_frequent_class(["r2", "fake"]) == "fake"
+
+
+def test_vote_rejects_empty_samples():
+    with pytest.raises(ValueError):
+        _select_most_frequent_class([])
 
 
 def test_processing_at_deadline_does_not_warn():

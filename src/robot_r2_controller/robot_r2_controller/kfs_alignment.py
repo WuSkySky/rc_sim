@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 import threading
 import time
 
 from geometry_msgs.msg import Twist
+from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.callback_groups import (
     MutuallyExclusiveCallbackGroup,
@@ -25,6 +27,23 @@ from robot_r2_interfaces.msg import KfsRoiDetection
 from robot_r2_interfaces.srv import AlignToKFS
 
 
+ROI_TOPIC = "/r2/kfs/roi"
+CMD_VEL_TOPIC = "/r2/cmd_vel"
+ALIGN_SERVICE = "/r2/align_to_kfs"
+
+
+@dataclass(frozen=True)
+class AlignmentConfig:
+    pixel_tolerance: int
+    stable_cycles: int
+    default_timeout_sec: float
+    kp: float
+    ki: float
+    kd: float
+    integral_limit: float
+    output_limit: float
+
+
 class KfsAlignmentController(Node):
     """Run only the alignment control loop; vision lives in kfs_roi."""
 
@@ -32,11 +51,12 @@ class KfsAlignmentController(Node):
         super().__init__("kfs_alignment")
         self.service_lock = threading.Lock()
         self.state_condition = threading.Condition()
+        self._config_lock = threading.Lock()
         self._feedback_callback_group = MutuallyExclusiveCallbackGroup()
         self._service_callback_group = ReentrantCallbackGroup()
 
         self._declare_parameters()
-        self._load_parameters()
+        self._config = self._read_config()
 
         self._frame_sequence = 0
         self._latest_offset_x: int | None = None
@@ -51,80 +71,121 @@ class KfsAlignmentController(Node):
 
         self._subscription = self.create_subscription(
             KfsRoiDetection,
-            self._roi_topic,
+            ROI_TOPIC,
             self._on_roi,
             image_qos,
             callback_group=self._feedback_callback_group,
         )
         self._pub_cmd = self.create_publisher(
             Twist,
-            self._cmd_vel_topic,
+            CMD_VEL_TOPIC,
             10,
         )
         self._srv = self.create_service(
             AlignToKFS,
-            self._align_service,
+            ALIGN_SERVICE,
             self._handle_align,
             callback_group=self._service_callback_group,
         )
+        self._parameter_callback = self.add_on_set_parameters_callback(
+            self._on_parameters_changed
+        )
 
     def _declare_parameters(self) -> None:
-        self.declare_parameter("roi_topic", "/r2/kfs/roi")
-        self.declare_parameter("cmd_vel_topic", "/r2/cmd_vel")
-        self.declare_parameter("align_service", "/r2/align_to_kfs")
         self.declare_parameter("pixel_tolerance", 5)
         self.declare_parameter("stable_cycles", 10)
         self.declare_parameter("default_timeout_sec", 10.0)
-        self.declare_parameter("kp", 0.008)
-        self.declare_parameter("ki", 0.0003)
-        self.declare_parameter("kd", 0.001)
+        self.declare_parameter("kp", 0.004)
+        self.declare_parameter("ki", 0.00015)
+        self.declare_parameter("kd", 0.0005)
         self.declare_parameter("integral_limit", 0.5)
-        self.declare_parameter("output_limit", 1.0)
+        self.declare_parameter("output_limit", 0.1)
 
-    def _load_parameters(self) -> None:
-        self._roi_topic = str(self.get_parameter("roi_topic").value)
-        self._cmd_vel_topic = str(
-            self.get_parameter("cmd_vel_topic").value
-        )
-        self._align_service = str(
-            self.get_parameter("align_service").value
-        )
-        self._pixel_tolerance = int(
-            self.get_parameter("pixel_tolerance").value
-        )
-        self._stable_cycles = int(
-            self.get_parameter("stable_cycles").value
-        )
-        self._default_timeout_sec = float(
-            self.get_parameter("default_timeout_sec").value
-        )
-        if self._pixel_tolerance < 0:
+    @staticmethod
+    def _validate_config(config: AlignmentConfig) -> None:
+        if (
+            not isinstance(config.pixel_tolerance, int)
+            or isinstance(config.pixel_tolerance, bool)
+        ):
+            raise ValueError("pixel_tolerance must be an integer")
+        if (
+            not isinstance(config.stable_cycles, int)
+            or isinstance(config.stable_cycles, bool)
+        ):
+            raise ValueError("stable_cycles must be an integer")
+        if config.pixel_tolerance < 0:
             raise ValueError("pixel_tolerance must be non-negative")
-        if self._stable_cycles <= 0:
+        if config.stable_cycles <= 0:
             raise ValueError("stable_cycles must be greater than zero")
         if (
-            not math.isfinite(self._default_timeout_sec)
-            or self._default_timeout_sec <= 0.0
+            not math.isfinite(config.default_timeout_sec)
+            or config.default_timeout_sec <= 0.0
         ):
             raise ValueError(
                 "default_timeout_sec must be finite and positive"
             )
+        for name in ("kp", "ki", "kd"):
+            if not math.isfinite(getattr(config, name)):
+                raise ValueError(f"{name} must be finite")
+        if (
+            not math.isfinite(config.integral_limit)
+            or config.integral_limit < 0.0
+        ):
+            raise ValueError(
+                "integral_limit must be finite and non-negative"
+            )
+        if (
+            not math.isfinite(config.output_limit)
+            or config.output_limit <= 0.0
+        ):
+            raise ValueError("output_limit must be finite and positive")
 
-        self._kp = self._finite_parameter("kp")
-        self._ki = self._finite_parameter("ki")
-        self._kd = self._finite_parameter("kd")
-        self._integral_limit = abs(
-            self._finite_parameter("integral_limit")
+    @classmethod
+    def _config_from_values(cls, values) -> AlignmentConfig:
+        config = AlignmentConfig(
+            pixel_tolerance=values["pixel_tolerance"],
+            stable_cycles=values["stable_cycles"],
+            default_timeout_sec=values["default_timeout_sec"],
+            kp=values["kp"],
+            ki=values["ki"],
+            kd=values["kd"],
+            integral_limit=values["integral_limit"],
+            output_limit=values["output_limit"],
         )
-        self._output_limit = abs(
-            self._finite_parameter("output_limit")
-        )
+        cls._validate_config(config)
+        return config
 
-    def _finite_parameter(self, name: str) -> float:
-        value = float(self.get_parameter(name).value)
-        if not math.isfinite(value):
-            raise ValueError(f"{name} must be finite")
-        return value
+    def _read_config(self) -> AlignmentConfig:
+        names = AlignmentConfig.__dataclass_fields__
+        values = {
+            name: self.get_parameter(name).value
+            for name in names
+        }
+        return self._config_from_values(values)
+
+    def _config_snapshot(self) -> AlignmentConfig:
+        with self._config_lock:
+            return self._config
+
+    def _on_parameters_changed(self, parameters) -> SetParametersResult:
+        with self._config_lock:
+            current = self._config
+            values = {
+                name: getattr(current, name)
+                for name in AlignmentConfig.__dataclass_fields__
+            }
+            for parameter in parameters:
+                if parameter.name in values:
+                    values[parameter.name] = parameter.value
+            try:
+                candidate = self._config_from_values(values)
+            except (TypeError, ValueError) as error:
+                return SetParametersResult(
+                    successful=False,
+                    reason=str(error),
+                )
+            self._config = candidate
+        return SetParametersResult(successful=True)
 
     def _on_roi(self, msg: KfsRoiDetection) -> None:
         received_at = time.monotonic()
@@ -143,31 +204,36 @@ class KfsAlignmentController(Node):
         self._last_error = 0.0
         self._has_last_error = False
 
-    def _pid_update(self, error: float, dt: float) -> float:
+    def _pid_update(
+        self,
+        error: float,
+        dt: float,
+        config: AlignmentConfig,
+    ) -> float:
         if dt <= 0.0:
             return 0.0
 
         self._integral += error * dt
-        if self._integral_limit > 0.0:
+        if config.integral_limit > 0.0:
             self._integral = max(
-                -self._integral_limit,
-                min(self._integral, self._integral_limit),
+                -config.integral_limit,
+                min(self._integral, config.integral_limit),
             )
 
         derivative = 0.0
         if self._has_last_error:
             derivative = (error - self._last_error) / dt
         output = (
-            self._kp * error
-            + self._ki * self._integral
-            + self._kd * derivative
+            config.kp * error
+            + config.ki * self._integral
+            + config.kd * derivative
         )
         self._last_error = error
         self._has_last_error = True
-        if self._output_limit > 0.0:
+        if config.output_limit > 0.0:
             output = max(
-                -self._output_limit,
-                min(output, self._output_limit),
+                -config.output_limit,
+                min(output, config.output_limit),
             )
         return output
 
@@ -188,36 +254,40 @@ class KfsAlignmentController(Node):
                     None,
                 )
 
-            tolerance = (
+            tolerance_override = (
                 requested_tolerance
                 if requested_tolerance > 0.0
-                else float(self._pixel_tolerance)
+                else None
             )
-            timeout_sec = (
+            timeout_override = (
                 requested_timeout
                 if requested_timeout > 0.0
-                else self._default_timeout_sec
+                else None
             )
             with self.state_condition:
                 self._alignment_active = True
             try:
                 return self._execute_alignment(
                     response,
-                    tolerance,
-                    timeout_sec,
+                    tolerance_override,
+                    timeout_override,
                 )
             finally:
                 with self.state_condition:
                     self._alignment_active = False
 
-    def _execute_alignment(self, response, tolerance, timeout_sec):
+    def _execute_alignment(
+        self,
+        response,
+        tolerance_override,
+        timeout_override,
+    ):
         self._pid_reset()
         stable_cycle_count = 0
         last_frame_time: float | None = None
         last_offset: int | None = None
         saw_detection = False
         service_started_at = time.monotonic()
-        deadline = service_started_at + timeout_sec
 
         with self.state_condition:
             handled_sequence = self._frame_sequence
@@ -228,6 +298,13 @@ class KfsAlignmentController(Node):
                     self._frame_sequence <= handled_sequence
                     and rclpy.ok()
                 ):
+                    wait_config = self._config_snapshot()
+                    timeout_sec = (
+                        timeout_override
+                        if timeout_override is not None
+                        else wait_config.default_timeout_sec
+                    )
+                    deadline = service_started_at + timeout_sec
                     remaining = deadline - time.monotonic()
                     if remaining <= 0.0:
                         break
@@ -243,6 +320,18 @@ class KfsAlignmentController(Node):
                     offset = None
                     frame_time = 0.0
 
+            config = self._config_snapshot()
+            tolerance = (
+                tolerance_override
+                if tolerance_override is not None
+                else float(config.pixel_tolerance)
+            )
+            timeout_sec = (
+                timeout_override
+                if timeout_override is not None
+                else config.default_timeout_sec
+            )
+            deadline = service_started_at + timeout_sec
             if time.monotonic() >= deadline:
                 if not saw_detection:
                     message = (
@@ -254,7 +343,7 @@ class KfsAlignmentController(Node):
                     message = (
                         f"Alignment timeout: final offset={last_offset}px, "
                         f"stable={stable_cycle_count}/"
-                        f"{self._stable_cycles}"
+                        f"{config.stable_cycles}"
                     )
                 return self._failure_response(
                     response,
@@ -279,12 +368,12 @@ class KfsAlignmentController(Node):
                 last_frame_time = frame_time
                 self._pid_reset()
                 self._stop()
-                if stable_cycle_count >= self._stable_cycles:
+                if stable_cycle_count >= config.stable_cycles:
                     response.success = True
                     response.message = (
                         f"Alignment complete: offset={offset}px, "
                         f"stable={stable_cycle_count}/"
-                        f"{self._stable_cycles}, "
+                        f"{config.stable_cycles}, "
                         f"tolerance={tolerance:g}px"
                     )
                     response.final_offset_x = offset
@@ -299,7 +388,7 @@ class KfsAlignmentController(Node):
             last_frame_time = frame_time
 
             # Positive image offset means the target is to the right.
-            output = self._pid_update(-float(offset), dt)
+            output = self._pid_update(-float(offset), dt, config)
             cmd = Twist()
             cmd.linear.y = output
             self._pub_cmd.publish(cmd)

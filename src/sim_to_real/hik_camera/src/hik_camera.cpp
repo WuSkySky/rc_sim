@@ -78,7 +78,7 @@ public:
     acquisition_frame_rate_hz_ =
         declare_parameter<double>("acquisition_frame_rate_hz", 30.0);
     exposure_time_us_ = declare_parameter<double>("exposure_time_us", 3000.0);
-    gain_db_ = declare_parameter<double>("gain_db", 32.0);
+    gain_db_ = declare_parameter<double>("gain_db", 0.0);
     binning_2x2_enabled_ = declare_parameter<bool>("binning_2x2_enabled", true);
     visualization_enabled_.store(
         declare_parameter<bool>("visualization_enabled", false));
@@ -336,7 +336,10 @@ private:
       throw std::invalid_argument("exposure_time_us is outside camera range");
     }
     if (!is_in_range(gain, gain_range_)) {
-      throw std::invalid_argument("gain_db is outside camera range");
+      std::ostringstream message;
+      message << "gain_db " << gain << " is outside camera range ["
+              << gain_range_.minimum << ", " << gain_range_.maximum << "]";
+      throw std::invalid_argument(message.str());
     }
   }
 
@@ -613,7 +616,7 @@ private:
 
   double acquisition_frame_rate_hz_{30.0};
   double exposure_time_us_{3000.0};
-  double gain_db_{32.0};
+  double gain_db_{0.0};
   bool binning_2x2_enabled_{true};
   FloatRange frame_rate_range_;
   FloatRange exposure_range_;

@@ -47,14 +47,16 @@ GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘�
 两台实机共同运行 ROS 2 时，使用有线交换机连接。开发电脑配置在
 `10.42.0.0/24` 网段（当前使用 `10.42.0.1/24`），两台 Jetson 分别保持上述
 `.2` 和 `.3` 地址，即可通过交换机进行 ROS 2 节点发现、Topic 和 Service
-通信。
+通信。Jetson1（real1）固定使用 `10.42.0.2`，Jetson2（real2）固定使用
+`10.42.0.3`；两台机器均使用 ROS 2 Humble 和 `ROS_DOMAIN_ID=99`。
 
-无线热点用于单机维护：电脑连接目标 Jetson 的热点后，通过对应的
-`192.168.50.x` 地址 SSH。两个热点属于独立接入点，不用于替代两台 Jetson
-之间的有线 ROS 2 网络。
+网络连接和远程调试必须优先使用上述有线地址。未经操作者明确同意，不得切换
+开发电脑的 Wi-Fi，也不得连接任一 Jetson 热点。无线热点只用于经过明确授权的
+单机维护：电脑连接目标 Jetson 的热点后，通过对应的 `192.168.50.x` 地址 SSH。
+两个热点属于独立接入点，不用于替代两台 Jetson 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 及 LED 检测：
+Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 后摄像头及 LED 检测：
 
 ```bash
 source install/setup.bash
@@ -62,7 +64,10 @@ ros2 launch bringup real1.launch.py
 ```
 
 real2 负责前置海康 USB3 相机、左右 MIPI 相机、前/左/右三路融合 KFS 识别和
-KFS ROI。融合节点不会等待未接入的相机，因此只有部分相机在线时也能正常推理：
+KFS ROI。前置海康相机默认发布自定义 `/r2/front_camera/image_raw`，
+ROI 节点默认直接使用该话题。两个节点的标准调试图均默认关闭，可通过
+`visualization_enabled` 动态开启。融合节点不会等待未接入的相机，因此只有部分相机
+在线时也能正常推理：
 
 ```bash
 source install/setup.bash
@@ -107,14 +112,13 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 四轮抬升       | `/r2/lift/set`               | `robot_r2_interfaces/srv/SetLift`             | 仿真、实机 |
 | 跨越台阶       | `/r2/step_traverse`          | `robot_r2_interfaces/srv/TraverseStep`        | 仿真、实机 |
 | KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/AlignToKFS`          | 仿真、实机 |
-| KFS 类型检测   | `/r2/detection/get_type`（仿真）<br>`/r2/detection/{front,left,right}/get_type`（实机） | `robot_r2_interfaces/srv/GetKfsType` | 仿真、实机 |
+| KFS 类型检测   | `/r2/detection/{front,left,right}/get_type` | `robot_r2_interfaces/srv/GetKfsType` | 仅实机 |
 | LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
-| KFS 装载     | `/r2/kfs/load`               | `robot_r2_interfaces/srv/LoadKfs`             | 仿真、实机 |
-| KFS 释放     | `/r2/kfs/release`            | `robot_r2_interfaces/srv/ReleaseKfs`          | 仿真、实机 |
-| KFS 夹爪升降   | `/r2/kfs_lift`               | `robot_r2_interfaces/srv/SetKfsLift`          | 仿真、实机 |
-| KFS 夹爪根部旋转 | `/r2/gripper/set_rotate`     | `robot_r2_interfaces/srv/SetGripperRotate`    | 仿真、实机 |
-| KFS 夹爪末端旋转 | `/r2/gripper/set_tip_rotate` | `robot_r2_interfaces/srv/SetGripperTipRotate` | 仿真、实机 |
-| KFS 夹爪开合   | `/r2/gripper/set_grip`       | `robot_r2_interfaces/srv/SetGripperGrip`      | 仿真、实机 |
+| KFS 装载、释放、弹出 | `/r2/kfs/action`             | `robot_r2_interfaces/srv/KfsAction`           | 仿真、实机 |
+| KFS 夹爪升降   | `/r2/kfs_lift`               | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
+| KFS 夹爪根部旋转 | `/r2/gripper/set_rotate`     | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
+| KFS 夹爪末端旋转 | `/r2/gripper/set_tip_rotate` | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
+| KFS 夹爪开合   | `/r2/gripper/set_grip`       | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
 | 重新随机摆放 KFS | `/simulation/reset_kfs`      | `std_srvs/srv/Trigger`                        | 仅仿真   |
 
 
@@ -196,7 +200,20 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 ### KFS 与视觉
 
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
-前相机；实机 ROI 由 real2 发布，默认使用左 MIPI 相机，也可在启动时切换为右相机：
+前相机；实机的前置海康相机和 ROI 节点都由 real2 启动，ROI 默认使用
+`/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
+`/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、左右边界、左右
+边界列的最下方掩膜点和横向中心偏差，不包含图像像素：
+
+使用 `kfs_alignment.yaml` 中的默认容差和超时时间执行对齐：
+
+```bash
+ros2 service call /r2/align_to_kfs \
+  robot_r2_interfaces/srv/AlignToKFS \
+  "{pixel_tolerance: 0.0, timeout_sec: 0.0}"
+```
+
+也可以在单次调用中指定横向像素容差和超时时间：
 
 ```bash
 ros2 service call /r2/align_to_kfs \
@@ -210,13 +227,22 @@ ros2 service call /r2/align_to_kfs \
 有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于当前 ROI 输入相机
 的视野内。
 
+对齐容差、稳定帧数、默认超时、PID 和速度限幅均支持运行时动态修改。例如：
+
+```bash
+ros2 param set /kfs_alignment output_limit 0.05
+ros2 param set /kfs_alignment pixel_tolerance 10
+```
+
+参数修改会整体校验后原子生效；无效值会被拒绝。服务请求中的容差或超时为
+`0.0` 时，正在执行的任务会使用对应参数的最新值；请求中显式指定的正数不受
+后续参数修改影响。
+
 可视化默认关闭。所有可能发布调试图像的节点统一使用动态参数
 `visualization_enabled`，可在运行时开启或关闭：
 
 ```bash
 ros2 param set /kfs_roi visualization_enabled true
-# 仿真检测节点：
-ros2 param set /kfs_detect visualization_enabled true
 # 实机检测节点：
 ros2 param set /kfs_detect_fused visualization_enabled true
 ros2 param set /led_detect visualization_enabled true
@@ -227,23 +253,23 @@ ros2 param set /left_mipi_camera visualization_enabled true
 ros2 param set /right_mipi_camera visualization_enabled true
 ```
 
-将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的六阶段调试图像发布在
-`/r2/kfs/roi/debug`；仿真 KFS 检测调试图像为
-`/r2/detection/debug`，实机三路检测分别为 `/r2/detection/{front,left,right}/debug`；
-LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后处理、前置
+将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的五阶段调试图像发布在
+`/r2/kfs/roi/debug`；实机三路检测分别为
+`/r2/detection/{front,left,right}/debug`；
+LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后摄像头后处理、前置
 海康相机以及左右 MIPI 相机也使用同一个动态参数控制各自的 `/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
 
-KFS 类型检测：
+实机 KFS 类型检测，以前相机为例：
 
 ```bash
-ros2 service call /r2/detection/get_type \
+ros2 service call /r2/detection/front/get_type \
   robot_r2_interfaces/srv/GetKfsType \
   "{sample_count: 10, timeout_sec: 10.0}"
 ```
 
-上面是仿真服务。实机前、左、右相机分别使用
-`/r2/detection/{front,left,right}/get_type`，请求格式相同。
+前、左、右相机分别使用 `/r2/detection/{front,left,right}/get_type`，请求格式相同。
+仿真启动文件不再启动 KFS 类型检测节点。
 
 LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：
 
@@ -253,17 +279,44 @@ ros2 service call /r2/led_detection/detect \
   "{target_states: [true, false, true]}"
 ```
 
-KFS 装载，位置：`0=前方`、`1=上方`；方式：`0=标准`、`1=转移`。
+KFS 动作通过 `action` 区分：`load=装载`、`release=释放`、`pop=弹出`。
+装载时还需指定位置：`0=前方`、`1=上方`；方式：`0=标准`、`1=转移`。
 
 ```bash
-ros2 service call /r2/kfs/load robot_r2_interfaces/srv/LoadKfs \
-  "{mode: 0, load_method: 0}"
+ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
+  "{action: load, mode: 0, load_method: 0}"
 ```
+
+装载、释放和弹出动作由 `robot_r2_control/config/kfs_loader.yaml` 中的六条轨迹配置：
+`front_standard_sequence`、`front_transfer_sequence`、
+`top_standard_sequence`、`top_transfer_sequence`、`release_sequence` 和
+`pop_sequence`。
+每连续六个数表示一个同步步骤，字段顺序为根部位置、末端位置、夹爪位置以及
+三者各自的容差。每一步会同时向三个电机发送目标，全部到达后才执行下一步；
+无需运动的电机重复填写上一目标值。
+
+轨迹支持运行时整体替换。以下示例把前方转移动作改为一个步骤：
+
+```bash
+ros2 param set /kfs_loader_control front_transfer_sequence \
+  "[0.0, 0.0, 0.145, 0.01, 0.01, 0.005]"
+```
+
+轨迹数组必须非空且长度为六的倍数。动态更新在下一次装载、释放或弹出调用时
+生效，不会改变正在执行的动作。
 
 释放 KFS：
 
 ```bash
-ros2 service call /r2/kfs/release robot_r2_interfaces/srv/ReleaseKfs "{}"
+ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
+  "{action: release}"
+```
+
+弹出 KFS：
+
+```bash
+ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
+  "{action: pop}"
 ```
 
 以下服务用于直接调试 KFS 夹爪机构。`position` 分别表示升降位置、根部角度、
@@ -273,19 +326,19 @@ ros2 service call /r2/kfs/release robot_r2_interfaces/srv/ReleaseKfs "{}"
 为 `0 rad`，沿工作旋转方向使用负值，范围为 `-π–0 rad`。
 
 ```bash
-ros2 service call /r2/kfs_lift robot_r2_interfaces/srv/SetKfsLift \
+ros2 service call /r2/kfs_lift robot_r2_interfaces/srv/SetJointPosition \
   "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
 
 ros2 service call /r2/gripper/set_rotate \
-  robot_r2_interfaces/srv/SetGripperRotate \
+  robot_r2_interfaces/srv/SetJointPosition \
   "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
 
 ros2 service call /r2/gripper/set_tip_rotate \
-  robot_r2_interfaces/srv/SetGripperTipRotate \
+  robot_r2_interfaces/srv/SetJointPosition \
   "{position: -1.5708, tolerance: 0.0, timeout_sec: 0.0}"
 
 ros2 service call /r2/gripper/set_grip \
-  robot_r2_interfaces/srv/SetGripperGrip \
+  robot_r2_interfaces/srv/SetJointPosition \
   "{position: 0.209, tolerance: 0.0, timeout_sec: 0.0}"
 ```
 

@@ -161,43 +161,6 @@ std_msgs::msg::Header make_header(const CameraFrame &frame) {
   return header;
 }
 
-void fill_identity(CameraFrame &target, const CameraFrame &source) {
-  target.sequence = source.sequence;
-  target.stamp_sec = source.stamp_sec;
-  target.stamp_nanosec = source.stamp_nanosec;
-  target.encoding = CameraFrame::ENCODING_BGR8;
-  target.is_bigendian = 0;
-  target.layout_version = CameraFrame::LAYOUT_VERSION;
-  target.frame_id_size = source.frame_id_size;
-  target.frame_id = source.frame_id;
-}
-
-void clear_frame(CameraFrame &target, const CameraFrame &source) {
-  fill_identity(target, source);
-  target.width = 0;
-  target.height = 0;
-  target.step = 0;
-  target.data_size = 0;
-  target.data.clear();
-}
-
-void fill_frame(CameraFrame &target, const CameraFrame &source,
-                const cv::Mat &bgr) {
-  if (bgr.empty() || bgr.type() != CV_8UC3 || !bgr.isContinuous()) {
-    throw std::invalid_argument("ROI output must be packed 8-bit BGR");
-  }
-  const std::size_t data_size = bgr.total() * bgr.elemSize();
-  if (data_size > CameraFrame::DATA_CAPACITY) {
-    throw std::invalid_argument("ROI output exceeds CameraFrame capacity");
-  }
-  fill_identity(target, source);
-  target.width = static_cast<std::uint32_t>(bgr.cols);
-  target.height = static_cast<std::uint32_t>(bgr.rows);
-  target.step = static_cast<std::uint32_t>(bgr.cols * 3);
-  target.data_size = static_cast<std::uint32_t>(data_size);
-  target.data.assign(bgr.data, bgr.data + data_size);
-}
-
 sensor_msgs::msg::Image make_image(const cv::Mat &bgr,
                                    const std_msgs::msg::Header &header) {
   if (bgr.empty() || bgr.type() != CV_8UC3) {
@@ -235,17 +198,20 @@ void draw_stage_label(cv::Mat &tile, const std::string &label) {
 
 cv::Mat make_roi_panel(const cv::Mat &image, const KfsRoiResult &result) {
   cv::Mat panel(image.size(), CV_8UC3, cv::Scalar(24, 24, 24));
-  if (!result.valid || result.roi.empty()) {
+  if (!result.valid) {
     return panel;
   }
 
+  const cv::Mat roi = image(cv::Rect(result.x1, 0,
+                                     result.x2 - result.x1 + 1,
+                                     image.rows));
   const double scale = std::min(
-      static_cast<double>(panel.cols) / result.roi.cols,
-      static_cast<double>(panel.rows) / result.roi.rows);
-  const int width = std::max(1, static_cast<int>(result.roi.cols * scale));
-  const int height = std::max(1, static_cast<int>(result.roi.rows * scale));
+      static_cast<double>(panel.cols) / roi.cols,
+      static_cast<double>(panel.rows) / roi.rows);
+  const int width = std::max(1, static_cast<int>(roi.cols * scale));
+  const int height = std::max(1, static_cast<int>(roi.rows * scale));
   cv::Mat resized;
-  cv::resize(result.roi, resized, cv::Size(width, height), 0.0, 0.0,
+  cv::resize(roi, resized, cv::Size(width, height), 0.0, 0.0,
              scale < 1.0 ? cv::INTER_AREA : cv::INTER_LINEAR);
   const int x = (panel.cols - width) / 2;
   const int y = (panel.rows - height) / 2;
@@ -256,81 +222,49 @@ cv::Mat make_roi_panel(const cv::Mat &image, const KfsRoiResult &result) {
 cv::Mat make_visualization(const cv::Mat &image,
                            const KfsRoiResult &result) {
   cv::Mat source_view = image.clone();
+  cv::Mat axis_view = mask_to_bgr(result.opened_mask);
   if (result.valid) {
-    cv::rectangle(source_view, cv::Point(result.x1, result.y1),
-                  cv::Point(result.x2, result.y2), cv::Scalar(0, 255, 0), 2);
-    cv::drawMarker(source_view,
-                   cv::Point(result.center_u, result.center_v),
-                   cv::Scalar(0, 0, 255), cv::MARKER_CROSS, 18, 2);
-  }
-
-  cv::Mat axis_view = mask_to_bgr(result.mask);
-  std::vector<bool> valid_columns(result.mask.cols, false);
-  std::vector<bool> valid_rows(result.mask.rows, false);
-  if (result.max_column_length > 0) {
-    for (int column = 0; column < result.mask.cols; ++column) {
-      valid_columns[column] =
-          cv::countNonZero(result.mask.col(column)) >=
-          result.column_threshold;
-    }
-  }
-  if (result.max_row_length > 0) {
-    for (int row = 0; row < result.mask.rows; ++row) {
-      valid_rows[row] = cv::countNonZero(result.mask.row(row)) >=
-                        result.row_threshold;
-    }
-  }
-  for (int row = 0; row < result.mask.rows; ++row) {
-    for (int column = 0; column < result.mask.cols; ++column) {
-      if (result.mask.at<std::uint8_t>(row, column) == 0) {
-        continue;
-      }
-      if (valid_columns[column] && valid_rows[row]) {
-        axis_view.at<cv::Vec3b>(row, column) = cv::Vec3b(0, 180, 0);
-      } else if (valid_columns[column]) {
-        axis_view.at<cv::Vec3b>(row, column) = cv::Vec3b(0, 255, 255);
-      } else if (valid_rows[row]) {
-        axis_view.at<cv::Vec3b>(row, column) = cv::Vec3b(255, 255, 0);
-      }
-    }
-  }
-  if (result.valid) {
-    cv::line(axis_view, cv::Point(result.x1, 0),
-             cv::Point(result.x1, axis_view.rows - 1),
-             cv::Scalar(0, 0, 255), 2);
-    cv::line(axis_view, cv::Point(result.x2, 0),
-             cv::Point(result.x2, axis_view.rows - 1),
-             cv::Scalar(0, 0, 255), 2);
-    cv::line(axis_view, cv::Point(0, result.y1),
-             cv::Point(axis_view.cols - 1, result.y1),
-             cv::Scalar(255, 0, 255), 2);
-    cv::line(axis_view, cv::Point(0, result.y2),
-             cv::Point(axis_view.cols - 1, result.y2),
-             cv::Scalar(255, 0, 255), 2);
+    const auto draw_geometry = [&result](cv::Mat &view) {
+      cv::line(view, cv::Point(result.x1, 0),
+               cv::Point(result.x1, view.rows - 1),
+               cv::Scalar(0, 255, 0), 2);
+      cv::line(view, cv::Point(result.x2, 0),
+               cv::Point(result.x2, view.rows - 1),
+               cv::Scalar(0, 255, 0), 2);
+      cv::line(view, cv::Point(result.center_u, 0),
+               cv::Point(result.center_u, view.rows - 1),
+               cv::Scalar(0, 0, 255), 1);
+      cv::drawMarker(view,
+                     cv::Point(result.x1, result.left_bottom_y),
+                     cv::Scalar(255, 0, 255), cv::MARKER_CROSS, 18, 2);
+      cv::drawMarker(view,
+                     cv::Point(result.x2, result.right_bottom_y),
+                     cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 18, 2);
+    };
+    draw_geometry(source_view);
+    draw_geometry(axis_view);
   }
 
   std::string source_label = "1 Source | ROI not found";
-  std::string roi_label = "6 ROI | invalid";
+  std::string roi_label = "5 Horizontal ROI | invalid";
   if (result.valid) {
     std::ostringstream source_stream;
-    source_stream << "1 Source | offset=(" << std::showpos
-                  << result.center_offset_x << ',' << result.center_offset_y
-                  << std::noshowpos << ")";
+    source_stream << "1 Source | offset_x=" << std::showpos
+                  << result.center_offset_x << std::noshowpos
+                  << " bottom_y=(" << result.left_bottom_y << ','
+                  << result.right_bottom_y << ')';
     source_label = source_stream.str();
-    roi_label = cv::format("6 ROI | %dx%d", result.roi.cols,
-                           result.roi.rows);
+    roi_label = cv::format("5 Horizontal ROI | %dx%d",
+                           result.x2 - result.x1 + 1, image.rows);
   }
 
   const std::vector<std::pair<cv::Mat, std::string>> stages{
       {source_view, source_label},
       {mask_to_bgr(result.raw_mask), "2 HSV union"},
       {mask_to_bgr(result.opened_mask), "3 Morphological open"},
-      {mask_to_bgr(result.mask),
-       cv::format("4 Largest component | area=%d", result.component_area)},
       {axis_view,
-       cv::format("5 Axes | X %.1f/%d Y %.1f/%d",
-                  result.column_threshold, result.max_column_length,
-                  result.row_threshold, result.max_row_length)},
+       cv::format("4 Columns | area=%d threshold=%.1f/%d", result.mask_area,
+                  result.column_threshold, result.max_column_length)},
       {make_roi_panel(image, result), roi_label},
   };
 
@@ -341,7 +275,7 @@ cv::Mat make_visualization(const cv::Mat &image,
   for (std::size_t index = 0; index < stages.size(); ++index) {
     cv::Mat tile;
     const int interpolation =
-        index == 0 || index == 5 ? cv::INTER_AREA : cv::INTER_NEAREST;
+        index == 0 || index == 4 ? cv::INTER_AREA : cv::INTER_NEAREST;
     cv::resize(stages[index].first, tile, cv::Size(tile_width, tile_height),
                0.0, 0.0, interpolation);
     draw_stage_label(tile, stages[index].second);
@@ -358,21 +292,20 @@ class KfsRoiNode final : public rclcpp::Node {
     declare_parameter<double>("target_processing_rate", 30.0);
     declare_parameter<bool>("visualization_enabled", false);
     declare_parameter<std::vector<std::int64_t>>(
-        "blue_hsv_lower", {105, 100, 80});
+        "blue_hsv_lower", {95, 60, 20});
     declare_parameter<std::vector<std::int64_t>>(
-        "blue_hsv_upper", {125, 255, 255});
+        "blue_hsv_upper", {135, 255, 255});
     declare_parameter<std::vector<std::int64_t>>(
-        "red_low_hsv_lower", {0, 100, 80});
+        "red_low_hsv_lower", {0, 60, 20});
     declare_parameter<std::vector<std::int64_t>>(
-        "red_low_hsv_upper", {6, 255, 255});
+        "red_low_hsv_upper", {15, 255, 255});
     declare_parameter<std::vector<std::int64_t>>(
-        "red_high_hsv_lower", {174, 100, 80});
+        "red_high_hsv_lower", {165, 60, 20});
     declare_parameter<std::vector<std::int64_t>>(
         "red_high_hsv_upper", {179, 255, 255});
-    declare_parameter<double>("column_threshold_ratio", 0.8);
-    declare_parameter<double>("row_threshold_ratio", 0.8);
-    declare_parameter<std::int64_t>("morphology_kernel_size", 3);
-    declare_parameter<std::int64_t>("min_component_area_px", 100);
+    declare_parameter<double>("column_threshold_ratio", 0.7);
+    declare_parameter<std::int64_t>("morphology_kernel_size", 5);
+    declare_parameter<std::int64_t>("min_mask_area_px", 100);
 
     config_ = read_config();
     validate_node_config(config_);
@@ -413,14 +346,11 @@ class KfsRoiNode final : public rclcpp::Node {
                   "red_high_hsv_upper")};
     config.roi.column_threshold_ratio =
         get_parameter("column_threshold_ratio").as_double();
-    config.roi.row_threshold_ratio =
-        get_parameter("row_threshold_ratio").as_double();
     config.roi.morphology_kernel_size = positive_int(
         get_parameter("morphology_kernel_size").as_int(),
         "morphology_kernel_size");
-    config.roi.min_component_area_px = positive_int(
-        get_parameter("min_component_area_px").as_int(),
-        "min_component_area_px");
+    config.roi.min_mask_area_px = positive_int(
+        get_parameter("min_mask_area_px").as_int(), "min_mask_area_px");
     return config;
   }
 
@@ -466,13 +396,11 @@ class KfsRoiNode final : public rclcpp::Node {
           hsv_value(parameter.as_integer_array(), name);
     } else if (name == "column_threshold_ratio") {
       config.roi.column_threshold_ratio = parameter.as_double();
-    } else if (name == "row_threshold_ratio") {
-      config.roi.row_threshold_ratio = parameter.as_double();
     } else if (name == "morphology_kernel_size") {
       config.roi.morphology_kernel_size =
           positive_int(parameter.as_int(), name);
-    } else if (name == "min_component_area_px") {
-      config.roi.min_component_area_px =
+    } else if (name == "min_mask_area_px") {
+      config.roi.min_mask_area_px =
           positive_int(parameter.as_int(), name);
     }
   }
@@ -522,23 +450,21 @@ class KfsRoiNode final : public rclcpp::Node {
                                           const cv::Mat &image,
                                           const KfsRoiResult &result) {
     KfsRoiDetection message;
+    message.header = make_header(source);
+    message.sequence = source.sequence;
     message.valid = result.valid;
     message.image_width = image.cols;
     message.image_height = image.rows;
     if (!result.valid) {
-      clear_frame(message.roi, source);
       return message;
     }
 
-    fill_frame(message.roi, source, result.roi);
     message.x1 = result.x1;
-    message.y1 = result.y1;
     message.x2 = result.x2;
-    message.y2 = result.y2;
+    message.left_bottom_y = result.left_bottom_y;
+    message.right_bottom_y = result.right_bottom_y;
     message.center_u = result.center_u;
-    message.center_v = result.center_v;
     message.center_offset_x = result.center_offset_x;
-    message.center_offset_y = result.center_offset_y;
     return message;
   }
 

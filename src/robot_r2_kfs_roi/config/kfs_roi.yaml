@@ -3,13 +3,12 @@ kfs_roi:
     target_processing_rate: 30.0
     visualization_enabled: false
 
-    blue_hsv_lower: [105, 100, 80]
-    blue_hsv_upper: [125, 255, 255]
-    red_low_hsv_lower: [0, 100, 80]
-    red_low_hsv_upper: [6, 255, 255]
-    red_high_hsv_lower: [174, 100, 80]
+    blue_hsv_lower: [95, 60, 20]
+    blue_hsv_upper: [135, 255, 255]
+    red_low_hsv_lower: [0, 60, 20]
+    red_low_hsv_upper: [15, 255, 255]
+    red_high_hsv_lower: [165, 60, 20]
     red_high_hsv_upper: [179, 255, 255]
-    column_threshold_ratio: 0.8
-    row_threshold_ratio: 0.8
-    morphology_kernel_size: 3
-    min_component_area_px: 100
+    column_threshold_ratio: 0.7
+    morphology_kernel_size: 5
+    min_mask_area_px: 100

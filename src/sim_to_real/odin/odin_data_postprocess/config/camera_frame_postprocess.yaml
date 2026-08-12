@@ -1,6 +1,3 @@
 camera_frame_postprocess:
   ros__parameters:
-    input_image_topic: /odin1/image/undistorted
-    output_image_topic: /r2/front_camera/image_raw
-    standard_image_topic: /r2/front_camera/image_raw/debug
     visualization_enabled: false

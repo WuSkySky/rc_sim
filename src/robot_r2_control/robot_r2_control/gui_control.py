@@ -11,7 +11,7 @@ from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
 from robot_r2_interfaces.msg import LiftCommand
-from robot_r2_interfaces.srv import MoveToPose
+from robot_r2_interfaces.srv import AlignToKFS, MoveToPose
 from std_msgs.msg import Float64
 
 
@@ -74,6 +74,10 @@ def motion_control_text(config):
     pose_distance = format_parameter_value(
         config['pose_test_linear_distance'])
     pose_yaw = format_parameter_value(config['pose_test_yaw'])
+    kfs_tolerance = format_parameter_value(
+        config['kfs_alignment_pixel_tolerance'])
+    kfs_timeout = format_parameter_value(
+        config['kfs_alignment_timeout_sec'])
     return {
         'keyboard_hint': (
             '键盘控制（GUI 窗口聚焦时）\n'
@@ -92,6 +96,10 @@ def motion_control_text(config):
             'left': f'位置伺服左平移 {pose_distance} m',
             'rotate_left': f'位置伺服逆时针旋转 {pose_yaw} rad',
         },
+        'kfs_alignment': (
+            f'KFS 对齐（容忍 {kfs_tolerance} px，'
+            f'超时 {kfs_timeout} s）'
+        ),
     }
 
 
@@ -110,6 +118,7 @@ class GuiControlNode(Node):
     CMD_VEL_TOPIC = '/r2/cmd_vel'
     POSE_FEEDBACK_TOPIC = '/r2/pose_feedback'
     MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+    KFS_ALIGNMENT_SERVICE = '/r2/align_to_kfs'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
 
     FLOAT_CONTROL_PARAMETERS = {
@@ -155,6 +164,8 @@ class GuiControlNode(Node):
         'pose_test_linear_distance': 0.5,
         'pose_test_yaw': 1.57,
         'move_timeout_sec': 20.0,
+        'kfs_alignment_pixel_tolerance': 10.0,
+        'kfs_alignment_timeout_sec': 3.0,
     }
 
     def __init__(self):
@@ -168,6 +179,7 @@ class GuiControlNode(Node):
         self.velocity_test_kind = None
         self.velocity_test_deadline = None
         self.pose_request_in_flight = False
+        self.kfs_alignment_request_in_flight = False
 
         self.declare_parameter('lift_min', 0.0)
         self.declare_parameter('lift_max', 0.376)
@@ -217,6 +229,8 @@ class GuiControlNode(Node):
         )
         self.move_client = self.create_client(
             MoveToPose, self.MOVE_TO_POSE_SERVICE)
+        self.kfs_alignment_client = self.create_client(
+            AlignToKFS, self.KFS_ALIGNMENT_SERVICE)
         self.motion_timer = self.create_timer(
             1.0 / self.motion_config['motion_publish_rate'],
             self._publish_motion_tick,
@@ -378,7 +392,7 @@ class GuiControlNode(Node):
         command = None
         completed_test = False
         with self.state_lock:
-            if self.pose_request_in_flight:
+            if self._chassis_service_in_flight_locked():
                 return
             if self.active_manual_keys:
                 command = self._manual_twist_locked()
@@ -399,7 +413,7 @@ class GuiControlNode(Node):
         if key not in MOTION_KEYS:
             return False
         with self.state_lock:
-            if self.pose_request_in_flight:
+            if self._chassis_service_in_flight_locked():
                 return False
             if key in self.active_manual_keys:
                 return False
@@ -437,7 +451,7 @@ class GuiControlNode(Node):
         if kind not in {'forward', 'left', 'rotate_left'}:
             raise ValueError(f'Unknown velocity test: {kind}')
         with self.state_lock:
-            if self.pose_request_in_flight:
+            if self._chassis_service_in_flight_locked():
                 return False
             self.active_manual_keys.clear()
             self.velocity_test_kind = kind
@@ -453,6 +467,8 @@ class GuiControlNode(Node):
         with self.state_lock:
             if self.pose_request_in_flight:
                 return False, '位置伺服正在执行'
+            if self.kfs_alignment_request_in_flight:
+                return False, 'KFS 对齐正在执行'
             if self.current_pose is None:
                 return False, '尚未收到 /r2/pose_feedback'
             if not self.move_client.service_is_ready():
@@ -514,9 +530,70 @@ class GuiControlNode(Node):
         else:
             self._queue_status(f'位置伺服失败：{response.message}')
 
+    def request_kfs_alignment(self):
+        with self.state_lock:
+            if self.kfs_alignment_request_in_flight:
+                return False, 'KFS 对齐正在执行'
+            if self.pose_request_in_flight:
+                return False, '位置伺服正在执行'
+            if not self.kfs_alignment_client.service_is_ready():
+                return False, '/r2/align_to_kfs 服务不可用'
+
+            pixel_tolerance = self.motion_config[
+                'kfs_alignment_pixel_tolerance']
+            timeout_sec = self.motion_config[
+                'kfs_alignment_timeout_sec']
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.kfs_alignment_request_in_flight = True
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = AlignToKFS.Request()
+        request.pixel_tolerance = pixel_tolerance
+        request.timeout_sec = timeout_sec
+        try:
+            future = self.kfs_alignment_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.kfs_alignment_request_in_flight = False
+            return False, f'KFS 对齐请求发送失败：{exc}'
+        future.add_done_callback(self._on_kfs_alignment_complete)
+        return True, (
+            f'已发送 KFS 对齐请求：容忍 {pixel_tolerance:g} px，'
+            f'超时 {timeout_sec:g} s'
+        )
+
+    def _on_kfs_alignment_complete(self, future):
+        with self.state_lock:
+            self.kfs_alignment_request_in_flight = False
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._queue_status(f'KFS 对齐调用异常：{exc}')
+            return
+        if response is None:
+            self._queue_status('KFS 对齐调用失败：无响应')
+        elif response.success:
+            self._queue_status(
+                f'KFS 对齐完成：最终偏差 '
+                f'{response.final_offset_x} px')
+        else:
+            self._queue_status(f'KFS 对齐失败：{response.message}')
+
+    def _chassis_service_in_flight_locked(self):
+        return (
+            self.pose_request_in_flight or
+            self.kfs_alignment_request_in_flight
+        )
+
     def is_pose_request_in_flight(self):
         with self.state_lock:
             return self.pose_request_in_flight
+
+    def is_chassis_request_in_flight(self):
+        with self.state_lock:
+            return self._chassis_service_in_flight_locked()
 
     def stop_chassis(self):
         with self.state_lock:
@@ -610,11 +687,12 @@ class GuiControlApp:
         self.last_lift_command = None
         self.last_float_commands = {}
         self.last_config_generation = -1
-        self.last_pose_busy = None
+        self.last_chassis_busy = None
         self._closed = False
         self.chassis_buttons = []
         self.velocity_test_buttons = {}
         self.pose_test_buttons = {}
+        self.kfs_test_button = None
 
         self._build_ui()
         self._sync_dynamic_ranges()
@@ -662,6 +740,16 @@ class GuiControlApp:
             button.grid(row=row, column=1, sticky='ew', padx=(8, 0), pady=3)
             self.pose_test_buttons[kind] = button
             self.chassis_buttons.append(button)
+
+        kfs_test_frame = ttk.LabelFrame(
+            chassis_column, text='KFS 测试', padding=12)
+        kfs_test_frame.grid(row=2, column=0, sticky='ew', pady=(10, 0))
+        self.kfs_test_button = ttk.Button(
+            kfs_test_frame,
+            command=self._start_kfs_alignment_test,
+        )
+        self.kfs_test_button.grid(row=0, column=0, sticky='ew')
+        self.chassis_buttons.append(self.kfs_test_button)
 
         lift_frame = ttk.LabelFrame(
             mechanism_column, text='底盘抬升', padding=12)
@@ -775,6 +863,10 @@ class GuiControlApp:
         _, message = self.node.request_relative_pose(kind)
         self.status_text.set(message)
 
+    def _start_kfs_alignment_test(self):
+        _, message = self.node.request_kfs_alignment()
+        self.status_text.set(message)
+
     def _publish_lift_command(self, _event=None):
         targets = (
             round(self.front_lift_value.get(), 3),
@@ -841,6 +933,8 @@ class GuiControlApp:
             button.configure(text=control_text['velocity'][kind])
         for kind, button in self.pose_test_buttons.items():
             button.configure(text=control_text['pose'][kind])
+        self.kfs_test_button.configure(
+            text=control_text['kfs_alignment'])
 
     def _poll_ros(self):
         if self._closed:
@@ -850,10 +944,10 @@ class GuiControlApp:
             self._sync_dynamic_ranges()
             for message in self.node.pop_status_events():
                 self.status_text.set(message)
-            pose_busy = self.node.is_pose_request_in_flight()
-            if pose_busy != self.last_pose_busy:
-                self.last_pose_busy = pose_busy
-                state = tk.DISABLED if pose_busy else tk.NORMAL
+            chassis_busy = self.node.is_chassis_request_in_flight()
+            if chassis_busy != self.last_chassis_busy:
+                self.last_chassis_busy = chassis_busy
+                state = tk.DISABLED if chassis_busy else tk.NORMAL
                 for button in self.chassis_buttons:
                     button.configure(state=state)
         except Exception as exc:

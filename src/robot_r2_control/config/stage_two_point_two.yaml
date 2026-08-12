@@ -5,9 +5,6 @@ stage_two_point_two:
     move_to_pose_service: /r2/move_to_pose
     traverse_step_service: /r2/step_traverse
     get_kfs_type_service: /r2/detection/get_type
-    load_kfs_service: /r2/kfs/load
-    release_kfs_service: /r2/kfs/release
-
     dependency_timeout_sec: 2.0
     pose_timeout_sec: 2.0
     move_timeout_sec: 35.0
