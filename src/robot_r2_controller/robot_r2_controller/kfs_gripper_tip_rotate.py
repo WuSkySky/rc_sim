@@ -5,7 +5,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from robot_r2_interfaces.srv import SetGripperTipRotate
+from robot_r2_interfaces.srv import SetJointPosition
 from std_msgs.msg import Float64
 
 
@@ -55,7 +55,7 @@ class GripperTipRotateServiceController(Node):
             callback_group=self.callback_group,
         )
         self.service = self.create_service(
-            SetGripperTipRotate,
+            SetJointPosition,
             service_name,
             self.handle_set_tip_rotate,
             callback_group=self.callback_group,
@@ -124,7 +124,7 @@ class GripperTipRotateServiceController(Node):
                     self.current_position
                     if self.current_position is not None else 0.0)
                 response.success = False
-                response.message = 'SetGripperTipRotate timeout'
+                response.message = 'Gripper tip rotate timeout'
                 response.final_position = final_pos
                 response.position_error = request.position - final_pos
                 return response

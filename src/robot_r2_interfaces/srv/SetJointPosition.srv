@@ -1,3 +1,4 @@
+# Position units and valid range are defined by the target joint service.
 float64 position
 float64 tolerance
 float64 timeout_sec

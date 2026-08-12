@@ -6,7 +6,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from robot_r2_interfaces.srv import SetKfsLift
+from robot_r2_interfaces.srv import SetJointPosition
 from std_msgs.msg import Float64
 
 
@@ -48,7 +48,7 @@ class KfsLiftServiceController(Node):
             callback_group=self.callback_group,
         )
         self.service = self.create_service(
-            SetKfsLift,
+            SetJointPosition,
             service_name,
             self.handle_set_lift,
             callback_group=self.callback_group,
@@ -104,7 +104,7 @@ class KfsLiftServiceController(Node):
 
             final_position = self._last_position()
             response.success = False
-            response.message = 'SetKfsLift timeout'
+            response.message = 'KFS lift timeout'
             response.final_position = final_position
             response.position_error = request.position - final_position
             return response

@@ -1,9 +1,0 @@
-# Opening position in meters: 0.0 is closed and positive values open.
-float64 position
-float64 tolerance
-float64 timeout_sec
----
-bool success
-string message
-float64 final_position
-float64 position_error

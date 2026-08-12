@@ -4,8 +4,6 @@ stage_two_point_one:
     move_to_pose_service: /r2/move_to_pose
     set_lift_service: /r2/lift/set
     get_kfs_type_service: /r2/detection/get_type
-    load_kfs_service: /r2/kfs/load
-    release_kfs_service: /r2/kfs/release
     dependency_timeout_sec: 2.0
     move_timeout_sec: 35.0
     lift_timeout_sec: 15.0

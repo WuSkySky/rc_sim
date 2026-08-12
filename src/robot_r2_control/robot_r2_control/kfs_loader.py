@@ -10,12 +10,8 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from robot_r2_interfaces.srv import (
-    LoadKfs,
-    PopKfs,
-    ReleaseKfs,
-    SetGripperGrip,
-    SetGripperRotate,
-    SetGripperTipRotate,
+    KfsAction,
+    SetJointPosition,
 )
 
 
@@ -120,9 +116,7 @@ def validate_timeout(value):
 
 
 class KfsLoaderController(Node):
-    LOAD_SERVICE = '/r2/kfs/load'
-    RELEASE_SERVICE = '/r2/kfs/release'
-    POP_SERVICE = '/r2/kfs/pop'
+    KFS_ACTION_SERVICE = '/r2/kfs/action'
     GRIP_SERVICE = '/r2/gripper/set_grip'
     ROOT_ROTATE_SERVICE = '/r2/gripper/set_rotate'
     TIP_ROTATE_SERVICE = '/r2/gripper/set_tip_rotate'
@@ -153,36 +147,24 @@ class KfsLoaderController(Node):
             self.on_parameters_changed)
 
         self.grip_client = self.create_client(
-            SetGripperGrip,
+            SetJointPosition,
             self.GRIP_SERVICE,
             callback_group=self.callback_group,
         )
         self.root_rotate_client = self.create_client(
-            SetGripperRotate,
+            SetJointPosition,
             self.ROOT_ROTATE_SERVICE,
             callback_group=self.callback_group,
         )
         self.tip_rotate_client = self.create_client(
-            SetGripperTipRotate,
+            SetJointPosition,
             self.TIP_ROTATE_SERVICE,
             callback_group=self.callback_group,
         )
-        self.load_service = self.create_service(
-            LoadKfs,
-            self.LOAD_SERVICE,
-            self.handle_load_kfs,
-            callback_group=self.callback_group,
-        )
-        self.release_service = self.create_service(
-            ReleaseKfs,
-            self.RELEASE_SERVICE,
-            self.handle_release_kfs,
-            callback_group=self.callback_group,
-        )
-        self.pop_service = self.create_service(
-            PopKfs,
-            self.POP_SERVICE,
-            self.handle_pop_kfs,
+        self.kfs_action_service = self.create_service(
+            KfsAction,
+            self.KFS_ACTION_SERVICE,
+            self.handle_kfs_action,
             callback_group=self.callback_group,
         )
 
@@ -225,8 +207,8 @@ class KfsLoaderController(Node):
                 raise RuntimeError(f'{description} service unavailable')
 
     @staticmethod
-    def make_request(service_type, position, tolerance, timeout_sec):
-        request = service_type.Request()
+    def make_request(position, tolerance, timeout_sec):
+        request = SetJointPosition.Request()
         request.position = float(position)
         request.tolerance = float(tolerance)
         request.timeout_sec = float(timeout_sec)
@@ -270,19 +252,16 @@ class KfsLoaderController(Node):
         for step_index, step in enumerate(sequence, start=1):
             requests = {
                 'root': self.make_request(
-                    SetGripperRotate,
                     step.root_position,
                     step.root_tolerance,
                     timeout_sec,
                 ),
                 'tip': self.make_request(
-                    SetGripperTipRotate,
                     step.tip_position,
                     step.tip_tolerance,
                     timeout_sec,
                 ),
                 'grip': self.make_request(
-                    SetGripperGrip,
                     step.grip_position,
                     step.grip_tolerance,
                     timeout_sec,
@@ -302,12 +281,12 @@ class KfsLoaderController(Node):
     @staticmethod
     def load_sequence_name(request):
         mode_names = {
-            LoadKfs.Request.FRONT: 'front',
-            LoadKfs.Request.TOP: 'top',
+            KfsAction.Request.FRONT: 'front',
+            KfsAction.Request.TOP: 'top',
         }
         method_names = {
-            LoadKfs.Request.STANDARD: 'standard',
-            LoadKfs.Request.TRANSFER: 'transfer',
+            KfsAction.Request.STANDARD: 'standard',
+            KfsAction.Request.TRANSFER: 'transfer',
         }
         if request.mode not in mode_names:
             raise ValueError(f'unsupported KFS load mode: {request.mode}')
@@ -319,50 +298,20 @@ class KfsLoaderController(Node):
             f'{method_names[request.load_method]}_sequence'
         )
 
-    def handle_load_kfs(self, request, response):
+    @classmethod
+    def action_sequence_name(cls, request):
+        if request.action == KfsAction.Request.LOAD:
+            return cls.load_sequence_name(request)
+        if request.action == KfsAction.Request.RELEASE:
+            return 'release_sequence'
+        if request.action == KfsAction.Request.POP:
+            return 'pop_sequence'
+        raise ValueError(f'unsupported KFS action: {request.action!r}')
+
+    def handle_kfs_action(self, request, response):
         with self.operation_lock:
             try:
-                sequence_name = self.load_sequence_name(request)
-                sequence, timeout_sec = self.snapshot_config(sequence_name)
-                self.execute_sequence(
-                    sequence_name,
-                    sequence,
-                    timeout_sec,
-                )
-            except Exception as exc:
-                response.success = False
-                response.message = str(exc)
-                return response
-
-            response.success = True
-            response.message = f'{sequence_name} completed'
-            return response
-
-    def handle_release_kfs(self, request, response):
-        del request
-        with self.operation_lock:
-            try:
-                sequence_name = 'release_sequence'
-                sequence, timeout_sec = self.snapshot_config(sequence_name)
-                self.execute_sequence(
-                    sequence_name,
-                    sequence,
-                    timeout_sec,
-                )
-            except Exception as exc:
-                response.success = False
-                response.message = str(exc)
-                return response
-
-            response.success = True
-            response.message = f'{sequence_name} completed'
-            return response
-
-    def handle_pop_kfs(self, request, response):
-        del request
-        with self.operation_lock:
-            try:
-                sequence_name = 'pop_sequence'
+                sequence_name = self.action_sequence_name(request)
                 sequence, timeout_sec = self.snapshot_config(sequence_name)
                 self.execute_sequence(
                     sequence_name,

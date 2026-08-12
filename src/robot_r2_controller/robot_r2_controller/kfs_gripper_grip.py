@@ -5,7 +5,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from robot_r2_interfaces.srv import SetGripperGrip
+from robot_r2_interfaces.srv import SetJointPosition
 from std_msgs.msg import Float64
 
 
@@ -69,7 +69,7 @@ class GripperGripServiceController(Node):
             callback_group=self.callback_group,
         )
         self.service = self.create_service(
-            SetGripperGrip,
+            SetJointPosition,
             service_name,
             self.handle_set_grip,
             callback_group=self.callback_group,
@@ -153,7 +153,7 @@ class GripperGripServiceController(Node):
                     self.current_position
                     if self.current_position is not None else 0.0)
                 response.success = False
-                response.message = 'SetGripperGrip timeout'
+                response.message = 'Gripper grip timeout'
                 response.final_position = final_pos
                 response.position_error = request.position - final_pos
                 return response

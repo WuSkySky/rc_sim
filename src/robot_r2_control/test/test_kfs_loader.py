@@ -9,7 +9,7 @@ from robot_r2_control.kfs_loader import (
     TRAJECTORY_PARAMETER_NAMES,
     parse_sequence,
 )
-from robot_r2_interfaces.srv import LoadKfs
+from robot_r2_interfaces.srv import KfsAction
 
 
 class ImmediateFuture:
@@ -44,6 +44,7 @@ class FakeClient:
 
 def make_controller():
     controller = KfsLoaderController.__new__(KfsLoaderController)
+    controller.operation_lock = threading.Lock()
     controller.config_lock = threading.Lock()
     controller.service_timeout_sec = 10.0
     controller.sequences = {
@@ -60,34 +61,60 @@ def make_controller():
 
 
 @pytest.mark.parametrize(
-    'mode, method, expected',
+    'action, mode, method, expected',
     [
         (
-            LoadKfs.Request.FRONT,
-            LoadKfs.Request.STANDARD,
+            KfsAction.Request.LOAD,
+            KfsAction.Request.FRONT,
+            KfsAction.Request.STANDARD,
             'front_standard_sequence',
         ),
         (
-            LoadKfs.Request.FRONT,
-            LoadKfs.Request.TRANSFER,
+            KfsAction.Request.LOAD,
+            KfsAction.Request.FRONT,
+            KfsAction.Request.TRANSFER,
             'front_transfer_sequence',
         ),
         (
-            LoadKfs.Request.TOP,
-            LoadKfs.Request.STANDARD,
+            KfsAction.Request.LOAD,
+            KfsAction.Request.TOP,
+            KfsAction.Request.STANDARD,
             'top_standard_sequence',
         ),
         (
-            LoadKfs.Request.TOP,
-            LoadKfs.Request.TRANSFER,
+            KfsAction.Request.LOAD,
+            KfsAction.Request.TOP,
+            KfsAction.Request.TRANSFER,
             'top_transfer_sequence',
         ),
+        (KfsAction.Request.RELEASE, 0, 0, 'release_sequence'),
+        (KfsAction.Request.POP, 0, 0, 'pop_sequence'),
     ],
 )
-def test_load_request_selects_complete_trajectory(mode, method, expected):
-    request = SimpleNamespace(mode=mode, load_method=method)
+def test_action_request_selects_complete_trajectory(
+    action, mode, method, expected
+):
+    request = SimpleNamespace(
+        action=action,
+        mode=mode,
+        load_method=method,
+    )
 
-    assert KfsLoaderController.load_sequence_name(request) == expected
+    assert KfsLoaderController.action_sequence_name(request) == expected
+
+
+def test_unknown_action_is_rejected_without_executing_a_trajectory():
+    controller = make_controller()
+    request = SimpleNamespace(action='unknown', mode=0, load_method=0)
+    response = SimpleNamespace(success=None, message='')
+    executed = []
+    controller.execute_sequence = lambda *args: executed.append(args)
+
+    result = controller.handle_kfs_action(request, response)
+
+    assert not result.success
+    assert 'unsupported KFS action' in result.message
+    assert executed == []
 
 
 def test_parse_sequence_groups_each_six_values_into_one_step():

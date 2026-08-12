@@ -7,15 +7,16 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from robot_r2_interfaces.srv import (
     GetKfsType,
-    LoadKfs,
+    KfsAction,
     MoveToPose,
-    ReleaseKfs,
     SetLift,
     StageTwoPointOne,
 )
 
 
 class StageTwoPointOneController(Node):
+    KFS_ACTION_SERVICE = '/r2/kfs/action'
+
     def __init__(self):
         super().__init__('stage_two_point_one')
         self.callback_group = ReentrantCallbackGroup()
@@ -29,8 +30,6 @@ class StageTwoPointOneController(Node):
         self.declare_parameter('set_lift_service', '/r2/lift/set')
         self.declare_parameter(
             'get_kfs_type_service', '/r2/detection/get_type')
-        self.declare_parameter('load_kfs_service', '/r2/kfs/load')
-        self.declare_parameter('release_kfs_service', '/r2/kfs/release')
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('move_timeout_sec', 35.0)
         self.declare_parameter('lift_timeout_sec', 15.0)
@@ -58,9 +57,6 @@ class StageTwoPointOneController(Node):
         lift_service = self.get_parameter('set_lift_service').value
         detection_service = self.get_parameter(
             'get_kfs_type_service').value
-        load_service = self.get_parameter('load_kfs_service').value
-        release_service = self.get_parameter('release_kfs_service').value
-
         self.dependency_timeout_sec = self._positive_float_parameter(
             'dependency_timeout_sec')
         self.move_timeout_sec = self._positive_float_parameter(
@@ -111,14 +107,9 @@ class StageTwoPointOneController(Node):
             detection_service,
             callback_group=self.callback_group,
         )
-        self.load_client = self.create_client(
-            LoadKfs,
-            load_service,
-            callback_group=self.callback_group,
-        )
-        self.release_client = self.create_client(
-            ReleaseKfs,
-            release_service,
+        self.kfs_action_client = self.create_client(
+            KfsAction,
+            self.KFS_ACTION_SERVICE,
             callback_group=self.callback_group,
         )
         self.task_service = self.create_service(
@@ -182,8 +173,7 @@ class StageTwoPointOneController(Node):
             (self.move_client, 'MoveToPose'),
             (self.lift_client, 'SetLift'),
             (self.detection_client, 'GetKfsType'),
-            (self.load_client, 'LoadKfs'),
-            (self.release_client, 'ReleaseKfs'),
+            (self.kfs_action_client, 'KfsAction'),
         )
         for client, name in dependencies:
             if not client.wait_for_service(
@@ -247,27 +237,30 @@ class StageTwoPointOneController(Node):
         return response.class_name
 
     def load_front_kfs(self, load_method):
-        request = LoadKfs.Request()
-        request.mode = LoadKfs.Request.FRONT
+        request = KfsAction.Request()
+        request.action = KfsAction.Request.LOAD
+        request.mode = KfsAction.Request.FRONT
         request.load_method = load_method
         response = self.wait_for_future(
-            self.load_client.call_async(request),
+            self.kfs_action_client.call_async(request),
             self.load_timeout_sec,
-            'LoadKfs',
+            'KfsAction load',
         )
         if not response.success:
-            raise RuntimeError(f'LoadKfs failed: {response.message}')
+            raise RuntimeError(f'KfsAction load failed: {response.message}')
         self.loaded_count += 1
 
     def release_kfs(self):
-        request = ReleaseKfs.Request()
+        request = KfsAction.Request()
+        request.action = KfsAction.Request.RELEASE
         response = self.wait_for_future(
-            self.release_client.call_async(request),
+            self.kfs_action_client.call_async(request),
             self.release_timeout_sec,
-            'ReleaseKfs',
+            'KfsAction release',
         )
         if not response.success:
-            raise RuntimeError(f'ReleaseKfs failed: {response.message}')
+            raise RuntimeError(
+                f'KfsAction release failed: {response.message}')
         self.loaded_count -= 1
 
     def cell_center_from_edge_pose(self, edge_pose):
@@ -321,9 +314,9 @@ class StageTwoPointOneController(Node):
             self.release_at_arrival_edge(loading_edge_pose)
 
         load_method = (
-            LoadKfs.Request.TRANSFER
+            KfsAction.Request.TRANSFER
             if self.loaded_count == 2
-            else LoadKfs.Request.STANDARD
+            else KfsAction.Request.STANDARD
         )
         self.load_front_kfs(load_method)
 

@@ -114,13 +114,11 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/AlignToKFS`          | 仿真、实机 |
 | KFS 类型检测   | `/r2/detection/{front,left,right}/get_type` | `robot_r2_interfaces/srv/GetKfsType` | 仅实机 |
 | LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
-| KFS 装载     | `/r2/kfs/load`               | `robot_r2_interfaces/srv/LoadKfs`             | 仿真、实机 |
-| KFS 释放     | `/r2/kfs/release`            | `robot_r2_interfaces/srv/ReleaseKfs`          | 仿真、实机 |
-| KFS 弹出     | `/r2/kfs/pop`                | `robot_r2_interfaces/srv/PopKfs`              | 仿真、实机 |
-| KFS 夹爪升降   | `/r2/kfs_lift`               | `robot_r2_interfaces/srv/SetKfsLift`          | 仿真、实机 |
-| KFS 夹爪根部旋转 | `/r2/gripper/set_rotate`     | `robot_r2_interfaces/srv/SetGripperRotate`    | 仿真、实机 |
-| KFS 夹爪末端旋转 | `/r2/gripper/set_tip_rotate` | `robot_r2_interfaces/srv/SetGripperTipRotate` | 仿真、实机 |
-| KFS 夹爪开合   | `/r2/gripper/set_grip`       | `robot_r2_interfaces/srv/SetGripperGrip`      | 仿真、实机 |
+| KFS 装载、释放、弹出 | `/r2/kfs/action`             | `robot_r2_interfaces/srv/KfsAction`           | 仿真、实机 |
+| KFS 夹爪升降   | `/r2/kfs_lift`               | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
+| KFS 夹爪根部旋转 | `/r2/gripper/set_rotate`     | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
+| KFS 夹爪末端旋转 | `/r2/gripper/set_tip_rotate` | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
+| KFS 夹爪开合   | `/r2/gripper/set_grip`       | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
 | 重新随机摆放 KFS | `/simulation/reset_kfs`      | `std_srvs/srv/Trigger`                        | 仅仿真   |
 
 
@@ -281,11 +279,12 @@ ros2 service call /r2/led_detection/detect \
   "{target_states: [true, false, true]}"
 ```
 
-KFS 装载，位置：`0=前方`、`1=上方`；方式：`0=标准`、`1=转移`。
+KFS 动作通过 `action` 区分：`load=装载`、`release=释放`、`pop=弹出`。
+装载时还需指定位置：`0=前方`、`1=上方`；方式：`0=标准`、`1=转移`。
 
 ```bash
-ros2 service call /r2/kfs/load robot_r2_interfaces/srv/LoadKfs \
-  "{mode: 0, load_method: 0}"
+ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
+  "{action: load, mode: 0, load_method: 0}"
 ```
 
 装载、释放和弹出动作由 `robot_r2_control/config/kfs_loader.yaml` 中的六条轨迹配置：
@@ -309,13 +308,15 @@ ros2 param set /kfs_loader_control front_transfer_sequence \
 释放 KFS：
 
 ```bash
-ros2 service call /r2/kfs/release robot_r2_interfaces/srv/ReleaseKfs "{}"
+ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
+  "{action: release}"
 ```
 
 弹出 KFS：
 
 ```bash
-ros2 service call /r2/kfs/pop robot_r2_interfaces/srv/PopKfs "{}"
+ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
+  "{action: pop}"
 ```
 
 以下服务用于直接调试 KFS 夹爪机构。`position` 分别表示升降位置、根部角度、
@@ -325,19 +326,19 @@ ros2 service call /r2/kfs/pop robot_r2_interfaces/srv/PopKfs "{}"
 为 `0 rad`，沿工作旋转方向使用负值，范围为 `-π–0 rad`。
 
 ```bash
-ros2 service call /r2/kfs_lift robot_r2_interfaces/srv/SetKfsLift \
+ros2 service call /r2/kfs_lift robot_r2_interfaces/srv/SetJointPosition \
   "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
 
 ros2 service call /r2/gripper/set_rotate \
-  robot_r2_interfaces/srv/SetGripperRotate \
+  robot_r2_interfaces/srv/SetJointPosition \
   "{position: 0.0, tolerance: 0.0, timeout_sec: 0.0}"
 
 ros2 service call /r2/gripper/set_tip_rotate \
-  robot_r2_interfaces/srv/SetGripperTipRotate \
+  robot_r2_interfaces/srv/SetJointPosition \
   "{position: -1.5708, tolerance: 0.0, timeout_sec: 0.0}"
 
 ros2 service call /r2/gripper/set_grip \
-  robot_r2_interfaces/srv/SetGripperGrip \
+  robot_r2_interfaces/srv/SetJointPosition \
   "{position: 0.209, tolerance: 0.0, timeout_sec: 0.0}"
 ```
 
