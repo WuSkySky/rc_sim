@@ -3,5 +3,8 @@ kfs_gripper_rotate:
     command_topic: /r2/gripper/rotate_cmd
     feedback_topic: /r2/gripper/rotate_feedback
     service_name: /r2/gripper/set_rotate
+    # Zero remains the initial pose; the working range extends 15 degrees below it.
+    min_position: -0.2617993877991494
+    max_position: 2.356194490192345
     default_tolerance: 0.01
     default_timeout_sec: 10.0

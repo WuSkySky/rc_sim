@@ -236,11 +236,10 @@ class StageTwoPointOneController(Node):
             raise RuntimeError(f'GetKfsType failed: {response.message}')
         return response.class_name
 
-    def load_front_kfs(self, load_method):
+    def load_front_kfs(self, mode):
         request = KfsAction.Request()
         request.action = KfsAction.Request.LOAD
-        request.mode = KfsAction.Request.FRONT
-        request.load_method = load_method
+        request.mode = mode
         response = self.wait_for_future(
             self.kfs_action_client.call_async(request),
             self.load_timeout_sec,
@@ -313,12 +312,12 @@ class StageTwoPointOneController(Node):
         if self.loaded_count == 3:
             self.release_at_arrival_edge(loading_edge_pose)
 
-        load_method = (
-            KfsAction.Request.TRANSFER
+        load_mode = (
+            KfsAction.Request.MODE_2
             if self.loaded_count == 2
-            else KfsAction.Request.STANDARD
+            else KfsAction.Request.MODE_1
         )
-        self.load_front_kfs(load_method)
+        self.load_front_kfs(load_mode)
 
     def execute_task(self):
         self.move_to_loading_edge(self.cell_5_3_edge_pose)

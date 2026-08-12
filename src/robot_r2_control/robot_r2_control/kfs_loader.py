@@ -1,6 +1,7 @@
 import math
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import rclpy
@@ -20,10 +21,11 @@ ROOT_POSITION_RANGE = (0.0, 2.356194490192345)
 TIP_POSITION_RANGE = (-math.pi, 0.0)
 GRIP_POSITION_RANGE = (0.0, 0.209)
 TRAJECTORY_PARAMETER_NAMES = (
-    'front_standard_sequence',
-    'front_transfer_sequence',
-    'top_standard_sequence',
-    'top_transfer_sequence',
+    'mode_1_sequence',
+    'mode_2_sequence',
+    'mode_3_sequence',
+    'mode_4_sequence',
+    'mode_5_sequence',
     'release_sequence',
     'pop_sequence',
 )
@@ -56,7 +58,10 @@ def _validate_range(value, limits, description):
 
 
 def parse_sequence(parameter_name, values):
-    if not isinstance(values, (list, tuple)):
+    if (
+        not isinstance(values, Sequence) or
+        isinstance(values, (str, bytes, bytearray))
+    ):
         raise ValueError(f'{parameter_name} must be a double array')
     if not values:
         raise ValueError(f'{parameter_name} must not be empty')
@@ -280,23 +285,16 @@ class KfsLoaderController(Node):
 
     @staticmethod
     def load_sequence_name(request):
-        mode_names = {
-            KfsAction.Request.FRONT: 'front',
-            KfsAction.Request.TOP: 'top',
+        sequence_names = {
+            KfsAction.Request.MODE_1: 'mode_1_sequence',
+            KfsAction.Request.MODE_2: 'mode_2_sequence',
+            KfsAction.Request.MODE_3: 'mode_3_sequence',
+            KfsAction.Request.MODE_4: 'mode_4_sequence',
+            KfsAction.Request.MODE_5: 'mode_5_sequence',
         }
-        method_names = {
-            KfsAction.Request.STANDARD: 'standard',
-            KfsAction.Request.TRANSFER: 'transfer',
-        }
-        if request.mode not in mode_names:
+        if request.mode not in sequence_names:
             raise ValueError(f'unsupported KFS load mode: {request.mode}')
-        if request.load_method not in method_names:
-            raise ValueError(
-                f'unsupported KFS load method: {request.load_method}')
-        return (
-            f'{mode_names[request.mode]}_'
-            f'{method_names[request.load_method]}_sequence'
-        )
+        return sequence_names[request.mode]
 
     @classmethod
     def action_sequence_name(cls, request):

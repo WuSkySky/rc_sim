@@ -18,18 +18,14 @@ class GripperGripServiceController(Node):
 
         self.declare_parameter('command_topic', '/r2/gripper/grip_cmd')
         self.declare_parameter('feedback_topic', '/r2/gripper/grip_feedback')
-        self.declare_parameter(
-            'gap_feedback_topic', '/r2/gripper/grip_gap_feedback')
         self.declare_parameter('service_name', '/r2/gripper/set_grip')
         self.declare_parameter('min_position', 0.0)
         self.declare_parameter('max_position', 0.209)
         self.declare_parameter('default_tolerance', 0.005)
         self.declare_parameter('default_timeout_sec', 10.0)
-        self.declare_parameter('closed_gap_threshold', 0.38)
 
         command_topic = self.get_parameter('command_topic').value
         feedback_topic = self.get_parameter('feedback_topic').value
-        gap_feedback_topic = self.get_parameter('gap_feedback_topic').value
         service_name = self.get_parameter('service_name').value
         self.min_position = float(
             self.get_parameter('min_position').value)
@@ -38,8 +34,6 @@ class GripperGripServiceController(Node):
         self.default_tolerance = self.get_parameter('default_tolerance').value
         self.default_timeout_sec = self.get_parameter(
             'default_timeout_sec').value
-        self.closed_gap_threshold = self.get_parameter(
-            'closed_gap_threshold').value
 
         if not math.isfinite(self.min_position):
             raise ValueError('min_position must be finite')
@@ -50,7 +44,6 @@ class GripperGripServiceController(Node):
                 'min_position must be less than max_position')
 
         self.current_position = None
-        self.current_gap = None
 
         self.command_publisher = self.create_publisher(
             Float64, command_topic, 10)
@@ -58,13 +51,6 @@ class GripperGripServiceController(Node):
             Float64,
             feedback_topic,
             self.on_feedback,
-            10,
-            callback_group=self.callback_group,
-        )
-        self.gap_feedback_subscription = self.create_subscription(
-            Float64,
-            gap_feedback_topic,
-            self.on_gap_feedback,
             10,
             callback_group=self.callback_group,
         )
@@ -78,11 +64,6 @@ class GripperGripServiceController(Node):
     def on_feedback(self, msg):
         with self.state_condition:
             self.current_position = msg.data
-            self.state_condition.notify_all()
-
-    def on_gap_feedback(self, msg):
-        with self.state_condition:
-            self.current_gap = msg.data
             self.state_condition.notify_all()
 
     def handle_set_grip(self, request, response):
@@ -122,18 +103,7 @@ class GripperGripServiceController(Node):
                         should_wait = True
                     else:
                         error = request.position - self.current_position
-                        is_closing = (
-                            request.position < self.current_position
-                        )
-                        close_reached = (
-                            is_closing and
-                            self.current_gap is not None and
-                            self.current_gap <= self.closed_gap_threshold
-                        )
-                        reached = (
-                            abs(error) <= tolerance or close_reached
-                        )
-                        if reached:
+                        if abs(error) <= tolerance:
                             response.success = True
                             response.message = 'Gripper grip target reached'
                             response.final_position = self.current_position

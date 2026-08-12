@@ -1,26 +1,59 @@
 from collections import deque
 from functools import partial
 import math
+import os
+from pathlib import Path
+import subprocess
 import threading
 import time
 import tkinter as tk
 from tkinter import ttk
 
+from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped, Twist
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
 from robot_r2_interfaces.msg import LiftCommand
-from robot_r2_interfaces.srv import AlignToKFS, MoveToPose
+from robot_r2_interfaces.srv import AlignToKFS, KfsAction, MoveToPose
 from std_msgs.msg import Float64
 
 
 MOTION_KEYS = {'w', 'a', 's', 'd', 'q', 'e'}
+KFS_LOADER_PARAMETER_NAMES = {
+    'service_timeout_sec',
+    'mode_1_sequence',
+    'mode_2_sequence',
+    'mode_3_sequence',
+    'mode_4_sequence',
+    'mode_5_sequence',
+    'release_sequence',
+    'pop_sequence',
+}
+KFS_LOADER_SOURCE_RELATIVE_PATH = Path(
+    'src/robot_r2_control/config/kfs_loader.yaml')
 
 
 def normalize_motion_key(keysym):
     key = str(keysym).lower()
     return key if key in MOTION_KEYS else None
+
+
+def resolve_kfs_loader_source_config(package_share_directory):
+    package_share_path = Path(package_share_directory).resolve()
+    search_roots = (package_share_path, *package_share_path.parents)
+
+    for root in search_roots:
+        candidate = root / KFS_LOADER_SOURCE_RELATIVE_PATH
+        if candidate.is_file():
+            return os.fspath(candidate)
+
+    for root in search_roots:
+        if root.name == 'install':
+            return os.fspath(
+                root.parent / KFS_LOADER_SOURCE_RELATIVE_PATH)
+
+    return os.fspath(Path.cwd() / KFS_LOADER_SOURCE_RELATIVE_PATH)
 
 
 def normalize_angle(angle):
@@ -114,12 +147,61 @@ def relative_pose_goal(current_pose, forward, left, yaw_delta):
     )
 
 
+def summarize_parameter_load_result(returncode, stdout, stderr):
+    output_lines = [
+        line.strip()
+        for line in f'{stdout}\n{stderr}'.splitlines()
+        if line.strip()
+    ]
+    failures = [line for line in output_lines if ' failed:' in line]
+    successful_names = {
+        line.removeprefix('Set parameter ').removesuffix(' successful')
+        for line in output_lines
+        if line.startswith('Set parameter ') and line.endswith(' successful')
+    }
+    missing = KFS_LOADER_PARAMETER_NAMES - successful_names
+    if returncode == 0 and not failures and not missing:
+        return (
+            True,
+            f'KFS Load 参数写入成功：共 {len(successful_names)} 项',
+        )
+
+    details = list(failures)
+    if returncode != 0 and not details:
+        details.append(f'ros2 param load 退出码 {returncode}')
+    if missing and not failures:
+        details.append('未确认写入：' + ', '.join(sorted(missing)))
+    if not details:
+        details.append('没有收到参数写入结果')
+    return False, 'KFS Load 参数写入失败：' + '；'.join(details)
+
+
+def make_parameter_load_command(config_path):
+    return [
+        'ros2',
+        'param',
+        'load',
+        '--no-daemon',
+        '--spin-time',
+        '2.0',
+        '/kfs_loader_control',
+        config_path,
+    ]
+
+
 class GuiControlNode(Node):
     CMD_VEL_TOPIC = '/r2/cmd_vel'
     POSE_FEEDBACK_TOPIC = '/r2/pose_feedback'
     MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
     KFS_ALIGNMENT_SERVICE = '/r2/align_to_kfs'
+    KFS_ACTION_SERVICE = '/r2/kfs/action'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
+
+    KFS_LOAD_MOTOR_FEEDBACK_TOPICS = {
+        'root_rotate': '/r2/gripper/rotate_feedback',
+        'tip_rotate': '/r2/gripper/tip_rotate_feedback',
+        'grip': '/r2/gripper/grip_feedback',
+    }
 
     FLOAT_CONTROL_PARAMETERS = {
         'kfs_lift': {
@@ -129,7 +211,7 @@ class GuiControlNode(Node):
         },
         'root_rotate': {
             'topic': '/r2/gripper/rotate_cmd',
-            'minimum': ('root_rotate_min', 0.0),
+            'minimum': ('root_rotate_min', -math.radians(15.0)),
             'maximum': ('root_rotate_max', 2.356194490192345),
         },
         'tip_rotate': {
@@ -174,12 +256,21 @@ class GuiControlNode(Node):
         self.state_lock = threading.RLock()
         self.status_events = deque()
         self.config_generation = 0
+        self.kfs_load_feedback_generation = 0
+        self.kfs_load_motor_feedback = {
+            name: None for name in self.KFS_LOAD_MOTOR_FEEDBACK_TOPICS
+        }
         self.current_pose = None
         self.active_manual_keys = set()
         self.velocity_test_kind = None
         self.velocity_test_deadline = None
         self.pose_request_in_flight = False
         self.kfs_alignment_request_in_flight = False
+        self.kfs_action_request_in_flight = False
+        self.kfs_parameter_load_in_flight = False
+        self.kfs_loader_config_path = resolve_kfs_loader_source_config(
+            get_package_share_directory('robot_r2_control'),
+        )
 
         self.declare_parameter('lift_min', 0.0)
         self.declare_parameter('lift_max', 0.376)
@@ -227,10 +318,21 @@ class GuiControlNode(Node):
             self._on_pose_feedback,
             10,
         )
+        self.kfs_load_feedback_subscribers = {
+            name: self.create_subscription(
+                Float64,
+                topic,
+                partial(self._on_kfs_load_motor_feedback, name),
+                10,
+            )
+            for name, topic in self.KFS_LOAD_MOTOR_FEEDBACK_TOPICS.items()
+        }
         self.move_client = self.create_client(
             MoveToPose, self.MOVE_TO_POSE_SERVICE)
         self.kfs_alignment_client = self.create_client(
             AlignToKFS, self.KFS_ALIGNMENT_SERVICE)
+        self.kfs_action_client = self.create_client(
+            KfsAction, self.KFS_ACTION_SERVICE)
         self.motion_timer = self.create_timer(
             1.0 / self.motion_config['motion_publish_rate'],
             self._publish_motion_tick,
@@ -363,6 +465,21 @@ class GuiControlNode(Node):
             return
         with self.state_lock:
             self.current_pose = current
+
+    def _on_kfs_load_motor_feedback(self, motor_name, message):
+        value = float(message.data)
+        if not math.isfinite(value):
+            return
+        with self.state_lock:
+            self.kfs_load_motor_feedback[motor_name] = value
+            self.kfs_load_feedback_generation += 1
+
+    def get_kfs_load_feedback_snapshot(self):
+        with self.state_lock:
+            return (
+                self.kfs_load_feedback_generation,
+                dict(self.kfs_load_motor_feedback),
+            )
 
     @staticmethod
     def _make_twist(x=0.0, y=0.0, yaw=0.0):
@@ -581,6 +698,70 @@ class GuiControlNode(Node):
         else:
             self._queue_status(f'KFS 对齐失败：{response.message}')
 
+    def request_kfs_action(self, action, mode=0):
+        if action == KfsAction.Request.LOAD:
+            mode_labels = {
+                KfsAction.Request.MODE_1: (
+                    '模式 1：前方装载（当前数量 0，装载到车上）'),
+                KfsAction.Request.MODE_2: (
+                    '模式 2：前方装载（当前数量 2，留在夹爪）'),
+                KfsAction.Request.MODE_3: (
+                    '模式 3：上方装载（当前数量 0，装载到车上）'),
+                KfsAction.Request.MODE_4: (
+                    '模式 4：上方装载（当前数量 2，留在夹爪）'),
+                KfsAction.Request.MODE_5: (
+                    '模式 5：上方装载（当前数量 1）'),
+            }
+            if mode not in mode_labels:
+                raise ValueError(f'Unknown KFS load mode: {mode}')
+            action_label = mode_labels[mode]
+        elif action == KfsAction.Request.RELEASE:
+            action_label = '释放'
+        elif action == KfsAction.Request.POP:
+            action_label = '弹出'
+        else:
+            raise ValueError(f'Unknown KFS action: {action}')
+
+        with self.state_lock:
+            if self.kfs_action_request_in_flight:
+                return False, 'KFS 动作正在执行'
+            if not self.kfs_action_client.service_is_ready():
+                return False, '/r2/kfs/action 服务不可用'
+            self.kfs_action_request_in_flight = True
+
+        request = KfsAction.Request()
+        request.action = action
+        if action == KfsAction.Request.LOAD:
+            request.mode = mode
+        try:
+            future = self.kfs_action_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.kfs_action_request_in_flight = False
+            return False, f'KFS {action_label}请求发送失败：{exc}'
+        future.add_done_callback(partial(
+            self._on_kfs_action_complete,
+            action_label=action_label,
+        ))
+        return True, f'已发送 KFS {action_label}请求'
+
+    def _on_kfs_action_complete(self, future, action_label):
+        with self.state_lock:
+            self.kfs_action_request_in_flight = False
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._queue_status(f'KFS {action_label}调用异常：{exc}')
+            return
+        if response is None:
+            self._queue_status(f'KFS {action_label}调用失败：无响应')
+        elif response.success:
+            self._queue_status(
+                f'KFS {action_label}完成：{response.message}')
+        else:
+            self._queue_status(
+                f'KFS {action_label}失败：{response.message}')
+
     def _chassis_service_in_flight_locked(self):
         return (
             self.pose_request_in_flight or
@@ -594,6 +775,63 @@ class GuiControlNode(Node):
     def is_chassis_request_in_flight(self):
         with self.state_lock:
             return self._chassis_service_in_flight_locked()
+
+    def is_kfs_action_request_in_flight(self):
+        with self.state_lock:
+            return self.kfs_action_request_in_flight
+
+    def request_kfs_parameter_load(self):
+        with self.state_lock:
+            if self.kfs_parameter_load_in_flight:
+                return False, 'KFS Load 参数正在写入'
+            if not os.path.isfile(self.kfs_loader_config_path):
+                return (
+                    False,
+                    f'KFS Load 参数文件不存在：'
+                    f'{self.kfs_loader_config_path}',
+                )
+            self.kfs_parameter_load_in_flight = True
+
+        worker = threading.Thread(
+            target=self._load_kfs_parameters,
+            daemon=True,
+        )
+        worker.start()
+        return (
+            True,
+            f'正在从 YAML 写入 KFS Load 参数：'
+            f'{self.kfs_loader_config_path}',
+        )
+
+    def _load_kfs_parameters(self):
+        try:
+            result = subprocess.run(
+                make_parameter_load_command(
+                    self.kfs_loader_config_path),
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=15.0,
+            )
+            _, message = summarize_parameter_load_result(
+                result.returncode,
+                result.stdout,
+                result.stderr,
+            )
+        except FileNotFoundError:
+            message = 'KFS Load 参数写入失败：找不到 ros2 命令'
+        except subprocess.TimeoutExpired:
+            message = 'KFS Load 参数写入失败：15 秒内未完成'
+        except Exception as exc:
+            message = f'KFS Load 参数写入异常：{exc}'
+        finally:
+            with self.state_lock:
+                self.kfs_parameter_load_in_flight = False
+        self._queue_status(message)
+
+    def is_kfs_parameter_load_in_flight(self):
+        with self.state_lock:
+            return self.kfs_parameter_load_in_flight
 
     def stop_chassis(self):
         with self.state_lock:
@@ -682,17 +920,26 @@ class GuiControlApp:
             control_name = control['name']
             self.float_control_values[control_name] = tk.DoubleVar(
                 value=0.0)
+        self.kfs_load_feedback_text = {
+            name: tk.StringVar(value='实际反馈：尚未收到')
+            for name in self.node.KFS_LOAD_MOTOR_FEEDBACK_TOPICS
+        }
         self.status_text = tk.StringVar(value='已就绪')
 
         self.last_lift_command = None
         self.last_float_commands = {}
         self.last_config_generation = -1
+        self.last_kfs_load_feedback_generation = -1
         self.last_chassis_busy = None
+        self.last_kfs_action_busy = None
+        self.last_kfs_parameter_load_busy = None
         self._closed = False
         self.chassis_buttons = []
         self.velocity_test_buttons = {}
         self.pose_test_buttons = {}
         self.kfs_test_button = None
+        self.kfs_action_buttons = []
+        self.kfs_parameter_load_button = None
 
         self._build_ui()
         self._sync_dynamic_ranges()
@@ -750,6 +997,61 @@ class GuiControlApp:
         )
         self.kfs_test_button.grid(row=0, column=0, sticky='ew')
         self.chassis_buttons.append(self.kfs_test_button)
+        kfs_actions = (
+            (
+                '模式 1：前方，数量 0，装载到车上',
+                KfsAction.Request.LOAD, KfsAction.Request.MODE_1,
+            ),
+            (
+                '模式 2：前方，数量 2，留在夹爪',
+                KfsAction.Request.LOAD, KfsAction.Request.MODE_2,
+            ),
+            (
+                '模式 3：上方，数量 0，装载到车上',
+                KfsAction.Request.LOAD, KfsAction.Request.MODE_3,
+            ),
+            (
+                '模式 4：上方，数量 2，留在夹爪',
+                KfsAction.Request.LOAD, KfsAction.Request.MODE_4,
+            ),
+            (
+                '模式 5：上方，数量 1',
+                KfsAction.Request.LOAD, KfsAction.Request.MODE_5,
+            ),
+            ('释放', KfsAction.Request.RELEASE, 0),
+            ('弹出', KfsAction.Request.POP, 0),
+        )
+        for index, (label, action, mode) in enumerate(
+                kfs_actions):
+            button = ttk.Button(
+                kfs_test_frame,
+                text=label,
+                command=partial(
+                    self._start_kfs_action_test,
+                    action,
+                    mode,
+                ),
+            )
+            button.grid(
+                row=1 + index // 2,
+                column=index % 2,
+                sticky='ew',
+                padx=(0 if index % 2 == 0 else 8, 0),
+                pady=(8, 0),
+            )
+            self.kfs_action_buttons.append(button)
+        self.kfs_parameter_load_button = ttk.Button(
+            kfs_test_frame,
+            text='从 YAML 写入 KFS Load 参数',
+            command=self._write_kfs_load_parameters,
+        )
+        self.kfs_parameter_load_button.grid(
+            row=5,
+            column=0,
+            columnspan=2,
+            sticky='ew',
+            pady=(8, 0),
+        )
 
         lift_frame = ttk.LabelFrame(
             mechanism_column, text='底盘抬升', padding=12)
@@ -781,7 +1083,8 @@ class GuiControlApp:
     def _create_control_frame(self, parent, row, title, controls):
         frame = ttk.LabelFrame(parent, text=title, padding=12)
         frame.grid(row=row, column=0, sticky='ew', pady=(10, 0))
-        for control_row, control in enumerate(controls):
+        control_row = 0
+        for control in controls:
             control_name = control['name']
             minimum, maximum = self.node.float_control_ranges[control_name]
             to_display = control.get('to_display', float)
@@ -799,6 +1102,20 @@ class GuiControlApp:
                 control['resolution'],
                 partial(self._publish_float_command, control_name),
             )
+            control_row += 1
+            if control_name in self.kfs_load_feedback_text:
+                feedback_label = ttk.Label(
+                    frame,
+                    textvariable=self.kfs_load_feedback_text[control_name],
+                    anchor='e',
+                )
+                feedback_label.grid(
+                    row=control_row,
+                    column=0,
+                    sticky='ew',
+                    pady=(0, 8),
+                )
+                control_row += 1
 
     @staticmethod
     def _create_slider(
@@ -865,6 +1182,14 @@ class GuiControlApp:
 
     def _start_kfs_alignment_test(self):
         _, message = self.node.request_kfs_alignment()
+        self.status_text.set(message)
+
+    def _start_kfs_action_test(self, action, mode):
+        _, message = self.node.request_kfs_action(action, mode)
+        self.status_text.set(message)
+
+    def _write_kfs_load_parameters(self):
+        _, message = self.node.request_kfs_parameter_load()
         self.status_text.set(message)
 
     def _publish_lift_command(self, _event=None):
@@ -936,12 +1261,32 @@ class GuiControlApp:
         self.kfs_test_button.configure(
             text=control_text['kfs_alignment'])
 
+    def _sync_kfs_load_feedback(self):
+        generation, feedback = (
+            self.node.get_kfs_load_feedback_snapshot())
+        if generation == self.last_kfs_load_feedback_generation:
+            return
+        self.last_kfs_load_feedback_generation = generation
+        controls = {item['name']: item for item in self.KFS_CONTROLS}
+        for name, text_variable in self.kfs_load_feedback_text.items():
+            value = feedback[name]
+            if value is None:
+                text_variable.set('实际反馈：尚未收到')
+                continue
+            control = controls[name]
+            display_value = control.get('to_display', float)(value)
+            decimals = control['decimals']
+            text_variable.set(
+                f"实际反馈：{display_value:.{decimals}f} "
+                f"{control['unit']}")
+
     def _poll_ros(self):
         if self._closed:
             return
         try:
             rclpy.spin_once(self.node, timeout_sec=0.0)
             self._sync_dynamic_ranges()
+            self._sync_kfs_load_feedback()
             for message in self.node.pop_status_events():
                 self.status_text.set(message)
             chassis_busy = self.node.is_chassis_request_in_flight()
@@ -950,6 +1295,18 @@ class GuiControlApp:
                 state = tk.DISABLED if chassis_busy else tk.NORMAL
                 for button in self.chassis_buttons:
                     button.configure(state=state)
+            kfs_action_busy = self.node.is_kfs_action_request_in_flight()
+            if kfs_action_busy != self.last_kfs_action_busy:
+                self.last_kfs_action_busy = kfs_action_busy
+                state = tk.DISABLED if kfs_action_busy else tk.NORMAL
+                for button in self.kfs_action_buttons:
+                    button.configure(state=state)
+            parameter_load_busy = (
+                self.node.is_kfs_parameter_load_in_flight())
+            if parameter_load_busy != self.last_kfs_parameter_load_busy:
+                self.last_kfs_parameter_load_busy = parameter_load_busy
+                state = tk.DISABLED if parameter_load_busy else tk.NORMAL
+                self.kfs_parameter_load_button.configure(state=state)
         except Exception as exc:
             self.node.get_logger().error(f'GUI ROS 回调异常：{exc}')
             self.status_text.set(f'ROS 回调异常：{exc}')

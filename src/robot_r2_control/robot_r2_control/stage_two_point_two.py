@@ -313,11 +313,10 @@ class StageTwoPointTwoController(Node):
             raise RuntimeError(f'GetKfsType failed: {response.message}')
         return response.class_name
 
-    def load_kfs(self, mode, load_method):
+    def load_kfs(self, mode):
         request = KfsAction.Request()
         request.action = KfsAction.Request.LOAD
         request.mode = mode
-        request.load_method = load_method
         response = self.wait_for_future(
             self.kfs_action_client.call_async(request),
             self.load_timeout_sec,
@@ -462,12 +461,20 @@ class StageTwoPointTwoController(Node):
 
         if target[2] > current[2]:
             offset = self.higher_kfs_edge_offset
-            load_mode = KfsAction.Request.FRONT
             load_mode_name = 'front'
+            load_modes = {
+                0: KfsAction.Request.MODE_1,
+                1: KfsAction.Request.MODE_1,
+                2: KfsAction.Request.MODE_2,
+            }
         elif target[2] < current[2]:
             offset = self.lower_kfs_edge_offset
-            load_mode = KfsAction.Request.TOP
             load_mode_name = 'top'
+            load_modes = {
+                0: KfsAction.Request.MODE_3,
+                1: KfsAction.Request.MODE_5,
+                2: KfsAction.Request.MODE_4,
+            }
         else:
             raise ValueError(
                 f'KFS at {target_index} has the same height as '
@@ -494,12 +501,7 @@ class StageTwoPointTwoController(Node):
             self.release_kfs()
             self.move_to_pose(edge_x, edge_y, direction_yaw)
 
-        load_method = (
-            KfsAction.Request.TRANSFER
-            if self.loaded_count == 2
-            else KfsAction.Request.STANDARD
-        )
-        self.load_kfs(load_mode, load_method)
+        self.load_kfs(load_modes[self.loaded_count])
         self.move_to_pose(current[0], current[1], direction_yaw)
 
     def detect_direction(self, current_index, delta):

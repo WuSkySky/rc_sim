@@ -1,4 +1,4 @@
-kfs_loader_control:
+/kfs_loader_control:
   ros__parameters:
     service_timeout_sec: 10.0
 
@@ -6,50 +6,50 @@ kfs_loader_control:
     # root_position, tip_position, grip_position,
     # root_tolerance, tip_tolerance, grip_tolerance.
     # All three motors are commanded concurrently in every step.
-    front_standard_sequence: [
-      # Move to the front pickup pose with the gripper open.
-      1.1471975511965977, -1.1471975511965977, 0.209, 0.01, 0.01, 0.005,
-      # Grip the KFS.
-      1.1471975511965977, -1.1471975511965977, 0.145, 0.01, 0.01, 0.005,
-      # Return the tip first, then return the root.
-      1.1471975511965977, -3.141592653589793, 0.145, 0.01, 0.01, 0.005,
-      0.0, -3.141592653589793, 0.145, 0.01, 0.01, 0.005,
-      # Release into the storage area.
-      0.0, -3.141592653589793, 0.209, 0.01, 0.01, 0.005
+    # Mode 1: front load, current loaded count 0, store onboard.
+    mode_1_sequence: [
+      1.192, -1.228, 0.046, 0.01, 0.01, 0.02,
+      1.192, -1.228, 0.0, 0.01, 0.01, 0.02,
+      0.23, -2.916, 0.0, 0.01, 0.01, 0.02,
+      0.0, -2.916, 0.0, 0.01, 0.01, 0.02,
+      0.0, -2.916, 0.046, 0.01, 0.01, 0.02,
     ]
 
-    front_transfer_sequence: [
-      1.1471975511965977, -1.1471975511965977, 0.209, 0.01, 0.01, 0.005,
-      1.1471975511965977, -1.1471975511965977, 0.145, 0.01, 0.01, 0.005,
-      # Return both rotation axes while keeping the KFS gripped.
-      0.0, 0.0, 0.145, 0.01, 0.01, 0.005
+    # Mode 2: front load, current loaded count 2, keep gripped.
+    mode_2_sequence: [
+      1.192, -1.228, 0.046, 0.01, 0.01, 0.02,
+      1.192, -1.228, 0.0, 0.01, 0.01, 0.02,
+      0.0, -1.562, 0.0, 0.01, 0.01, 0.02,
     ]
 
-    top_standard_sequence: [
-      # Move to the top pickup pose with the gripper open.
-      1.7395202484681462, -0.16872392167324968, 0.209, 0.01, 0.01, 0.005,
-      # Grip the KFS.
-      1.7395202484681462, -0.16872392167324968, 0.145, 0.01, 0.01, 0.005,
-      # Return the root first, then return the tip.
-      0.0, -0.16872392167324968, 0.145, 0.01, 0.01, 0.005,
-      0.0, -3.141592653589793, 0.145, 0.01, 0.01, 0.005,
-      # Release into the storage area.
-      0.0, -3.141592653589793, 0.209, 0.01, 0.01, 0.005
+    # Mode 3: top load, current loaded count 0, store onboard.
+    mode_3_sequence: [
+      1.53, 0.0, 0.046, 0.01, 0.01, 0.02,
+      1.53, 0.0, 0.0, 0.01, 0.01, 0.02,
+      0.2, -2.5, 0.0, 0.01, 0.01, 0.02,
+      0.129, -2.889, 0.0, 0.01, 0.01, 0.02,
+      0.129, -2.889, 0.046, 0.01, 0.01, 0.02,
     ]
 
-    top_transfer_sequence: [
-      1.7395202484681462, -0.16872392167324968, 0.209, 0.01, 0.01, 0.005,
-      1.7395202484681462, -0.16872392167324968, 0.145, 0.01, 0.01, 0.005,
-      # Return both rotation axes while keeping the KFS gripped.
-      0.0, 0.0, 0.145, 0.01, 0.01, 0.005
+    # Mode 4: top load, current loaded count 2, keep gripped.
+    mode_4_sequence: [
+      1.53, 0.0, 0.046, 0.01, 0.01, 0.02,
+      1.53, 0.0, 0.0, 0.01, 0.01, 0.02,
+      0.284, -1.761, 0.0, 0.01, 0.01, 0.02,
+    ]
+
+    # Mode 5: top load, current loaded count 1.
+    mode_5_sequence: [
+      1.53, 0.0, 0.046, 0.01, 0.01, 0.02,
+      1.53, 0.0, 0.0, 0.01, 0.01, 0.02,
+      0.264, -2.366, 0.0, 0.01, 0.01, 0.02,
+      0.264, -2.366, 0.046, 0.01, 0.01, 0.02,
+      0.0, -1.688, 0.046, 0.01, 0.01, 0.02,
     ]
 
     release_sequence: [
-      # Move the gripped KFS to the release pose.
-      0.7853981633974483, -0.7853981633974483, 0.145, 0.01, 0.01, 0.005,
-      # Open the gripper, then return to the initial pose.
-      0.7853981633974483, -0.7853981633974483, 0.209, 0.01, 0.01, 0.005,
-      0.0, 0.0, 0.209, 0.01, 0.01, 0.005
+      1.334, -1.46, 0.0, 0.01, 0.01, 0.02,
+      1.334, -1.46, 0.046, 0.01, 0.01, 0.02,
     ]
 
     pop_sequence: [
