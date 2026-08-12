@@ -16,6 +16,7 @@ set(CMAKE_CUDA_ARCHITECTURES "${ROBOT_R2_CUDA_ARCHITECTURES}")
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(robot_r2_interfaces REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -51,6 +52,7 @@ target_include_directories(kfs_detect_fused PRIVATE
 
 ament_target_dependencies(kfs_detect_fused
   ament_index_cpp
+  rcl_interfaces
   rclcpp
   robot_r2_interfaces
   sensor_msgs

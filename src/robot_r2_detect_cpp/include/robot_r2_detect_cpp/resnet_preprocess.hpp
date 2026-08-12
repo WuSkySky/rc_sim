@@ -12,9 +12,9 @@ enum class TensorElementType {
   kFloat16,
 };
 
-// Launches Resize(short side) + CenterCrop + BGR/RGB/mono to RGB +
-// ImageNet normalization directly on the GPU. The destination is one NCHW
-// tensor slot and may be float32 or float16.
+// Launches a direct resize of the complete image plus BGR/RGB/mono to RGB and
+// ImageNet normalization directly on the GPU. The destination is one square
+// NCHW tensor slot and may be float32 or float16.
 void launch_resnet_preprocess(const std::uint8_t *source, int source_width,
                               int source_height, std::size_t source_step,
                               int source_channels, bool source_is_rgb,

@@ -31,7 +31,7 @@
 
 1. `src/robot_r2_target_alignment/config/yolo_target_detector.yaml`
    - `model.device` 从 `cpu` 改为字符串 `"0"`，即第 0 块 CUDA GPU。
-   - `model.half` 保持 `false`，当前采用 CUDA FP32。
+   - `model.quantize` 保持 `32`，当前采用 CUDA FP32。
 2. `src/robot_r2_target_alignment/robot_r2_target_alignment/yolo_target_detector.py`
    - ROS 参数 `model.device` 的代码默认值从 `cpu` 改为 `"0"`。
    - 本地将限频基准改为推理开始时间，处理耗时不再与完整限频周期相加。

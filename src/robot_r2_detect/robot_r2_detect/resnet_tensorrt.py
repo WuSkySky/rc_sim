@@ -154,28 +154,20 @@ def preprocess_resnet_image(
     mean: tuple[float, ...],
     std: tuple[float, ...],
 ) -> np.ndarray:
-    """Apply training-time Resize(short side), CenterCrop and Normalize."""
+    """Resize the complete image directly to model size and normalize it."""
     if not isinstance(image, np.ndarray) or image.ndim != 3:
         raise TypeError("KFS image must be an HxWxC numpy array")
     if image.shape[2] != 3 or image.shape[0] == 0 or image.shape[1] == 0:
         raise ValueError("KFS image must be a non-empty 3-channel image")
 
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    resize_short = int(round(image_size / 0.875))
-    source_height, source_width = rgb.shape[:2]
-    scale = resize_short / min(source_height, source_width)
-    resized_width = max(image_size, int(round(source_width * scale)))
-    resized_height = max(image_size, int(round(source_height * scale)))
     resized = cv2.resize(
         rgb,
-        (resized_width, resized_height),
+        (image_size, image_size),
         interpolation=cv2.INTER_LINEAR,
     )
-    left = (resized_width - image_size) // 2
-    top = (resized_height - image_size) // 2
-    cropped = resized[top:top + image_size, left:left + image_size]
 
-    normalized = cropped.astype(np.float32) / 255.0
+    normalized = resized.astype(np.float32) / 255.0
     normalized = (
         normalized - np.asarray(mean, dtype=np.float32).reshape(1, 1, 3)
     ) / np.asarray(std, dtype=np.float32).reshape(1, 1, 3)

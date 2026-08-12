@@ -48,10 +48,11 @@ from robot_r2_target_alignment.detector_core import (
 class DetectorConfig:
     """One atomically replaceable detector configuration."""
 
+    input_video_topic: str
     model_path: Path
     input_size: int
     device: str
-    half: bool
+    quantize: int
     confidence: float
     iou: float
     max_detections: int
@@ -63,8 +64,8 @@ class DetectorConfig:
     visualization_enabled: bool
 
     @property
-    def model_signature(self) -> tuple[Path, int, str, bool]:
-        return self.model_path, self.input_size, self.device, self.half
+    def model_signature(self) -> tuple[Path, int, str, int]:
+        return self.model_path, self.input_size, self.device, self.quantize
 
 
 def _float_descriptor(
@@ -105,10 +106,11 @@ class YoloTargetDetector(Node):
     """Run YOLO inference off the executor and publish the selected target."""
 
     PARAMETER_NAMES = (
+        "input_video_topic",
         "model.path",
         "model.input_size",
         "model.device",
-        "model.half",
+        "model.quantize",
         "inference.confidence",
         "inference.iou",
         "inference.max_detections",
@@ -142,7 +144,7 @@ class YoloTargetDetector(Node):
         self._model = self._load_model(self._config)
         self._validate_target_filters(self._config, self._model)
 
-        image_qos = QoSProfile(
+        self._image_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -156,9 +158,9 @@ class YoloTargetDetector(Node):
         )
         self._subscription = self.create_subscription(
             CameraFrame,
-            "camera/image_raw",
+            self._config.input_video_topic,
             self._on_image,
-            image_qos,
+            self._image_qos,
         )
         self._detection_publisher = self.create_publisher(
             TargetDetection,
@@ -168,7 +170,7 @@ class YoloTargetDetector(Node):
         self._debug_publisher = self.create_publisher(
             Image,
             "debug_image",
-            image_qos,
+            self._image_qos,
         )
         self.add_on_set_parameters_callback(self._on_parameters_changed)
 
@@ -180,10 +182,18 @@ class YoloTargetDetector(Node):
         self._worker.start()
         self.get_logger().info(
             f"Loaded YOLO detector from {self._config.model_path} "
-            f"on device {self._config.device}"
+            f"on device {self._config.device}; input topic "
+            f"{self._config.input_video_topic}"
         )
 
     def _declare_parameters(self) -> None:
+        self.declare_parameter(
+            "input_video_topic",
+            "/r2/front_camera/image_raw",
+            ParameterDescriptor(
+                description="CameraFrame input video topic."
+            ),
+        )
         self.declare_parameter(
             "model.path",
             "",
@@ -205,9 +215,13 @@ class YoloTargetDetector(Node):
             ParameterDescriptor(description="Ultralytics inference device."),
         )
         self.declare_parameter(
-            "model.half",
-            False,
-            ParameterDescriptor(description="Enable FP16 inference."),
+            "model.quantize",
+            32,
+            _integer_descriptor(
+                "Ultralytics inference precision: 16 for FP16, 32 for FP32.",
+                16,
+                32,
+            ),
         )
         self.declare_parameter(
             "inference.confidence",
@@ -321,10 +335,11 @@ class YoloTargetDetector(Node):
     @classmethod
     def _make_config(cls, values: dict[str, object]) -> DetectorConfig:
         config = DetectorConfig(
+            input_video_topic=str(values["input_video_topic"]).strip(),
             model_path=cls._resolve_model_path(str(values["model.path"])),
             input_size=int(values["model.input_size"]),
             device=str(values["model.device"]).strip(),
-            half=bool(values["model.half"]),
+            quantize=int(values["model.quantize"]),
             confidence=float(values["inference.confidence"]),
             iou=float(values["inference.iou"]),
             max_detections=int(values["inference.max_detections"]),
@@ -350,12 +365,16 @@ class YoloTargetDetector(Node):
             raise ValueError("detector numeric parameters must be finite")
         if not config.device:
             raise ValueError("model.device must not be empty")
+        if not config.input_video_topic:
+            raise ValueError("input_video_topic must not be empty")
         if config.input_size <= 0 or config.max_detections <= 0:
             raise ValueError("model size and maximum detections must be positive")
         if config.input_size % 32 != 0:
             raise ValueError("model.input_size must be a multiple of 32")
-        if config.device.lower() == "cpu" and config.half:
-            raise ValueError("model.half cannot be enabled on the CPU")
+        if config.quantize not in (16, 32):
+            raise ValueError("model.quantize must be 16 or 32")
+        if config.device.lower() == "cpu" and config.quantize == 16:
+            raise ValueError("model.quantize must be 32 on the CPU")
         if not 0.0 <= config.confidence <= 1.0:
             raise ValueError("inference.confidence must be in [0, 1]")
         if not 0.0 <= config.iou <= 1.0:
@@ -389,7 +408,7 @@ class YoloTargetDetector(Node):
             source=[warmup],
             imgsz=config.input_size,
             device=config.device,
-            half=config.half,
+            quantize=config.quantize,
             verbose=False,
         )
         return model
@@ -422,6 +441,7 @@ class YoloTargetDetector(Node):
         try:
             new_config = self._make_config(proposed)
             with self._runtime_lock:
+                current_config = self._config
                 current_signature = self._config.model_signature
                 current_model = self._model
             new_model = None
@@ -432,15 +452,56 @@ class YoloTargetDetector(Node):
                 new_config,
                 new_model if new_model is not None else current_model,
             )
-        except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
+            replacement_subscription = None
+            if (
+                new_config.input_video_topic
+                != current_config.input_video_topic
+            ):
+                try:
+                    replacement_subscription = self.create_subscription(
+                        CameraFrame,
+                        new_config.input_video_topic,
+                        self._on_image,
+                        self._image_qos,
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        "Failed to subscribe to input_video_topic: "
+                        f"{exc}"
+                    ) from exc
+        except (
+            LookupError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
             return SetParametersResult(successful=False, reason=str(exc))
 
+        if replacement_subscription is not None:
+            with self._frame_condition:
+                self._latest_frame = None
+                self._handled_frame_sequence = self._latest_frame_sequence
+
+        previous_subscription = None
         with self._runtime_lock:
             self._config = new_config
             if new_model is not None:
                 self._model = new_model
             self._parameter_values = proposed
             self._previous_target = None
+            if replacement_subscription is not None:
+                previous_subscription = self._subscription
+                self._subscription = replacement_subscription
+        if previous_subscription is not None:
+            if not self.destroy_subscription(previous_subscription):
+                self.get_logger().warning(
+                    "Failed to destroy the previous YOLO image subscription"
+                )
+            self.get_logger().info(
+                "YOLO input video topic changed to "
+                f"{new_config.input_video_topic}"
+            )
         with self._frame_condition:
             self._frame_condition.notify_all()
         return SetParametersResult(successful=True)
@@ -512,7 +573,7 @@ class YoloTargetDetector(Node):
                 iou=config.iou,
                 max_det=config.max_detections,
                 device=config.device,
-                half=config.half,
+                quantize=config.quantize,
                 verbose=False,
             )
         candidates = self._candidates_from_results(results, model)

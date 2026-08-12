@@ -1,18 +1,22 @@
 /**:
   ros__parameters:
+    # CameraFrame input video topic. Supports runtime subscription switching.
+    input_video_topic: /r2/right_camera/image_raw
+
     model:
       # Installed from src/robot_r2_detect/model/duantou.pt.
       path: package://robot_r2_detect/model/duantou.pt
       input_size: 640
       # Ultralytics CUDA device index. Use "cpu" only for CPU fallback.
       device: "0"
-      half: false
+      # Inference precision: 16 enables FP16, 32 uses FP32.
+      quantize: 32
 
     inference:
       confidence: 0.5
       iou: 0.7
       max_detections: 20
-      rate_hz: 15.0
+      rate_hz: 30.0
 
     target:
       # Comma-separated values. Empty filters accept all model classes.
@@ -23,4 +27,4 @@
       switch_confidence_margin: 0.15
 
     visualization:
-      enabled: true
+      enabled: false
