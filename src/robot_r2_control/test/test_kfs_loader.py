@@ -1,3 +1,4 @@
+from array import array
 import threading
 from types import SimpleNamespace
 
@@ -61,51 +62,48 @@ def make_controller():
 
 
 @pytest.mark.parametrize(
-    'action, mode, method, expected',
+    'action, mode, expected',
     [
         (
             KfsAction.Request.LOAD,
-            KfsAction.Request.FRONT,
-            KfsAction.Request.STANDARD,
-            'front_standard_sequence',
+            KfsAction.Request.MODE_1,
+            'mode_1_sequence',
         ),
         (
             KfsAction.Request.LOAD,
-            KfsAction.Request.FRONT,
-            KfsAction.Request.TRANSFER,
-            'front_transfer_sequence',
+            KfsAction.Request.MODE_2,
+            'mode_2_sequence',
         ),
         (
             KfsAction.Request.LOAD,
-            KfsAction.Request.TOP,
-            KfsAction.Request.STANDARD,
-            'top_standard_sequence',
+            KfsAction.Request.MODE_3,
+            'mode_3_sequence',
         ),
         (
             KfsAction.Request.LOAD,
-            KfsAction.Request.TOP,
-            KfsAction.Request.TRANSFER,
-            'top_transfer_sequence',
+            KfsAction.Request.MODE_4,
+            'mode_4_sequence',
         ),
-        (KfsAction.Request.RELEASE, 0, 0, 'release_sequence'),
-        (KfsAction.Request.POP, 0, 0, 'pop_sequence'),
+        (
+            KfsAction.Request.LOAD,
+            KfsAction.Request.MODE_5,
+            'mode_5_sequence',
+        ),
+        (KfsAction.Request.RELEASE, 0, 'release_sequence'),
+        (KfsAction.Request.POP, 0, 'pop_sequence'),
     ],
 )
 def test_action_request_selects_complete_trajectory(
-    action, mode, method, expected
+    action, mode, expected
 ):
-    request = SimpleNamespace(
-        action=action,
-        mode=mode,
-        load_method=method,
-    )
+    request = SimpleNamespace(action=action, mode=mode)
 
     assert KfsLoaderController.action_sequence_name(request) == expected
 
 
 def test_unknown_action_is_rejected_without_executing_a_trajectory():
     controller = make_controller()
-    request = SimpleNamespace(action='unknown', mode=0, load_method=0)
+    request = SimpleNamespace(action='unknown', mode=0)
     response = SimpleNamespace(success=None, message='')
     executed = []
     controller.execute_sequence = lambda *args: executed.append(args)
@@ -129,6 +127,17 @@ def test_parse_sequence_groups_each_six_values_into_one_step():
     assert sequence == (
         MotionStep(1.0, -1.0, 0.2, 0.01, 0.02, 0.003),
         MotionStep(0.0, 0.0, 0.1, 0.04, 0.05, 0.006),
+    )
+
+
+def test_parse_sequence_accepts_ros_double_array_representation():
+    sequence = parse_sequence(
+        'test_sequence',
+        array('d', [0.5, -0.5, 0.1, 0.01, 0.02, 0.003]),
+    )
+
+    assert sequence == (
+        MotionStep(0.5, -0.5, 0.1, 0.01, 0.02, 0.003),
     )
 
 
@@ -236,7 +245,7 @@ def test_valid_parameter_update_replaces_only_future_snapshot():
     [
         SimpleNamespace(name='service_timeout_sec', value=0.0),
         SimpleNamespace(name='service_timeout_sec', value=float('inf')),
-        SimpleNamespace(name='front_standard_sequence', value=[]),
+        SimpleNamespace(name='mode_1_sequence', value=[]),
     ],
 )
 def test_invalid_parameter_update_preserves_configuration(parameter):
@@ -268,9 +277,9 @@ def test_multi_parameter_update_is_atomic_when_one_value_is_invalid():
     assert controller.service_timeout_sec == 10.0
 
 
-def test_all_six_trajectory_parameters_accept_valid_sequences():
+def test_all_seven_trajectory_parameters_accept_valid_sequences():
     assert 'pop_sequence' in TRAJECTORY_PARAMETER_NAMES
-    assert len(TRAJECTORY_PARAMETER_NAMES) == 6
+    assert len(TRAJECTORY_PARAMETER_NAMES) == 7
     for parameter_name in TRAJECTORY_PARAMETER_NAMES:
         assert parse_sequence(
             parameter_name,

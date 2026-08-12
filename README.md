@@ -280,25 +280,32 @@ ros2 service call /r2/led_detection/detect \
 ```
 
 KFS 动作通过 `action` 区分：`load=装载`、`release=释放`、`pop=弹出`。
-装载时还需指定位置：`0=前方`、`1=上方`；方式：`0=标准`、`1=转移`。
+装载请求只需通过 `mode=1..5` 选择完整轨迹：
+
+| mode | 装载方向 | 当前装载数量 | 动作结果 |
+|---:|---|---:|---|
+| 1 | 前方 | 0 | 装载到车上 |
+| 2 | 前方 | 2 | 留在夹爪 |
+| 3 | 上方 | 0 | 装载到车上 |
+| 4 | 上方 | 2 | 留在夹爪 |
+| 5 | 上方 | 1 | 使用单件上方装载轨迹 |
 
 ```bash
 ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
-  "{action: load, mode: 0, load_method: 0}"
+  "{action: load, mode: 1}"
 ```
 
-装载、释放和弹出动作由 `robot_r2_control/config/kfs_loader.yaml` 中的六条轨迹配置：
-`front_standard_sequence`、`front_transfer_sequence`、
-`top_standard_sequence`、`top_transfer_sequence`、`release_sequence` 和
+装载、释放和弹出动作由 `robot_r2_control/config/kfs_loader.yaml` 中的七条轨迹配置：
+`mode_1_sequence` 到 `mode_5_sequence`、`release_sequence` 和
 `pop_sequence`。
 每连续六个数表示一个同步步骤，字段顺序为根部位置、末端位置、夹爪位置以及
 三者各自的容差。每一步会同时向三个电机发送目标，全部到达后才执行下一步；
 无需运动的电机重复填写上一目标值。
 
-轨迹支持运行时整体替换。以下示例把前方转移动作改为一个步骤：
+轨迹支持运行时整体替换。以下示例把模式 2 改为一个步骤：
 
 ```bash
-ros2 param set /kfs_loader_control front_transfer_sequence \
+ros2 param set /kfs_loader_control mode_2_sequence \
   "[0.0, 0.0, 0.145, 0.01, 0.01, 0.005]"
 ```
 

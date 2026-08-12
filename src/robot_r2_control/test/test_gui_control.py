@@ -6,13 +6,17 @@ import pytest
 
 from robot_r2_control.gui_control import (
     GuiControlNode,
+    make_parameter_load_command,
     manual_twist_components,
     motion_control_text,
     normalize_angle,
     normalize_motion_key,
     relative_pose_goal,
+    resolve_kfs_loader_source_config,
+    summarize_parameter_load_result,
     velocity_test_twist_components,
 )
+from robot_r2_interfaces.srv import KfsAction
 
 
 class FakePublisher:
@@ -56,14 +60,20 @@ class FakeClient:
 def make_node_stub():
     node = GuiControlNode.__new__(GuiControlNode)
     node.state_lock = threading.RLock()
+    node.kfs_load_feedback_generation = 0
+    node.kfs_load_motor_feedback = {
+        name: None for name in GuiControlNode.KFS_LOAD_MOTOR_FEEDBACK_TOPICS
+    }
     node.active_manual_keys = set()
     node.velocity_test_kind = None
     node.velocity_test_deadline = None
     node.pose_request_in_flight = False
     node.kfs_alignment_request_in_flight = False
+    node.kfs_action_request_in_flight = False
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()
     node.kfs_alignment_client = FakeClient()
+    node.kfs_action_client = FakeClient()
     node.status_events = []
     return node
 
@@ -90,6 +100,32 @@ def test_normalize_motion_key_accepts_supported_keys(keysym):
 
 def test_normalize_motion_key_ignores_other_keys():
     assert normalize_motion_key('space') is None
+
+
+def test_kfs_loader_config_is_resolved_from_workspace_source(tmp_path):
+    package_share = (
+        tmp_path / 'install/robot_r2_control/share/robot_r2_control')
+    installed_config = package_share / 'config/kfs_loader.yaml'
+    installed_config.parent.mkdir(parents=True)
+    installed_config.write_text('installed', encoding='utf-8')
+    source_config = (
+        tmp_path / 'src/robot_r2_control/config/kfs_loader.yaml')
+    source_config.parent.mkdir(parents=True)
+    source_config.write_text('source', encoding='utf-8')
+
+    result = resolve_kfs_loader_source_config(package_share)
+
+    assert result == str(source_config)
+
+
+def test_parameter_load_command_does_not_use_ros_daemon():
+    command = make_parameter_load_command('/workspace/config.yaml')
+
+    assert command == [
+        'ros2', 'param', 'load',
+        '--no-daemon', '--spin-time', '2.0',
+        '/kfs_loader_control', '/workspace/config.yaml',
+    ]
 
 
 def test_manual_key_components_combine_and_cancel_opposites():
@@ -171,6 +207,148 @@ def test_kfs_alignment_reports_unavailable_service():
     assert message == '/r2/align_to_kfs 服务不可用'
     assert not node.kfs_alignment_request_in_flight
     assert not node.cmd_vel_publisher.messages
+
+
+@pytest.mark.parametrize(
+    'action, expected_mode, label',
+    [
+        (
+            KfsAction.Request.LOAD,
+            KfsAction.Request.MODE_1,
+            '模式 1：前方装载（当前数量 0，装载到车上）',
+        ),
+        (
+            KfsAction.Request.LOAD,
+            KfsAction.Request.MODE_2,
+            '模式 2：前方装载（当前数量 2，留在夹爪）',
+        ),
+        (
+            KfsAction.Request.LOAD,
+            KfsAction.Request.MODE_3,
+            '模式 3：上方装载（当前数量 0，装载到车上）',
+        ),
+        (
+            KfsAction.Request.LOAD,
+            KfsAction.Request.MODE_4,
+            '模式 4：上方装载（当前数量 2，留在夹爪）',
+        ),
+        (
+            KfsAction.Request.LOAD,
+            KfsAction.Request.MODE_5,
+            '模式 5：上方装载（当前数量 1）',
+        ),
+        (KfsAction.Request.RELEASE, 0, '释放'),
+        (KfsAction.Request.POP, 0, '弹出'),
+    ],
+)
+def test_kfs_action_sends_expected_request(
+        action, expected_mode, label):
+    node = make_node_stub()
+
+    success, message = node.request_kfs_action(action, expected_mode)
+
+    assert success
+    assert message == f'已发送 KFS {label}请求'
+    request = node.kfs_action_client.requests[0]
+    assert request.action == action
+    assert request.mode == expected_mode
+    assert node.kfs_action_request_in_flight
+
+    node.kfs_action_client.future.complete(SimpleNamespace(
+        success=True,
+        message='completed',
+    ))
+    assert not node.kfs_action_request_in_flight
+    assert node.pop_status_events() == [
+        f'KFS {label}完成：completed',
+    ]
+
+
+def test_kfs_action_rejects_concurrent_request():
+    node = make_node_stub()
+    node.kfs_action_request_in_flight = True
+
+    success, message = node.request_kfs_action(
+        KfsAction.Request.LOAD,
+        KfsAction.Request.MODE_1,
+    )
+
+    assert not success
+    assert message == 'KFS 动作正在执行'
+    assert not node.kfs_action_client.requests
+
+
+def test_kfs_action_reports_unavailable_service():
+    node = make_node_stub()
+    node.kfs_action_client = FakeClient(ready=False)
+
+    success, message = node.request_kfs_action(KfsAction.Request.RELEASE)
+
+    assert not success
+    assert message == '/r2/kfs/action 服务不可用'
+    assert not node.kfs_action_request_in_flight
+
+
+@pytest.mark.parametrize(
+    'motor_name, value',
+    [
+        ('root_rotate', 1.25),
+        ('tip_rotate', -2.5),
+        ('grip', 0.145),
+    ],
+)
+def test_kfs_load_motor_feedback_is_saved(motor_name, value):
+    node = make_node_stub()
+
+    node._on_kfs_load_motor_feedback(
+        motor_name, SimpleNamespace(data=value))
+
+    generation, feedback = node.get_kfs_load_feedback_snapshot()
+    assert generation == 1
+    assert feedback[motor_name] == pytest.approx(value)
+
+
+def test_non_finite_kfs_load_motor_feedback_is_ignored():
+    node = make_node_stub()
+
+    node._on_kfs_load_motor_feedback(
+        'root_rotate', SimpleNamespace(data=math.nan))
+
+    generation, feedback = node.get_kfs_load_feedback_snapshot()
+    assert generation == 0
+    assert feedback['root_rotate'] is None
+
+
+def test_parameter_load_result_reports_all_parameters_written():
+    output = '\n'.join([
+        'Set parameter service_timeout_sec successful',
+        'Set parameter mode_1_sequence successful',
+        'Set parameter mode_2_sequence successful',
+        'Set parameter mode_3_sequence successful',
+        'Set parameter mode_4_sequence successful',
+        'Set parameter mode_5_sequence successful',
+        'Set parameter release_sequence successful',
+        'Set parameter pop_sequence successful',
+    ])
+
+    success, message = summarize_parameter_load_result(0, output, '')
+
+    assert success
+    assert message == 'KFS Load 参数写入成功：共 8 项'
+
+
+def test_parameter_load_result_reports_partial_failure():
+    stdout = 'Set parameter service_timeout_sec successful'
+    stderr = (
+        'Set parameter mode_1_sequence failed: '
+        'length must be a multiple of 6'
+    )
+
+    success, message = summarize_parameter_load_result(0, stdout, stderr)
+
+    assert not success
+    assert 'mode_1_sequence failed' in message
+    assert 'multiple of 6' in message
 
 
 def test_repeated_key_press_is_ignored_and_release_publishes_zero():

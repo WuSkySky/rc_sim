@@ -241,7 +241,7 @@
     <!-- Absorb the former -90 degree initial command into the joint frame. -->
     <origin xyz="0.30 0 0.060" rpy="0 -1.5707963267948966 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="0.0" upper="2.356194490192345" effort="100" velocity="3.0"/>
+    <limit lower="-0.2617993877991494" upper="2.356194490192345" effort="100" velocity="3.0"/>
     <dynamics damping="5.0" friction="0.5"/>
   </joint>
 
@@ -1399,7 +1399,7 @@
       <command_topic>/r2/gripper/rotate_cmd</command_topic>
       <feedback_topic>/r2/gripper/rotate_feedback</feedback_topic>
       <joint_name>gripper_root_joint</joint_name>
-      <min_position>0.0</min_position>
+      <min_position>-0.2617993877991494</min_position>
       <max_position>2.356194490192345</max_position>
     </plugin>
   </gazebo>
@@ -1426,7 +1426,6 @@
       </ros>
       <command_topic>/r2/gripper/grip_cmd</command_topic>
       <feedback_topic>/r2/gripper/grip_feedback</feedback_topic>
-      <gap_feedback_topic>/r2/gripper/grip_gap_feedback</gap_feedback_topic>
       <left_joint_name>gripper_left_joint</left_joint_name>
       <right_joint_name>gripper_right_joint</right_joint_name>
       <!-- Opening coordinate: 0.0 is closed and stroke is fully open. -->

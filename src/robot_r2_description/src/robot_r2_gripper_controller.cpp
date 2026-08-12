@@ -24,8 +24,6 @@ public:
 
     command_topic_ = sdf->Get<std::string>("command_topic", "/r2/gripper/grip_cmd").first;
     feedback_topic_ = sdf->Get<std::string>("feedback_topic", "/r2/gripper/grip_feedback").first;
-    gap_feedback_topic_ = sdf->Get<std::string>(
-      "gap_feedback_topic", "/r2/gripper/grip_gap_feedback").first;
     joint_names_[0] = sdf->Get<std::string>("left_joint_name",  "gripper_left_joint").first;
     joint_names_[1] = sdf->Get<std::string>("right_joint_name", "gripper_right_joint").first;
 
@@ -66,8 +64,6 @@ public:
       });
 
     feedback_pub_ = node_->create_publisher<std_msgs::msg::Float64>(feedback_topic_, rclcpp::QoS(10));
-    gap_feedback_pub_ = node_->create_publisher<std_msgs::msg::Float64>(
-      gap_feedback_topic_, rclcpp::QoS(10));
 
     param_cb_ = node_->add_on_set_parameters_callback(
       std::bind(&RobotR2GripperController::OnParamsChanged, this, std::placeholders::_1));
@@ -157,11 +153,6 @@ private:
     fb.data = (left_position + right_position) / 2.0;
     feedback_pub_->publish(fb);
 
-    auto gap_fb = std_msgs::msg::Float64();
-    // Subtract both 5 mm plate halves and never report a negative gap.
-    gap_fb.data = std::max(
-      0.0, left_position + right_position - 0.01);
-    gap_feedback_pub_->publish(gap_fb);
   }
 
   static double Clamp(double v, double lo, double hi) { return std::max(lo, std::min(v, hi)); }
@@ -172,13 +163,11 @@ private:
   gazebo::event::ConnectionPtr update_conn_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr command_sub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr feedback_pub_;
-  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr gap_feedback_pub_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 
   std::mutex mutex_;
   std::string command_topic_{"/r2/gripper/grip_cmd"};
   std::string feedback_topic_{"/r2/gripper/grip_feedback"};
-  std::string gap_feedback_topic_{"/r2/gripper/grip_gap_feedback"};
   std::array<std::string, 2> joint_names_{"gripper_left_joint", "gripper_right_joint"};
   double stroke_{0.209};
   double p_gain_{1000.0}, i_gain_{200.0}, d_gain_{3.0};
