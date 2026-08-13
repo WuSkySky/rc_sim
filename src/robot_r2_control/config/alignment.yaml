@@ -3,6 +3,8 @@
     pixel_tolerance: 20
     stable_cycles: 10
     default_timeout_sec: 10.0
+    # Reverse only the published lateral velocity command.
+    reverse_direction: false
 
     # PID for lateral (linear.y) alignment
     kp: 0.004

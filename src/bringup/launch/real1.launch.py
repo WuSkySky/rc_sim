@@ -111,7 +111,7 @@ def generate_launch_description():
         package='robot_r2_control',
         executable='alignment',
         name='tip_alignment',
-        parameters=[alignment_config],
+        parameters=[alignment_config, {'reverse_direction': True}],
         remappings=[
             ('/r2/alignment/detection', '/r2/tip/roi'),
             ('/r2/alignment/cmd_vel', '/r2/cmd_vel'),

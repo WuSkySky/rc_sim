@@ -228,16 +228,20 @@ ros2 service call /r2/align_to_kfs \
 有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于当前 ROI 输入相机
 的视野内。
 
-对齐容差、稳定帧数、默认超时、PID 和速度限幅均支持运行时动态修改。例如：
+对齐容差、稳定帧数、默认超时、PID、速度限幅和输出方向均支持运行时动态修改。
+`reverse_direction` 为 `true` 时只反转最终发布的 `linear.y`，不改变检测偏差、
+容差或完成判定。例如：
 
 ```bash
 ros2 param set /kfs_alignment output_limit 0.05
 ros2 param set /kfs_alignment pixel_tolerance 10
+ros2 param set /tip_alignment reverse_direction false
 ```
 
-real1 还会启动使用相同参数的 `/tip_alignment` 实例。它订阅
+real1 还会启动使用相同基础参数的 `/tip_alignment` 实例。它订阅
 `/r2/tip/roi`，通过 `/r2/align_to_tip` 提供端头对齐服务，并将速度输出映射到
-`/r2/cmd_vel`。例如：
+`/r2/cmd_vel`。该实例默认设置 `reverse_direction: true`，KFS 和仿真实例则默认
+为 `false`。例如：
 
 ```bash
 ros2 service call /r2/align_to_tip \

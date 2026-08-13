@@ -37,6 +37,7 @@ class AlignmentConfig:
     pixel_tolerance: int
     stable_cycles: int
     default_timeout_sec: float
+    reverse_direction: bool
     kp: float
     ki: float
     kd: float
@@ -95,6 +96,7 @@ class AlignmentController(Node):
         self.declare_parameter("pixel_tolerance", 5)
         self.declare_parameter("stable_cycles", 10)
         self.declare_parameter("default_timeout_sec", 10.0)
+        self.declare_parameter("reverse_direction", False)
         self.declare_parameter("kp", 0.004)
         self.declare_parameter("ki", 0.00015)
         self.declare_parameter("kd", 0.0005)
@@ -117,6 +119,8 @@ class AlignmentController(Node):
             raise ValueError("pixel_tolerance must be non-negative")
         if config.stable_cycles <= 0:
             raise ValueError("stable_cycles must be greater than zero")
+        if not isinstance(config.reverse_direction, bool):
+            raise ValueError("reverse_direction must be a boolean")
         if (
             not math.isfinite(config.default_timeout_sec)
             or config.default_timeout_sec <= 0.0
@@ -146,6 +150,7 @@ class AlignmentController(Node):
             pixel_tolerance=values["pixel_tolerance"],
             stable_cycles=values["stable_cycles"],
             default_timeout_sec=values["default_timeout_sec"],
+            reverse_direction=values["reverse_direction"],
             kp=values["kp"],
             ki=values["ki"],
             kd=values["kd"],
@@ -389,6 +394,8 @@ class AlignmentController(Node):
 
             # Positive image offset means the target is to the right.
             output = self._pid_update(-float(offset), dt, config)
+            if config.reverse_direction:
+                output = -output
             cmd = Twist()
             cmd.linear.y = output
             self._pub_cmd.publish(cmd)

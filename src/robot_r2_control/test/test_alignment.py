@@ -97,6 +97,17 @@ def publish_detection(harness, valid, offset=0):
     harness.detections.publish(message)
 
 
+def wait_for_nonzero_command(harness, start_index, offset=30):
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        publish_detection(harness, valid=True, offset=offset)
+        for command in harness.commands[start_index:]:
+            if command.linear.y != 0.0:
+                return command.linear.y
+        time.sleep(0.02)
+    pytest.fail('alignment did not publish a non-zero command')
+
+
 def test_alignment_succeeds_after_stable_detections(alignment_harness):
     future = send_request(alignment_harness, tolerance=2.0, timeout=1.0)
 
@@ -157,6 +168,7 @@ def test_pid_output_and_integral_are_limited():
         pixel_tolerance=1,
         stable_cycles=2,
         default_timeout_sec=1.0,
+        reverse_direction=False,
         kp=1.0,
         ki=1.0,
         kd=0.0,
@@ -174,6 +186,7 @@ def test_pid_output_and_integral_are_limited():
         ('pixel_tolerance', -1),
         ('stable_cycles', 0),
         ('default_timeout_sec', 0.0),
+        ('reverse_direction', 1),
         ('integral_limit', -0.1),
         ('output_limit', 0.0),
     ],
@@ -183,6 +196,7 @@ def test_invalid_alignment_config_is_rejected(field, value):
         'pixel_tolerance': 1,
         'stable_cycles': 2,
         'default_timeout_sec': 1.0,
+        'reverse_direction': False,
         'kp': 0.1,
         'ki': 0.0,
         'kd': 0.0,
@@ -199,11 +213,51 @@ def test_dynamic_parameter_update_is_validated(alignment_harness):
     rejected = alignment_harness.controller.set_parameters([
         Parameter('stable_cycles', value=0),
     ])[0]
+    rejected_direction = alignment_harness.controller._on_parameters_changed([
+        Parameter('reverse_direction', value=1),
+    ])
     accepted = alignment_harness.controller.set_parameters([
         Parameter('output_limit', value=0.05),
     ])[0]
 
     assert not rejected.successful
+    assert not rejected_direction.successful
     assert accepted.successful
     assert alignment_harness.controller._config.stable_cycles == 2
+    assert not alignment_harness.controller._config.reverse_direction
     assert alignment_harness.controller._config.output_limit == 0.05
+
+
+def test_reverse_direction_changes_the_next_control_output(
+    alignment_harness,
+):
+    results = alignment_harness.controller.set_parameters([
+        Parameter('kp', value=0.001),
+        Parameter('ki', value=0.0),
+        Parameter('kd', value=0.0),
+        Parameter('output_limit', value=0.1),
+    ])
+    assert all(result.successful for result in results)
+    future = send_request(alignment_harness, timeout=1.0)
+
+    original_output = wait_for_nonzero_command(
+        alignment_harness,
+        start_index=0,
+    )
+    result = alignment_harness.controller.set_parameters([
+        Parameter('reverse_direction', value=True),
+    ])[0]
+    assert result.successful
+    start_index = len(alignment_harness.commands)
+    reversed_output = wait_for_nonzero_command(
+        alignment_harness,
+        start_index=start_index,
+    )
+
+    assert original_output == pytest.approx(-0.03)
+    assert reversed_output == pytest.approx(0.03)
+    deadline = time.monotonic() + 1.0
+    while not future.done() and time.monotonic() < deadline:
+        publish_detection(alignment_harness, valid=True, offset=0)
+        time.sleep(0.02)
+    assert future.done()
