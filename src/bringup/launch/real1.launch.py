@@ -19,7 +19,7 @@ def generate_launch_description():
     odin_data_postprocess_pkg = get_package_share_directory(
         'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
-    controller_pkg = get_package_share_directory('robot_r2_controller')
+    control_pkg = get_package_share_directory('robot_r2_control')
     detect_pkg = get_package_share_directory('robot_r2_detect')
     fastdds_profile = os.path.join(
         interfaces_pkg,
@@ -90,15 +90,33 @@ def generate_launch_description():
         output='screen',
     )
 
-    kfs_alignment_config = os.path.join(
-        controller_pkg,
+    alignment_config = os.path.join(
+        control_pkg,
         'config',
-        'kfs_alignment.yaml',
+        'alignment.yaml',
     )
     kfs_alignment = Node(
-        package='robot_r2_controller',
-        executable='kfs_alignment',
-        parameters=[kfs_alignment_config],
+        package='robot_r2_control',
+        executable='alignment',
+        name='kfs_alignment',
+        parameters=[alignment_config],
+        remappings=[
+            ('/r2/alignment/detection', '/r2/kfs/roi'),
+            ('/r2/alignment/cmd_vel', '/r2/cmd_vel'),
+            ('/r2/alignment/align', '/r2/align_to_kfs'),
+        ],
+        output='screen',
+    )
+    tip_alignment = Node(
+        package='robot_r2_control',
+        executable='alignment',
+        name='tip_alignment',
+        parameters=[alignment_config],
+        remappings=[
+            ('/r2/alignment/detection', '/r2/tip/roi'),
+            ('/r2/alignment/cmd_vel', '/r2/cmd_vel'),
+            ('/r2/alignment/align', '/r2/align_to_tip'),
+        ],
         output='screen',
     )
 
@@ -141,5 +159,6 @@ def generate_launch_description():
         control_launch,
         serial_bridge,
         kfs_alignment,
+        tip_alignment,
         led_detect,
     ])

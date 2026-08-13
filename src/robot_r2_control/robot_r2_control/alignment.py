@@ -23,13 +23,13 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
-from robot_r2_interfaces.msg import KfsRoiDetection
-from robot_r2_interfaces.srv import AlignToKFS
+from robot_r2_interfaces.msg import AlignmentDetection
+from robot_r2_interfaces.srv import Align
 
 
-ROI_TOPIC = "/r2/kfs/roi"
-CMD_VEL_TOPIC = "/r2/cmd_vel"
-ALIGN_SERVICE = "/r2/align_to_kfs"
+DETECTION_TOPIC = "/r2/alignment/detection"
+CMD_VEL_TOPIC = "/r2/alignment/cmd_vel"
+ALIGN_SERVICE = "/r2/alignment/align"
 
 
 @dataclass(frozen=True)
@@ -44,11 +44,11 @@ class AlignmentConfig:
     output_limit: float
 
 
-class KfsAlignmentController(Node):
-    """Run only the alignment control loop; vision lives in kfs_roi."""
+class AlignmentController(Node):
+    """Align the chassis from generic image-space target feedback."""
 
     def __init__(self) -> None:
-        super().__init__("kfs_alignment")
+        super().__init__("alignment")
         self.service_lock = threading.Lock()
         self.state_condition = threading.Condition()
         self._config_lock = threading.Lock()
@@ -70,9 +70,9 @@ class KfsAlignmentController(Node):
         )
 
         self._subscription = self.create_subscription(
-            KfsRoiDetection,
-            ROI_TOPIC,
-            self._on_roi,
+            AlignmentDetection,
+            DETECTION_TOPIC,
+            self._on_detection,
             image_qos,
             callback_group=self._feedback_callback_group,
         )
@@ -82,7 +82,7 @@ class KfsAlignmentController(Node):
             10,
         )
         self._srv = self.create_service(
-            AlignToKFS,
+            Align,
             ALIGN_SERVICE,
             self._handle_align,
             callback_group=self._service_callback_group,
@@ -187,7 +187,7 @@ class KfsAlignmentController(Node):
             self._config = candidate
         return SetParametersResult(successful=True)
 
-    def _on_roi(self, msg: KfsRoiDetection) -> None:
+    def _on_detection(self, msg: AlignmentDetection) -> None:
         received_at = time.monotonic()
         with self.state_condition:
             if not self._alignment_active:
@@ -335,7 +335,7 @@ class KfsAlignmentController(Node):
             if time.monotonic() >= deadline:
                 if not saw_detection:
                     message = (
-                        "Alignment timeout: no KFS ROI detected"
+                        "Alignment timeout: no target detected"
                     )
                 elif last_offset is None:
                     message = "Alignment timeout: target lost"
@@ -412,7 +412,7 @@ class KfsAlignmentController(Node):
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
-    node = KfsAlignmentController()
+    node = AlignmentController()
     executor = MultiThreadedExecutor(num_threads=3)
     executor.add_node(node)
     try:

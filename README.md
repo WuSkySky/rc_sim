@@ -56,7 +56,7 @@ GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘�
 两个热点属于独立接入点，不用于替代两台 Jetson 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责控制、串口、KFS 对齐、Odin 后摄像头及 LED 检测：
+Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐、Odin 后摄像头及 LED 检测：
 
 ```bash
 source install/setup.bash
@@ -111,7 +111,8 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 重置或设置里程计位姿 | `/r2/set_base_pose`          | `robot_r2_interfaces/srv/SetBasePose`         | 仅实机   |
 | 四轮抬升       | `/r2/lift/set`               | `robot_r2_interfaces/srv/SetLift`             | 仿真、实机 |
 | 跨越台阶       | `/r2/step_traverse`          | `robot_r2_interfaces/srv/TraverseStep`        | 仿真、实机 |
-| KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/AlignToKFS`          | 仿真、实机 |
+| KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/Align`               | 仿真、实机 |
+| 端头视觉对齐    | `/r2/align_to_tip`           | `robot_r2_interfaces/srv/Align`               | 仅实机   |
 | KFS 类型检测   | `/r2/detection/{front,left,right}/get_type` | `robot_r2_interfaces/srv/GetKfsType` | 仅实机 |
 | LED 状态检测   | `/r2/led_detection/detect`   | `robot_r2_interfaces/srv/DetectLed`           | 仿真、实机 |
 | KFS 装载、释放、弹出 | `/r2/kfs/action`             | `robot_r2_interfaces/srv/KfsAction`           | 仿真、实机 |
@@ -205,11 +206,11 @@ KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。�
 `/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、左右边界、左右
 边界列的最下方掩膜点和横向中心偏差，不包含图像像素：
 
-使用 `kfs_alignment.yaml` 中的默认容差和超时时间执行对齐：
+使用 `alignment.yaml` 中的默认容差和超时时间执行对齐：
 
 ```bash
 ros2 service call /r2/align_to_kfs \
-  robot_r2_interfaces/srv/AlignToKFS \
+  robot_r2_interfaces/srv/Align \
   "{pixel_tolerance: 0.0, timeout_sec: 0.0}"
 ```
 
@@ -217,12 +218,12 @@ ros2 service call /r2/align_to_kfs \
 
 ```bash
 ros2 service call /r2/align_to_kfs \
-  robot_r2_interfaces/srv/AlignToKFS \
+  robot_r2_interfaces/srv/Align \
   "{pixel_tolerance: 20.0, timeout_sec: 10.0}"
 ```
 
 `pixel_tolerance` 是允许的图像横向像素误差，`timeout_sec` 是整个对齐过程的
-最大等待时间。两项都填写 `0.0` 时使用 `kfs_alignment.yaml` 中的默认值。
+最大等待时间。两项都填写 `0.0` 时使用 `alignment.yaml` 中的默认值。
 返回值中的 `success` 表示是否连续稳定达到容差，`final_offset_x` 是最后一次
 有效检测的横向像素误差。调用前应确保目标红色或蓝色区域位于当前 ROI 输入相机
 的视野内。
@@ -233,6 +234,20 @@ ros2 service call /r2/align_to_kfs \
 ros2 param set /kfs_alignment output_limit 0.05
 ros2 param set /kfs_alignment pixel_tolerance 10
 ```
+
+real1 还会启动使用相同参数的 `/tip_alignment` 实例。它订阅
+`/r2/tip/roi`，通过 `/r2/align_to_tip` 提供端头对齐服务，并将速度输出映射到
+`/r2/cmd_vel`。例如：
+
+```bash
+ros2 service call /r2/align_to_tip \
+  robot_r2_interfaces/srv/Align \
+  "{pixel_tolerance: 0.0, timeout_sec: 0.0}"
+```
+
+端头检测上游应在 `/r2/tip/roi` 发布
+`robot_r2_interfaces/msg/AlignmentDetection`。KFS ROI 节点在
+`/r2/kfs/roi` 发布相同的通用检测类型。
 
 参数修改会整体校验后原子生效；无效值会被拒绝。服务请求中的容差或超时为
 `0.0` 时，正在执行的任务会使用对应参数的最新值；请求中显式指定的正数不受

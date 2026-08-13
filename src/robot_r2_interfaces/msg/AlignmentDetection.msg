@@ -1,4 +1,4 @@
-# Lightweight KFS region-of-interest result from one camera frame.
+# Lightweight alignment-target detection from one camera frame.
 # Pixels remain on the source camera/debug topics and are not transported here.
 std_msgs/Header header
 uint64 sequence

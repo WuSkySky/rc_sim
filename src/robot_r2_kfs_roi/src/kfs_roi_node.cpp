@@ -4,7 +4,7 @@
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <robot_r2_interfaces/msg/camera_frame.hpp>
-#include <robot_r2_interfaces/msg/kfs_roi_detection.hpp>
+#include <robot_r2_interfaces/msg/alignment_detection.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/header.hpp>
 
@@ -28,7 +28,7 @@ namespace robot_r2_kfs_roi {
 namespace {
 
 using CameraFrame = robot_r2_interfaces::msg::CameraFrame;
-using KfsRoiDetection = robot_r2_interfaces::msg::KfsRoiDetection;
+using AlignmentDetection = robot_r2_interfaces::msg::AlignmentDetection;
 
 constexpr char kInputTopic[] = "/r2/front_camera/image_raw";
 constexpr char kRoiTopic[] = "/r2/kfs/roi";
@@ -311,7 +311,7 @@ class KfsRoiNode final : public rclcpp::Node {
     validate_node_config(config_);
 
     const auto image_qos = rclcpp::SensorDataQoS().keep_last(1);
-    roi_publisher_ = create_publisher<KfsRoiDetection>(kRoiTopic, image_qos);
+    roi_publisher_ = create_publisher<AlignmentDetection>(kRoiTopic, image_qos);
     debug_publisher_ =
         create_publisher<sensor_msgs::msg::Image>(kDebugTopic, image_qos);
     subscription_ = create_subscription<CameraFrame>(
@@ -446,10 +446,10 @@ class KfsRoiNode final : public rclcpp::Node {
     }
   }
 
-  static KfsRoiDetection make_roi_message(const CameraFrame &source,
-                                          const cv::Mat &image,
-                                          const KfsRoiResult &result) {
-    KfsRoiDetection message;
+  static AlignmentDetection make_roi_message(const CameraFrame &source,
+                                               const cv::Mat &image,
+                                               const KfsRoiResult &result) {
+    AlignmentDetection message;
     message.header = make_header(source);
     message.sequence = source.sequence;
     message.valid = result.valid;
@@ -470,7 +470,7 @@ class KfsRoiNode final : public rclcpp::Node {
 
   std::mutex config_mutex_;
   NodeConfig config_;
-  rclcpp::Publisher<KfsRoiDetection>::SharedPtr roi_publisher_;
+  rclcpp::Publisher<AlignmentDetection>::SharedPtr roi_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_publisher_;
   rclcpp::Subscription<CameraFrame>::SharedPtr subscription_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr

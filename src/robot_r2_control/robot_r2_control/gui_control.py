@@ -15,7 +15,13 @@ from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
 from robot_r2_interfaces.msg import LiftCommand
-from robot_r2_interfaces.srv import AlignToKFS, KfsAction, MoveToPose
+from robot_r2_interfaces.srv import (
+    Align,
+    KfsAction,
+    MoveToPose,
+    SetBasePose,
+    TraverseStep,
+)
 from std_msgs.msg import Float64
 
 
@@ -32,6 +38,7 @@ KFS_LOADER_PARAMETER_NAMES = {
 }
 KFS_LOADER_SOURCE_RELATIVE_PATH = Path(
     'src/robot_r2_control/config/kfs_loader.yaml')
+RELOCALIZATION_FIELDS = ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
 
 
 def normalize_motion_key(keysym):
@@ -147,6 +154,22 @@ def relative_pose_goal(current_pose, forward, left, yaw_delta):
     )
 
 
+def parse_relocalization_values(raw_values):
+    if len(raw_values) != len(RELOCALIZATION_FIELDS):
+        raise ValueError('重定位需要 6 个参数')
+
+    values = []
+    for name, raw_value in zip(RELOCALIZATION_FIELDS, raw_values):
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{name} 必须是数值') from exc
+        if not math.isfinite(value):
+            raise ValueError(f'{name} 必须是有限数值')
+        values.append(value)
+    return tuple(values)
+
+
 def summarize_parameter_load_result(returncode, stdout, stderr):
     output_lines = [
         line.strip()
@@ -195,6 +218,8 @@ class GuiControlNode(Node):
     MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
     KFS_ALIGNMENT_SERVICE = '/r2/align_to_kfs'
     KFS_ACTION_SERVICE = '/r2/kfs/action'
+    SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
+    STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
 
     KFS_LOAD_MOTOR_FEEDBACK_TOPICS = {
@@ -266,6 +291,8 @@ class GuiControlNode(Node):
         self.velocity_test_deadline = None
         self.pose_request_in_flight = False
         self.kfs_alignment_request_in_flight = False
+        self.relocalization_request_in_flight = False
+        self.step_test_request_in_flight = False
         self.kfs_action_request_in_flight = False
         self.kfs_parameter_load_in_flight = False
         self.kfs_loader_config_path = resolve_kfs_loader_source_config(
@@ -330,9 +357,13 @@ class GuiControlNode(Node):
         self.move_client = self.create_client(
             MoveToPose, self.MOVE_TO_POSE_SERVICE)
         self.kfs_alignment_client = self.create_client(
-            AlignToKFS, self.KFS_ALIGNMENT_SERVICE)
+            Align, self.KFS_ALIGNMENT_SERVICE)
         self.kfs_action_client = self.create_client(
             KfsAction, self.KFS_ACTION_SERVICE)
+        self.set_base_pose_client = self.create_client(
+            SetBasePose, self.SET_BASE_POSE_SERVICE)
+        self.step_traverse_client = self.create_client(
+            TraverseStep, self.STEP_TRAVERSE_SERVICE)
         self.motion_timer = self.create_timer(
             1.0 / self.motion_config['motion_publish_rate'],
             self._publish_motion_tick,
@@ -586,6 +617,11 @@ class GuiControlNode(Node):
                 return False, '位置伺服正在执行'
             if self.kfs_alignment_request_in_flight:
                 return False, 'KFS 对齐正在执行'
+            if (
+                self.relocalization_request_in_flight or
+                self.step_test_request_in_flight
+            ):
+                return False, '底盘操作正在执行'
             if self.current_pose is None:
                 return False, '尚未收到 /r2/pose_feedback'
             if not self.move_client.service_is_ready():
@@ -653,6 +689,11 @@ class GuiControlNode(Node):
                 return False, 'KFS 对齐正在执行'
             if self.pose_request_in_flight:
                 return False, '位置伺服正在执行'
+            if (
+                self.relocalization_request_in_flight or
+                self.step_test_request_in_flight
+            ):
+                return False, '底盘操作正在执行'
             if not self.kfs_alignment_client.service_is_ready():
                 return False, '/r2/align_to_kfs 服务不可用'
 
@@ -666,7 +707,7 @@ class GuiControlNode(Node):
             self.kfs_alignment_request_in_flight = True
 
         self.cmd_vel_publisher.publish(Twist())
-        request = AlignToKFS.Request()
+        request = Align.Request()
         request.pixel_tolerance = pixel_tolerance
         request.timeout_sec = timeout_sec
         try:
@@ -697,6 +738,129 @@ class GuiControlNode(Node):
                 f'{response.final_offset_x} px')
         else:
             self._queue_status(f'KFS 对齐失败：{response.message}')
+
+    @staticmethod
+    def _make_set_base_pose_request(values):
+        request = SetBasePose.Request()
+        for name, value in zip(RELOCALIZATION_FIELDS, values):
+            setattr(request, name, value)
+        return request
+
+    def request_relocalization(self, raw_values):
+        try:
+            values = parse_relocalization_values(raw_values)
+        except ValueError as exc:
+            return False, f'重定位参数无效：{exc}'
+
+        with self.state_lock:
+            if self._chassis_service_in_flight_locked():
+                return False, '底盘操作正在执行'
+            if not self.set_base_pose_client.service_is_ready():
+                return False, '/r2/set_base_pose 服务不可用'
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.relocalization_request_in_flight = True
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = self._make_set_base_pose_request(values)
+        try:
+            future = self.set_base_pose_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.relocalization_request_in_flight = False
+            return False, f'重定位请求发送失败：{exc}'
+        future.add_done_callback(self._on_relocalization_complete)
+        return True, (
+            f'已发送重定位请求：x={values[0]:.3f} m，'
+            f'y={values[1]:.3f} m，z={values[2]:.3f} m，'
+            f'roll={values[3]:.3f} rad，'
+            f'pitch={values[4]:.3f} rad，yaw={values[5]:.3f} rad'
+        )
+
+    def _on_relocalization_complete(self, future):
+        with self.state_lock:
+            self.relocalization_request_in_flight = False
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._queue_status(f'重定位调用异常：{exc}')
+            return
+        if response is None:
+            self._queue_status('重定位调用失败：无响应')
+        elif response.success:
+            self._queue_status(f'重定位完成：{response.message}')
+        else:
+            self._queue_status(f'重定位失败：{response.message}')
+
+    def request_up_step_test(self):
+        with self.state_lock:
+            if self._chassis_service_in_flight_locked():
+                return False, '底盘操作正在执行'
+            if not self.set_base_pose_client.service_is_ready():
+                return False, '/r2/set_base_pose 服务不可用'
+            if not self.step_traverse_client.service_is_ready():
+                return False, '/r2/step_traverse 服务不可用'
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.step_test_request_in_flight = True
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = self._make_set_base_pose_request((0.0,) * 6)
+        try:
+            future = self.set_base_pose_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.step_test_request_in_flight = False
+            return False, f'跨越测试重定位请求发送失败：{exc}'
+        future.add_done_callback(self._on_step_test_relocalization_complete)
+        return True, '跨越测试：正在重定位到原点'
+
+    def _on_step_test_relocalization_complete(self, future):
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_step_test(
+                f'跨越测试重定位调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_step_test('跨越测试重定位失败：无响应')
+            return
+        if not response.success:
+            self._finish_step_test(
+                f'跨越测试重定位失败：{response.message}')
+            return
+
+        self._queue_status('跨越测试：重定位完成，正在上台阶')
+        request = TraverseStep.Request()
+        request.direction = TraverseStep.Request.UP
+        request.distance_to_step = 0.0
+        try:
+            step_future = self.step_traverse_client.call_async(request)
+        except Exception as exc:
+            self._finish_step_test(f'上台阶请求发送失败：{exc}')
+            return
+        step_future.add_done_callback(self._on_up_step_test_complete)
+
+    def _on_up_step_test_complete(self, future):
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_step_test(f'上台阶调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_step_test('上台阶失败：无响应')
+        elif response.success:
+            self._finish_step_test(
+                f'上台阶测试完成：{response.message}')
+        else:
+            self._finish_step_test(f'上台阶失败：{response.message}')
+
+    def _finish_step_test(self, message):
+        with self.state_lock:
+            self.step_test_request_in_flight = False
+        self._queue_status(message)
 
     def request_kfs_action(self, action, mode=0):
         if action == KfsAction.Request.LOAD:
@@ -765,7 +929,9 @@ class GuiControlNode(Node):
     def _chassis_service_in_flight_locked(self):
         return (
             self.pose_request_in_flight or
-            self.kfs_alignment_request_in_flight
+            self.kfs_alignment_request_in_flight or
+            self.relocalization_request_in_flight or
+            self.step_test_request_in_flight
         )
 
     def is_pose_request_in_flight(self):
@@ -924,6 +1090,10 @@ class GuiControlApp:
             name: tk.StringVar(value='实际反馈：尚未收到')
             for name in self.node.KFS_LOAD_MOTOR_FEEDBACK_TOPICS
         }
+        self.relocalization_values = {
+            name: tk.StringVar(value='0.0')
+            for name in RELOCALIZATION_FIELDS
+        }
         self.status_text = tk.StringVar(value='已就绪')
 
         self.last_lift_command = None
@@ -937,6 +1107,8 @@ class GuiControlApp:
         self.chassis_buttons = []
         self.velocity_test_buttons = {}
         self.pose_test_buttons = {}
+        self.relocalization_button = None
+        self.up_step_test_button = None
         self.kfs_test_button = None
         self.kfs_action_buttons = []
         self.kfs_parameter_load_button = None
@@ -988,9 +1160,59 @@ class GuiControlApp:
             self.pose_test_buttons[kind] = button
             self.chassis_buttons.append(button)
 
+        relocalization_frame = ttk.LabelFrame(
+            chassis_column, text='重定位', padding=12)
+        relocalization_frame.grid(
+            row=2, column=0, sticky='ew', pady=(10, 0))
+        field_units = {
+            'x': 'm',
+            'y': 'm',
+            'z': 'm',
+            'roll': 'rad',
+            'pitch': 'rad',
+            'yaw': 'rad',
+        }
+        for index, name in enumerate(RELOCALIZATION_FIELDS):
+            row = index // 3
+            column = (index % 3) * 2
+            label = ttk.Label(
+                relocalization_frame,
+                text=f'{name} ({field_units[name]})',
+            )
+            label.grid(
+                row=row, column=column, sticky='e',
+                padx=(0 if column == 0 else 8, 4), pady=3,
+            )
+            entry = ttk.Entry(
+                relocalization_frame,
+                textvariable=self.relocalization_values[name],
+                width=9,
+            )
+            entry.grid(row=row, column=column + 1, sticky='ew', pady=3)
+        self.relocalization_button = ttk.Button(
+            relocalization_frame,
+            text='重定位',
+            command=self._start_relocalization,
+        )
+        self.relocalization_button.grid(
+            row=2, column=0, columnspan=6, sticky='ew', pady=(8, 0))
+        self.chassis_buttons.append(self.relocalization_button)
+
+        traverse_test_frame = ttk.LabelFrame(
+            chassis_column, text='跨越测试', padding=12)
+        traverse_test_frame.grid(
+            row=3, column=0, sticky='ew', pady=(10, 0))
+        self.up_step_test_button = ttk.Button(
+            traverse_test_frame,
+            text='上一个台阶（先重定位，距离 0.0 m）',
+            command=self._start_up_step_test,
+        )
+        self.up_step_test_button.grid(row=0, column=0, sticky='ew')
+        self.chassis_buttons.append(self.up_step_test_button)
+
         kfs_test_frame = ttk.LabelFrame(
             chassis_column, text='KFS 测试', padding=12)
-        kfs_test_frame.grid(row=2, column=0, sticky='ew', pady=(10, 0))
+        kfs_test_frame.grid(row=4, column=0, sticky='ew', pady=(10, 0))
         self.kfs_test_button = ttk.Button(
             kfs_test_frame,
             command=self._start_kfs_alignment_test,
@@ -1141,6 +1363,8 @@ class GuiControlApp:
         return slider
 
     def _on_key_press(self, event):
+        if isinstance(event.widget, (tk.Entry, ttk.Entry)):
+            return
         key = normalize_motion_key(event.keysym)
         if key is not None and self.node.press_manual_key(key):
             self.status_text.set(f'底盘键盘控制：{key.upper()} 按下')
@@ -1182,6 +1406,18 @@ class GuiControlApp:
 
     def _start_kfs_alignment_test(self):
         _, message = self.node.request_kfs_alignment()
+        self.status_text.set(message)
+
+    def _start_relocalization(self):
+        raw_values = tuple(
+            self.relocalization_values[name].get()
+            for name in RELOCALIZATION_FIELDS
+        )
+        _, message = self.node.request_relocalization(raw_values)
+        self.status_text.set(message)
+
+    def _start_up_step_test(self):
+        _, message = self.node.request_up_step_test()
         self.status_text.set(message)
 
     def _start_kfs_action_test(self, action, mode):

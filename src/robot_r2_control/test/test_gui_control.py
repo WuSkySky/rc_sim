@@ -11,12 +11,13 @@ from robot_r2_control.gui_control import (
     motion_control_text,
     normalize_angle,
     normalize_motion_key,
+    parse_relocalization_values,
     relative_pose_goal,
     resolve_kfs_loader_source_config,
     summarize_parameter_load_result,
     velocity_test_twist_components,
 )
-from robot_r2_interfaces.srv import KfsAction
+from robot_r2_interfaces.srv import KfsAction, TraverseStep
 
 
 class FakePublisher:
@@ -69,11 +70,15 @@ def make_node_stub():
     node.velocity_test_deadline = None
     node.pose_request_in_flight = False
     node.kfs_alignment_request_in_flight = False
+    node.relocalization_request_in_flight = False
+    node.step_test_request_in_flight = False
     node.kfs_action_request_in_flight = False
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()
     node.kfs_alignment_client = FakeClient()
     node.kfs_action_client = FakeClient()
+    node.set_base_pose_client = FakeClient()
+    node.step_traverse_client = FakeClient()
     node.status_events = []
     return node
 
@@ -207,6 +212,159 @@ def test_kfs_alignment_reports_unavailable_service():
     assert message == '/r2/align_to_kfs 服务不可用'
     assert not node.kfs_alignment_request_in_flight
     assert not node.cmd_vel_publisher.messages
+
+
+def test_relocalization_sends_six_pose_values():
+    node = make_node_stub()
+
+    success, message = node.request_relocalization(
+        ('1.5', '-0.5', '0.1', '0.2', '-0.3', '1.57'))
+
+    assert success
+    assert 'x=1.500 m' in message
+    request = node.set_base_pose_client.requests[0]
+    assert (
+        request.x,
+        request.y,
+        request.z,
+        request.roll,
+        request.pitch,
+        request.yaw,
+    ) == pytest.approx((1.5, -0.5, 0.1, 0.2, -0.3, 1.57))
+    assert node.relocalization_request_in_flight
+
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    assert not node.relocalization_request_in_flight
+    assert node.pop_status_events() == [
+        '重定位完成：base_link pose updated',
+    ]
+
+
+def test_relocalization_reports_service_failure():
+    node = make_node_stub()
+
+    success, _ = node.request_relocalization(('0',) * 6)
+    assert success
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=False,
+        message='failed to read current base_link pose',
+    ))
+
+    assert not node.relocalization_request_in_flight
+    assert node.pop_status_events() == [
+        '重定位失败：failed to read current base_link pose',
+    ]
+
+
+def test_relocalization_reports_unavailable_service():
+    node = make_node_stub()
+    node.set_base_pose_client = FakeClient(ready=False)
+
+    success, message = node.request_relocalization(('0',) * 6)
+
+    assert not success
+    assert message == '/r2/set_base_pose 服务不可用'
+    assert not node.set_base_pose_client.requests
+
+
+@pytest.mark.parametrize(
+    'values, error',
+    [
+        (('', '0', '0', '0', '0', '0'), 'x 必须是数值'),
+        (('nan', '0', '0', '0', '0', '0'), 'x 必须是有限数值'),
+        (('0', '0', '0', '0', 'inf', '0'), 'pitch 必须是有限数值'),
+    ],
+)
+def test_invalid_relocalization_values_are_rejected(values, error):
+    node = make_node_stub()
+
+    success, message = node.request_relocalization(values)
+
+    assert not success
+    assert error in message
+    assert not node.set_base_pose_client.requests
+
+
+def test_up_step_test_relocalizes_then_traverses_at_zero_distance():
+    node = make_node_stub()
+
+    success, message = node.request_up_step_test()
+
+    assert success
+    assert message == '跨越测试：正在重定位到原点'
+    request = node.set_base_pose_client.requests[0]
+    assert (
+        request.x,
+        request.y,
+        request.z,
+        request.roll,
+        request.pitch,
+        request.yaw,
+    ) == (0.0,) * 6
+    assert node.step_test_request_in_flight
+
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    step_request = node.step_traverse_client.requests[0]
+    assert step_request.direction == TraverseStep.Request.UP
+    assert step_request.distance_to_step == 0.0
+    assert node.step_test_request_in_flight
+
+    node.step_traverse_client.future.complete(SimpleNamespace(
+        success=True,
+        message='up step traversal completed',
+    ))
+    assert not node.step_test_request_in_flight
+    assert node.pop_status_events() == [
+        '跨越测试：重定位完成，正在上台阶',
+        '上台阶测试完成：up step traversal completed',
+    ]
+
+
+def test_up_step_test_stops_when_relocalization_fails():
+    node = make_node_stub()
+
+    success, _ = node.request_up_step_test()
+    assert success
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=False,
+        message='failed to read current base_link pose',
+    ))
+
+    assert not node.step_traverse_client.requests
+    assert not node.step_test_request_in_flight
+    assert node.pop_status_events() == [
+        '跨越测试重定位失败：failed to read current base_link pose',
+    ]
+
+
+def test_up_step_test_reports_step_failure_and_releases_busy_state():
+    node = make_node_stub()
+
+    success, _ = node.request_up_step_test()
+    assert success
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    node.step_traverse_client.future.complete(SimpleNamespace(
+        success=False,
+        message='Pose feedback unavailable',
+    ))
+
+    assert not node.step_test_request_in_flight
+    assert node.pop_status_events()[-1] == (
+        '上台阶失败：Pose feedback unavailable')
+
+
+def test_parse_relocalization_values_requires_six_values():
+    with pytest.raises(ValueError, match='需要 6 个参数'):
+        parse_relocalization_values(('0',) * 5)
 
 
 @pytest.mark.parametrize(

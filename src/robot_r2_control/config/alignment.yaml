@@ -1,4 +1,4 @@
-kfs_alignment:
+/**:
   ros__parameters:
     pixel_tolerance: 20
     stable_cycles: 10

@@ -12,7 +12,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/KfsRawBox.msg"
   "msg/KfsRawDetections.msg"
   "msg/KfsProcessedDetection.msg"
-  "msg/KfsRoiDetection.msg"
+  "msg/AlignmentDetection.msg"
   "msg/LedDetection.msg"
   "msg/TargetDetection.msg"
   "srv/MoveToPose.srv"
@@ -26,7 +26,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StageTwoPointOne.srv"
   "srv/StageTwoPointTwo.srv"
   "srv/TraverseStep.srv"
-  "srv/AlignToKFS.srv"
+  "srv/Align.srv"
   DEPENDENCIES std_msgs
 )
 

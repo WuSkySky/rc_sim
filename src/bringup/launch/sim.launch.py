@@ -19,7 +19,7 @@ def generate_launch_description():
     robot_pkg = get_package_share_directory('robot_r2_description')
     robot_prefix = get_package_prefix('robot_r2_description')
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
-    controller_pkg = get_package_share_directory('robot_r2_controller')
+    control_pkg = get_package_share_directory('robot_r2_control')
     detect_pkg = get_package_share_directory('robot_r2_detect')
     roi_pkg = get_package_share_directory('robot_r2_kfs_roi')
     fastdds_profile = os.path.join(
@@ -67,15 +67,21 @@ def generate_launch_description():
         output='screen',
     )
 
-    kfs_alignment_config = os.path.join(
-        controller_pkg,
+    alignment_config = os.path.join(
+        control_pkg,
         'config',
-        'kfs_alignment.yaml',
+        'alignment.yaml',
     )
     kfs_alignment = Node(
-        package='robot_r2_controller',
-        executable='kfs_alignment',
-        parameters=[kfs_alignment_config],
+        package='robot_r2_control',
+        executable='alignment',
+        name='kfs_alignment',
+        parameters=[alignment_config],
+        remappings=[
+            ('/r2/alignment/detection', '/r2/kfs/roi'),
+            ('/r2/alignment/cmd_vel', '/r2/cmd_vel'),
+            ('/r2/alignment/align', '/r2/align_to_kfs'),
+        ],
         output='screen',
     )
 
