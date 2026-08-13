@@ -9,16 +9,24 @@
 默认模型资源为：
 
 ```text
-package://robot_r2_detect/model/duantou.pt
+package://robot_r2_detect/model/duantou_fp16.engine
 ```
 
-对应源码位置为 `src/robot_r2_detect/model/duantou.pt`。模型文件需要在构建
-`robot_r2_detect` 前放入该目录，构建后会安装到包的 share 目录。节点不会在
-机器人运行时自动联网下载模型。也可以修改
+对应源码位置为 `src/robot_r2_detect/model/duantou_fp16.engine`。该 engine 使用
+固定 `640x640`、batch 1、FP16，并在目标 Jetson 上由 `duantou.pt` 导出。
+TensorRT engine 与 GPU 架构、TensorRT 和 CUDA 版本相关，必须在实际部署设备
+上导出。模型文件需要在构建 `robot_r2_detect` 前放入该目录，构建后会安装到
+包的 share 目录。节点不会在机器人运行时自动导出或联网下载模型。也可以修改
 `config/yolo_target_detector.yaml` 中的 `model.path`，指定绝对路径。
 
-模型必须是目标检测模型，不能使用分类模型。官方 COCO `yolo11n.pt` 可用于
-COCO 类别；自定义目标需要使用基于 YOLO11n 训练得到的权重。
+在目标 Jetson 上重新导出：
+
+```bash
+python3 src/robot_r2_target_alignment/scripts/export_tensorrt_engine.py \
+  --source src/robot_r2_detect/model/duantou.pt \
+  --output src/robot_r2_detect/model/duantou_fp16.engine \
+  --input-size 640
+```
 
 Python 依赖：
 
@@ -26,9 +34,9 @@ Python 依赖：
 python3 -m pip install -r src/robot_r2_target_alignment/requirements.txt
 ```
 
-默认使用 Jetson 的第 0 块 CUDA GPU（`model.device: "0"`）执行推理，且
-`model.quantize: 32` 使用 FP32。设置为 `16` 可启用 FP16。需要临时回退到
-CPU 时，将 `model.device` 设置为 `"cpu"`，同时保持 `model.quantize: 32`。
+默认使用 Jetson 的第 0 块 CUDA GPU（`model.device: "0"`）加载 FP16
+TensorRT engine。推理精度和输入形状在导出时固化，运行时不支持 CPU 回退，
+`model.input_size` 必须与 engine 的导出尺寸一致。
 
 ## 启动
 
@@ -112,7 +120,7 @@ ros2 param set /r2/target_alignment/target_alignment_controller \
   test_mode false
 ```
 
-模型路径、输入尺寸、设备或推理精度变化时，新模型会先完成加载和预热，
+模型路径、输入尺寸或设备变化时，新 engine 会先完成加载和预热，
 成功后才替换旧模型。非法参数会被拒绝，现有配置保持不变。
 
 ## 通信接口
@@ -124,8 +132,8 @@ ros2 param set /r2/target_alignment/target_alignment_controller \
   `/r2/target_alignment/debug_image`；
 - 输出 `cmd_vel`：`geometry_msgs/Twist`，launch 默认映射到 `/r2/cmd_vel`。
 
-控制节点只设置 `Twist.linear.y`。默认方向与现有 R2 对齐控制一致：目标位于
-画面右侧时输出负 `linear.y`。若实车安装方向相反，动态设置
+控制节点只设置 `Twist.linear.y`。当前 alignment 使用后视相机，默认方向为：目标位于
+画面右侧时车体向自身右侧移动，输出负 `linear.y`。若相机图像经过镜像处理或安装方向相反，动态设置
 `control.invert_output=false`。
 
 不要同时运行多个向 `/r2/cmd_vel` 发布非零速度的控制节点。实际模式下，

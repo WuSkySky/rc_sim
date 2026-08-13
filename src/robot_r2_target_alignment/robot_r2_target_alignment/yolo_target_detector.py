@@ -52,7 +52,6 @@ class DetectorConfig:
     model_path: Path
     input_size: int
     device: str
-    quantize: int
     confidence: float
     iou: float
     max_detections: int
@@ -64,8 +63,8 @@ class DetectorConfig:
     visualization_enabled: bool
 
     @property
-    def model_signature(self) -> tuple[Path, int, str, int]:
-        return self.model_path, self.input_size, self.device, self.quantize
+    def model_signature(self) -> tuple[Path, int, str]:
+        return self.model_path, self.input_size, self.device
 
 
 def _float_descriptor(
@@ -110,7 +109,6 @@ class YoloTargetDetector(Node):
         "model.path",
         "model.input_size",
         "model.device",
-        "model.quantize",
         "inference.confidence",
         "inference.iou",
         "inference.max_detections",
@@ -199,7 +197,7 @@ class YoloTargetDetector(Node):
             "",
             ParameterDescriptor(
                 description=(
-                    "YOLO11 detection weights as an absolute path, package URI, "
+                    "YOLO11 TensorRT engine as an absolute path, package URI, "
                     "or package-name-relative path."
                 )
             ),
@@ -212,15 +210,8 @@ class YoloTargetDetector(Node):
         self.declare_parameter(
             "model.device",
             "0",
-            ParameterDescriptor(description="Ultralytics inference device."),
-        )
-        self.declare_parameter(
-            "model.quantize",
-            32,
-            _integer_descriptor(
-                "Ultralytics inference precision: 16 for FP16, 32 for FP32.",
-                16,
-                32,
+            ParameterDescriptor(
+                description="CUDA device used by the TensorRT engine."
             ),
         )
         self.declare_parameter(
@@ -287,7 +278,7 @@ class YoloTargetDetector(Node):
         if not value:
             path = Path(
                 get_package_share_directory("robot_r2_detect")
-            ) / "model" / "duantou.pt"
+            ) / "model" / "duantou_fp16.engine"
         elif value.startswith("package://"):
             resource = value.removeprefix("package://")
             package_name, separator, relative_path = resource.partition("/")
@@ -324,12 +315,12 @@ class YoloTargetDetector(Node):
         path = path.resolve()
         if not path.is_file():
             raise FileNotFoundError(
-                f"YOLO model not found: {path}. Add duantou.pt to "
+                f"TensorRT engine not found: {path}. Add duantou_fp16.engine to "
                 "robot_r2_detect/model before building, or set model.path to "
                 "an existing absolute path."
             )
-        if path.suffix.lower() not in (".pt", ".onnx", ".engine"):
-            raise ValueError("model.path must use .pt, .onnx, or .engine weights")
+        if path.suffix.lower() != ".engine":
+            raise ValueError("model.path must reference a TensorRT .engine file")
         return path
 
     @classmethod
@@ -339,7 +330,6 @@ class YoloTargetDetector(Node):
             model_path=cls._resolve_model_path(str(values["model.path"])),
             input_size=int(values["model.input_size"]),
             device=str(values["model.device"]).strip(),
-            quantize=int(values["model.quantize"]),
             confidence=float(values["inference.confidence"]),
             iou=float(values["inference.iou"]),
             max_detections=int(values["inference.max_detections"]),
@@ -371,10 +361,8 @@ class YoloTargetDetector(Node):
             raise ValueError("model size and maximum detections must be positive")
         if config.input_size % 32 != 0:
             raise ValueError("model.input_size must be a multiple of 32")
-        if config.quantize not in (16, 32):
-            raise ValueError("model.quantize must be 16 or 32")
-        if config.device.lower() == "cpu" and config.quantize == 16:
-            raise ValueError("model.quantize must be 32 on the CPU")
+        if config.device.lower() == "cpu":
+            raise ValueError("TensorRT inference requires a CUDA device")
         if not 0.0 <= config.confidence <= 1.0:
             raise ValueError("inference.confidence must be in [0, 1]")
         if not 0.0 <= config.iou <= 1.0:
@@ -408,7 +396,6 @@ class YoloTargetDetector(Node):
             source=[warmup],
             imgsz=config.input_size,
             device=config.device,
-            quantize=config.quantize,
             verbose=False,
         )
         return model
@@ -573,7 +560,6 @@ class YoloTargetDetector(Node):
                 iou=config.iou,
                 max_det=config.max_detections,
                 device=config.device,
-                quantize=config.quantize,
                 verbose=False,
             )
         candidates = self._candidates_from_results(results, model)

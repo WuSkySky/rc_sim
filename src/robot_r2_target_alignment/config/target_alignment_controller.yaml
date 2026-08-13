@@ -18,8 +18,9 @@
       output_limit: 0.4
       minimum_output: 0.04
 
-      # Existing R2 convention: target right of center -> negative linear.y.
-      invert_output: true
+      # Rear-facing camera convention: target right of image center ->
+      # move the chassis to its right, i.e. publish negative linear.y.
+      invert_output: false
 
     log:
       rate_hz: 2.0
