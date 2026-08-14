@@ -1,0 +1,3 @@
+# Yahboom USB camera (Sunplus SDYH-8P0P, VID 1bcf PID 0b09).
+# Creates a stable /dev/yahboom_front alias for the front camera.
+ACTION=="add", SUBSYSTEM=="video4linux", ATTRS{idVendor}=="1bcf", ATTRS{idProduct}=="0b09", SYMLINK+="yahboom_front"

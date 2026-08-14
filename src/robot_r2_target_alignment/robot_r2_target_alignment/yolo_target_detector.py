@@ -26,7 +26,7 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
-from robot_r2_interfaces.msg import CameraFrame, KfsRoiDetection
+from robot_r2_interfaces.msg import CameraFrame, AlignmentDetection
 from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 
@@ -44,7 +44,7 @@ from robot_r2_target_alignment.detector_core import (
 )
 
 
-KFS_ROI_TOPIC = "/r2/kfs/roi"
+TIP_ROI_TOPIC = "/r2/tip/roi"
 
 
 @dataclass(frozen=True)
@@ -157,9 +157,9 @@ class YoloTargetDetector(Node):
             self._on_image,
             self._image_qos,
         )
-        self._kfs_roi_publisher = self.create_publisher(
-            KfsRoiDetection,
-            KFS_ROI_TOPIC,
+        self._tip_roi_publisher = self.create_publisher(
+            AlignmentDetection,
+            TIP_ROI_TOPIC,
             self._image_qos,
         )
         self._debug_publisher = self.create_publisher(
@@ -635,7 +635,7 @@ class YoloTargetDetector(Node):
         selected: DetectionCandidate | None,
         sequence: int,
     ) -> None:
-        message = KfsRoiDetection()
+        message = AlignmentDetection()
         message.header = header
         message.sequence = max(0, sequence)
         message.image_width = width
@@ -655,7 +655,7 @@ class YoloTargetDetector(Node):
             message.right_bottom_y = y2
             message.center_u = center_u
             message.center_offset_x = center_u - width // 2
-        self._kfs_roi_publisher.publish(message)
+        self._tip_roi_publisher.publish(message)
 
     def _publish_invalid(self, frame: CameraFrame) -> None:
         try:

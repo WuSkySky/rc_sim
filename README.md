@@ -63,8 +63,8 @@ source install/setup.bash
 ros2 launch bringup real1.launch.py
 ```
 
-real2 负责前置海康 USB3 相机、左右 MIPI 相机、前/左/右三路融合 KFS 识别和
-KFS ROI。前置海康相机默认发布自定义 `/r2/front_camera/image_raw`，
+real2 负责前置 Yahboom USB 相机、左右 MIPI 相机、前/左/右三路融合 KFS 识别和
+KFS ROI。前置 Yahboom 相机默认发布自定义 `/r2/front_camera/image_raw`，
 ROI 节点默认直接使用该话题。两个节点的标准调试图均默认关闭，可通过
 `visualization_enabled` 动态开启。融合节点不会等待未接入的相机，因此只有部分相机
 在线时也能正常推理：
@@ -74,7 +74,7 @@ source install/setup.bash
 ros2 launch bringup real2.launch.py
 ```
 
-real2 的 ROI 默认使用前置海康相机，real1 的阶段任务默认使用左侧 KFS 识别
+real2 的 ROI 默认使用前置 Yahboom 相机，real1 的阶段任务默认使用左侧 KFS 识别
 服务。需要改用右侧时分别执行：
 
 ```bash
@@ -201,7 +201,7 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 ### KFS 与视觉
 
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
-前相机；实机的前置海康相机和 ROI 节点都由 real2 启动，ROI 默认使用
+前相机；实机的前置 Yahboom 相机和 ROI 节点都由 real2 启动，ROI 默认使用
 `/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
 `/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、左右边界、左右
 边界列的最下方掩膜点和横向中心偏差，不包含图像像素：
@@ -267,7 +267,7 @@ ros2 param set /kfs_detect_fused visualization_enabled true
 ros2 param set /led_detect visualization_enabled true
 ros2 param set /r2/front_camera_controller visualization_enabled true
 ros2 param set /camera_frame_postprocess visualization_enabled true
-ros2 param set /front_hik_camera visualization_enabled true
+ros2 param set /front_yahboom_camera visualization_enabled true
 ros2 param set /left_mipi_camera visualization_enabled true
 ros2 param set /right_mipi_camera visualization_enabled true
 ```
@@ -276,7 +276,7 @@ ros2 param set /right_mipi_camera visualization_enabled true
 `/r2/kfs/roi/debug`；实机三路检测分别为
 `/r2/detection/{front,left,right}/debug`；
 LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后摄像头后处理、前置
-海康相机以及左右 MIPI 相机也使用同一个动态参数控制各自的 `/debug` 图像。
+Yahboom 相机以及左右 MIPI 相机也使用同一个动态参数控制各自的 `/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
 
 实机 KFS 类型检测，以前相机为例：

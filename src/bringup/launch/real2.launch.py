@@ -10,9 +10,9 @@ from launch_ros.actions import Node
 MIPI_IMAGE_TOPIC = '/r2/mipi_camera/image_raw'
 MIPI_DEBUG_TOPIC = '/r2/mipi_camera/image_raw/debug'
 MIPI_CAMERA_INFO_TOPIC = '/r2/mipi_camera/camera_info'
-HIK_IMAGE_TOPIC = '/r2/hik_camera/image_raw'
-HIK_DEBUG_TOPIC = '/r2/hik_camera/image_raw/debug'
-HIK_CAMERA_INFO_TOPIC = '/r2/hik_camera/camera_info'
+YAHBOOM_IMAGE_TOPIC = '/r2/yahboom_camera/image_raw'
+YAHBOOM_DEBUG_TOPIC = '/r2/yahboom_camera/image_raw/debug'
+YAHBOOM_CAMERA_INFO_TOPIC = '/r2/yahboom_camera/camera_info'
 
 
 def mipi_camera_node(side, config):
@@ -31,19 +31,19 @@ def mipi_camera_node(side, config):
     )
 
 
-# def hik_camera_node(config):
-#     return Node(
-#         package='hik_camera',
-#         executable='hik_camera',
-#         name='front_hik_camera',
-#         parameters=[config],
-#         remappings=[
-#             (HIK_IMAGE_TOPIC, '/r2/front_camera/image_raw'),
-#             (HIK_DEBUG_TOPIC, '/r2/front_camera/image_raw/debug'),
-#             (HIK_CAMERA_INFO_TOPIC, '/r2/front_camera/camera_info'),
-#         ],
-#         output='screen',
-#     )
+def yahboom_camera_node(config):
+    return Node(
+        package='yahboom_camera',
+        executable='yahboom_camera',
+        name='front_yahboom_camera',
+        parameters=[config],
+        remappings=[
+            (YAHBOOM_IMAGE_TOPIC, '/r2/front_camera/image_raw'),
+            (YAHBOOM_DEBUG_TOPIC, '/r2/front_camera/image_raw/debug'),
+            (YAHBOOM_CAMERA_INFO_TOPIC, '/r2/front_camera/camera_info'),
+        ],
+        output='screen',
+    )
 
 
 def fused_kfs_detect_node(config):
@@ -58,7 +58,7 @@ def fused_kfs_detect_node(config):
 
 def generate_launch_description():
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
-    # hik_camera_pkg = get_package_share_directory('hik_camera')
+    yahboom_camera_pkg = get_package_share_directory('yahboom_camera')
     mipi_camera_pkg = get_package_share_directory('mipi_camera')
     detect_pkg = get_package_share_directory('robot_r2_detect')
     roi_pkg = get_package_share_directory('robot_r2_kfs_roi')
@@ -68,6 +68,13 @@ def generate_launch_description():
         'fastdds_camera.xml',
     )
 
+    yahboom_camera_config = os.path.join(
+        yahboom_camera_pkg,
+        'config',
+        'yahboom_camera.yaml',
+    )
+    front_yahboom_camera = yahboom_camera_node(yahboom_camera_config)
+
     mipi_camera_config = os.path.join(
         mipi_camera_pkg,
         'config',
@@ -75,12 +82,6 @@ def generate_launch_description():
     )
     left_mipi_camera = mipi_camera_node('left', mipi_camera_config)
     right_mipi_camera = mipi_camera_node('right', mipi_camera_config)
-    # hik_camera_config = os.path.join(
-    #     hik_camera_pkg,
-    #     'config',
-    #     'hik_camera.yaml',
-    # )
-    # front_hik_camera = hik_camera_node(hik_camera_config)
 
     kfs_detect_config = os.path.join(
         detect_pkg,
@@ -122,7 +123,7 @@ def generate_launch_description():
             default_value='/r2/front_camera/image_raw',
             description='Image topic used by the single KFS ROI node',
         ),
-        # front_hik_camera,
+        front_yahboom_camera,
         left_mipi_camera,
         right_mipi_camera,
         fused_kfs_detect,
