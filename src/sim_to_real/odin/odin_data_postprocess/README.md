@@ -47,6 +47,10 @@ ros2 run odin_data_postprocess odometry_postprocess \
 ros2 launch bringup real1.launch.py
 ```
 
+> 注意：`real1.launch.py` 现已不再启动本包的两个节点。`odometry_postprocess`
+> 的角色由 `serial_pkg` 的 `odometry_tf`（下位机串口里程计）取代；后摄像头
+> （`camera_frame_postprocess`）路线暂时断开。本包保留，仍可单独启动。
+
 实机启动使用 Odin 配置中的 `use_host_ros_time: 1`，使 Odin 里程计和
 `odometry_postprocess` 使用相同的主机 ROS 时间。不要改回未经对齐的设备时间，
 否则 `map -> odom -> base_link` 可能因时间戳差距过大而无法组合查询。

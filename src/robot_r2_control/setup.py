@@ -20,6 +20,7 @@ setup(
                 'config/kfs_loader.yaml',
                 'config/step_traverse.yaml',
                 'config/gui_control.yaml',
+                'config/alignment.yaml',
             ]),
     ],
     install_requires=['setuptools', 'pynput'],
@@ -38,6 +39,7 @@ setup(
             'stage_two_point_two = robot_r2_control.stage_two_point_two:main',
             'kfs_loader_control = robot_r2_control.kfs_loader:main',
             'step_traverse = robot_r2_control.step_traverse:main',
+            'alignment = robot_r2_control.alignment:main',
         ],
     },
 )

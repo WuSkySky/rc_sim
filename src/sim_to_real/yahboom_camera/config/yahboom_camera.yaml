@@ -1,0 +1,17 @@
+# Yahboom USB UVC camera (Sunplus SDYH-8P0P, USB 1bcf:0b09).
+/**:
+  ros__parameters:
+    # Video device node. Install udev/90-yahboom-camera.rules for a stable
+    # /dev/yahboom_front alias, or use the by-id path under /dev/v4l/by-id/.
+    device: /dev/video2
+
+    # MJPG (Motion-JPEG, 30 fps at full HD) or YUYV (raw, lower framerate).
+    pixel_format: MJPG
+
+    # [width, height, framerate]. MJPG 30 fps modes: [1920, 1080, 30],
+    # [1280, 720, 30], [800, 600, 30], [720, 1000, 30], [640, 480, 30],
+    # [640, 360, 30], [600, 600, 30], [320, 240, 30].
+    # 默认 720p：在 30 fps 下避免加重 kfs_roi / 融合检测的下游处理负载。
+    mode: [1280, 720, 30]
+
+    visualization_enabled: false

@@ -32,6 +32,17 @@ def test_preprocess_converts_bgr_to_rgb_before_normalization():
     assert np.allclose(tensor[:, 0, 0], (0.0, 0.0, 1.0))
 
 
+def test_preprocess_resizes_full_image_without_center_crop():
+    image = np.zeros((4, 8, 3), dtype=np.uint8)
+    image[:, :2, 0] = 255
+    image[:, -2:, 2] = 255
+
+    tensor = preprocess_resnet_image(image, 4, (0.0,) * 3, (1.0,) * 3)
+
+    assert np.allclose(tensor[:, 2, 0], (0.0, 0.0, 1.0))
+    assert np.allclose(tensor[:, 2, -1], (1.0, 0.0, 0.0))
+
+
 def test_softmax_is_stable_and_normalized():
     probabilities = softmax(
         np.asarray([[1000.0, 1001.0, 999.0, -1000.0]], dtype=np.float32)

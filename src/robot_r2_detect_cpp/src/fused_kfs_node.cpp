@@ -7,6 +7,10 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <rcl_interfaces/msg/floating_point_range.hpp>
+#include <rcl_interfaces/msg/integer_range.hpp>
+#include <rcl_interfaces/msg/parameter_descriptor.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <robot_r2_interfaces/msg/camera_frame.hpp>
 #include <robot_r2_interfaces/msg/kfs_processed_detection.hpp>
@@ -99,6 +103,26 @@ struct FrameView {
   int channels{};
   bool is_rgb{};
 };
+
+void validate_horizontal_crop_ratio(double ratio) {
+  if (!std::isfinite(ratio) || ratio < 0.0 || ratio >= 0.5) {
+    throw std::invalid_argument(
+        "horizontal_crop_ratio must be finite and in [0.0, 0.5)");
+  }
+}
+
+FrameView crop_frame_horizontally(FrameView view, double ratio) {
+  validate_horizontal_crop_ratio(ratio);
+  const int crop_each_side =
+      static_cast<int>(std::floor(static_cast<double>(view.width) * ratio));
+  const int cropped_width = view.width - 2 * crop_each_side;
+  if (cropped_width <= 0) {
+    throw std::invalid_argument("horizontal crop leaves an empty image");
+  }
+  view.data += static_cast<std::size_t>(crop_each_side) * view.channels;
+  view.width = cropped_width;
+  return view;
+}
 
 struct Classification {
   int class_id{};
@@ -398,46 +422,99 @@ struct PendingFrame {
   CameraFrame::ConstSharedPtr message;
 };
 
+struct KfsConfiguration {
+  std::string model_path;
+  int image_size{};
+  std::vector<std::string> class_names;
+  std::array<float, 3> mean{};
+  std::array<float, 3> std{};
+  double horizontal_crop_ratio{};
+  double confidence_threshold{};
+  bool visualization_enabled{};
+  double inference_rate{};
+  double stale_timeout_sec{};
+  double default_vote_timeout_sec{};
+};
+
 class FusedKfsNode final : public rclcpp::Node {
 public:
   FusedKfsNode() : Node("kfs_detect_fused") {
-    declare_parameter<std::string>("model_path", "");
-    declare_parameter<int>("model_input_size", 224);
+    declare_parameter<std::string>(
+        "model_path", "",
+        descriptor("TensorRT engine path; empty selects the installed default"));
+    declare_parameter<int>(
+        "model_input_size", 224,
+        integer_descriptor("Square TensorRT model input size in pixels", 1,
+                           16384));
     declare_parameter<std::vector<std::string>>(
-        "model_class_names", {"R1", "Unlabeled", "fake", "true"});
-    declare_parameter<std::vector<double>>("model_mean", {0.485, 0.456, 0.406});
-    declare_parameter<std::vector<double>>("model_std", {0.229, 0.224, 0.225});
-    declare_parameter<double>("conf", 0.5);
-    declare_parameter<bool>("visualization_enabled", false);
-    declare_parameter<double>("inference_rate", 30.0);
-    declare_parameter<double>("frame_stale_timeout_sec", 0.5);
-    declare_parameter<double>("default_vote_timeout_sec", 10.0);
+        "model_class_names", {"R1", "Unlabeled", "fake", "true"},
+        descriptor("Class names in TensorRT output-logit order"));
+    declare_parameter<std::vector<double>>(
+        "model_mean", {0.485, 0.456, 0.406},
+        descriptor("Three RGB normalization mean values"));
+    declare_parameter<std::vector<double>>(
+        "model_std", {0.229, 0.224, 0.225},
+        descriptor("Three positive RGB normalization standard deviations"));
+    declare_parameter<double>(
+        "horizontal_crop_ratio", 0.2,
+        floating_descriptor(
+            "Fraction cropped from both horizontal sides before inference",
+            0.0, 0.499999999));
+    declare_parameter<double>(
+        "conf", 0.5,
+        floating_descriptor("Minimum confidence for processed detections", 0.0,
+                            1.0));
+    declare_parameter<bool>(
+        "visualization_enabled", false,
+        descriptor("Publish annotated debug images when subscribers exist"));
+    declare_parameter<double>(
+        "inference_rate", 30.0,
+        floating_descriptor("Maximum fused inference batch rate in Hz", 0.001,
+                            1000.0));
+    declare_parameter<double>(
+        "frame_stale_timeout_sec", 0.5,
+        floating_descriptor("Maximum accepted cached-frame age in seconds",
+                            0.001, 1000000.0));
+    declare_parameter<double>(
+        "default_vote_timeout_sec", 10.0,
+        floating_descriptor(
+            "Default detection-vote timeout when a request uses zero", 0.001,
+            1000000.0));
 
-    image_size_ = get_parameter("model_input_size").as_int();
-    class_names_ = get_parameter("model_class_names").as_string_array();
+    auto configuration = std::make_shared<KfsConfiguration>();
+    configuration->model_path = get_parameter("model_path").as_string();
+    configuration->image_size = get_parameter("model_input_size").as_int();
+    configuration->class_names =
+        get_parameter("model_class_names").as_string_array();
     const auto mean = get_parameter("model_mean").as_double_array();
     const auto std = get_parameter("model_std").as_double_array();
-    confidence_threshold_ = get_parameter("conf").as_double();
-    visualization_enabled_ = get_parameter("visualization_enabled").as_bool();
-    inference_rate_ = get_parameter("inference_rate").as_double();
-    stale_timeout_sec_ = get_parameter("frame_stale_timeout_sec").as_double();
-    default_vote_timeout_sec_ =
+    if (mean.size() == 3 && std.size() == 3) {
+      for (std::size_t index = 0; index < 3; ++index) {
+        configuration->mean[index] = static_cast<float>(mean[index]);
+        configuration->std[index] = static_cast<float>(std[index]);
+      }
+    }
+    configuration->horizontal_crop_ratio =
+        get_parameter("horizontal_crop_ratio").as_double();
+    configuration->confidence_threshold = get_parameter("conf").as_double();
+    configuration->visualization_enabled =
+        get_parameter("visualization_enabled").as_bool();
+    configuration->inference_rate =
+        get_parameter("inference_rate").as_double();
+    configuration->stale_timeout_sec =
+        get_parameter("frame_stale_timeout_sec").as_double();
+    configuration->default_vote_timeout_sec =
         get_parameter("default_vote_timeout_sec").as_double();
-    validate_parameters(mean, std);
-    for (std::size_t index = 0; index < 3; ++index) {
-      mean_[index] = static_cast<float>(mean[index]);
-      std_[index] = static_cast<float>(std[index]);
-    }
+    validate_configuration(*configuration, mean.size(), std.size());
 
-    std::string model_path = get_parameter("model_path").as_string();
-    if (model_path.empty()) {
-      model_path =
-          ament_index_cpp::get_package_share_directory("robot_r2_detect") +
-          "/model/resnet18_batch3_fp16.engine";
-    }
+    const std::string model_path = resolve_model_path(configuration->model_path);
     engine_ = std::make_unique<TensorRtResNet>(
-        model_path, image_size_, static_cast<int>(class_names_.size()), mean_,
-        std_);
+        model_path, configuration->image_size,
+        static_cast<int>(configuration->class_names.size()),
+        configuration->mean, configuration->std);
+    configuration_ = configuration;
+    parameter_callback_handle_ = add_on_set_parameters_callback(std::bind(
+        &FusedKfsNode::on_parameters_changed, this, std::placeholders::_1));
 
     const std::array<std::string, 3> names{"front", "left", "right"};
     const auto sensor_qos = rclcpp::SensorDataQoS().keep_last(1);
@@ -484,51 +561,251 @@ public:
           rmw_qos_profile_services_default, service_callback_group_));
     }
 
-    const auto period = std::chrono::duration<double>(1.0 / inference_rate_);
-    inference_timer_ = create_wall_timer(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-        std::bind(&FusedKfsNode::run_inference, this),
-        inference_callback_group_);
+    replace_inference_timer(configuration->inference_rate);
     RCLCPP_INFO(get_logger(),
-                "Loaded fused TensorRT classifier '%s' at %.1f Hz; missing "
-                "cameras are optional",
-                model_path.c_str(), inference_rate_);
+                "Loaded fused TensorRT classifier '%s' at %.1f Hz with %.1f%% "
+                "cropped from each horizontal side; missing cameras are "
+                "optional",
+                model_path.c_str(), configuration->inference_rate,
+                configuration->horizontal_crop_ratio * 100.0);
   }
 
 private:
-  void validate_parameters(const std::vector<double> &mean,
-                           const std::vector<double> &std) const {
-    if (image_size_ <= 0 || class_names_.empty()) {
+  static rcl_interfaces::msg::ParameterDescriptor
+  descriptor(const std::string &description) {
+    rcl_interfaces::msg::ParameterDescriptor result;
+    result.description = description;
+    return result;
+  }
+
+  static rcl_interfaces::msg::ParameterDescriptor
+  floating_descriptor(const std::string &description, double minimum,
+                      double maximum) {
+    auto result = descriptor(description);
+    rcl_interfaces::msg::FloatingPointRange range;
+    range.from_value = minimum;
+    range.to_value = maximum;
+    range.step = 0.0;
+    result.floating_point_range.push_back(range);
+    return result;
+  }
+
+  static rcl_interfaces::msg::ParameterDescriptor
+  integer_descriptor(const std::string &description, std::int64_t minimum,
+                     std::int64_t maximum) {
+    auto result = descriptor(description);
+    rcl_interfaces::msg::IntegerRange range;
+    range.from_value = minimum;
+    range.to_value = maximum;
+    range.step = 1;
+    result.integer_range.push_back(range);
+    return result;
+  }
+
+  static std::string resolve_model_path(const std::string &configured_path) {
+    if (!configured_path.empty()) {
+      return configured_path;
+    }
+    return ament_index_cpp::get_package_share_directory("robot_r2_detect") +
+           "/model/resnet18_batch3_fp16.engine";
+  }
+
+  rcl_interfaces::msg::SetParametersResult on_parameters_changed(
+      const std::vector<rclcpp::Parameter> &parameters) {
+    rcl_interfaces::msg::SetParametersResult result;
+    result.successful = true;
+    const auto current = std::atomic_load(&configuration_);
+    auto next = std::make_shared<KfsConfiguration>(*current);
+    bool reload_model = false;
+    bool replace_timer = false;
+    bool relevant_parameter = false;
+    try {
+      for (const auto &parameter : parameters) {
+        const std::string &name = parameter.get_name();
+        if (name == "model_path") {
+          relevant_parameter = true;
+          next->model_path = parameter.as_string();
+          reload_model = true;
+        } else if (name == "model_input_size") {
+          relevant_parameter = true;
+          next->image_size = parameter.as_int();
+          reload_model = true;
+        } else if (name == "model_class_names") {
+          relevant_parameter = true;
+          next->class_names = parameter.as_string_array();
+          reload_model = true;
+        } else if (name == "model_mean" || name == "model_std") {
+          relevant_parameter = true;
+          const auto values = parameter.as_double_array();
+          if (values.size() != 3) {
+            throw std::invalid_argument(name + " must contain 3 values");
+          }
+          auto &destination = name == "model_mean" ? next->mean : next->std;
+          for (std::size_t index = 0; index < 3; ++index) {
+            destination[index] = static_cast<float>(values[index]);
+          }
+          reload_model = true;
+        } else if (name == "horizontal_crop_ratio") {
+          relevant_parameter = true;
+          next->horizontal_crop_ratio = parameter.as_double();
+        } else if (name == "conf") {
+          relevant_parameter = true;
+          next->confidence_threshold = parameter.as_double();
+        } else if (name == "visualization_enabled") {
+          relevant_parameter = true;
+          next->visualization_enabled = parameter.as_bool();
+        } else if (name == "inference_rate") {
+          relevant_parameter = true;
+          next->inference_rate = parameter.as_double();
+          replace_timer = next->inference_rate != current->inference_rate;
+        } else if (name == "frame_stale_timeout_sec") {
+          relevant_parameter = true;
+          next->stale_timeout_sec = parameter.as_double();
+        } else if (name == "default_vote_timeout_sec") {
+          relevant_parameter = true;
+          next->default_vote_timeout_sec = parameter.as_double();
+        }
+      }
+      if (!relevant_parameter) {
+        return result;
+      }
+      validate_configuration(*next, 3, 3);
+    } catch (const std::exception &error) {
+      result.successful = false;
+      result.reason = error.what();
+      return result;
+    }
+
+    std::unique_ptr<TensorRtResNet> replacement_engine;
+    std::string resolved_model_path;
+    if (reload_model) {
+      try {
+        resolved_model_path = resolve_model_path(next->model_path);
+        replacement_engine = std::make_unique<TensorRtResNet>(
+            resolved_model_path, next->image_size,
+            static_cast<int>(next->class_names.size()), next->mean, next->std);
+      } catch (const std::exception &error) {
+        result.successful = false;
+        result.reason = std::string("TensorRT model reload failed: ") +
+                        error.what();
+        return result;
+      }
+    }
+
+    std::unique_ptr<TensorRtResNet> previous_engine;
+    {
+      std::lock_guard<std::mutex> lock(engine_mutex_);
+      if (replacement_engine) {
+        previous_engine = std::move(engine_);
+        engine_ = std::move(replacement_engine);
+      }
+      std::shared_ptr<const KfsConfiguration> immutable_next = next;
+      std::atomic_store(&configuration_, std::move(immutable_next));
+    }
+
+    if (replace_timer) {
+      try {
+        replace_inference_timer(next->inference_rate);
+      } catch (const std::exception &error) {
+        std::unique_ptr<TensorRtResNet> failed_engine;
+        {
+          std::lock_guard<std::mutex> lock(engine_mutex_);
+          if (previous_engine) {
+            failed_engine = std::move(engine_);
+            engine_ = std::move(previous_engine);
+          }
+          std::atomic_store(&configuration_, current);
+        }
+        result.successful = false;
+        result.reason =
+            std::string("inference timer update failed: ") + error.what();
+        return result;
+      }
+    }
+    previous_engine.reset();
+    if (reload_model) {
+      RCLCPP_INFO(get_logger(), "Reloaded TensorRT classifier '%s'",
+                  resolved_model_path.c_str());
+    }
+    RCLCPP_INFO(get_logger(),
+                "Updated KFS parameters: conf=%.3f, rate=%.3f Hz, crop=%.1f%% "
+                "per side, visualization=%s",
+                next->confidence_threshold, next->inference_rate,
+                next->horizontal_crop_ratio * 100.0,
+                next->visualization_enabled ? "enabled" : "disabled");
+    return result;
+  }
+
+  static void validate_configuration(const KfsConfiguration &configuration,
+                                     std::size_t mean_size,
+                                     std::size_t std_size) {
+    if (configuration.image_size <= 0 || configuration.image_size > 16384 ||
+        configuration.class_names.empty()) {
       throw std::invalid_argument(
           "model_input_size and model_class_names are required");
     }
-    if (mean.size() != 3 || std.size() != 3) {
+    if (std::any_of(configuration.class_names.begin(),
+                    configuration.class_names.end(),
+                    [](const std::string &name) { return name.empty(); })) {
+      throw std::invalid_argument("model_class_names must not contain blanks");
+    }
+    for (std::size_t left = 0; left < configuration.class_names.size();
+         ++left) {
+      for (std::size_t right = left + 1;
+           right < configuration.class_names.size(); ++right) {
+        if (configuration.class_names[left] ==
+            configuration.class_names[right]) {
+          throw std::invalid_argument("model_class_names must be unique");
+        }
+      }
+    }
+    if (mean_size != 3 || std_size != 3) {
       throw std::invalid_argument(
           "model_mean and model_std must contain 3 values");
     }
-    if (!std::isfinite(confidence_threshold_) || confidence_threshold_ < 0.0 ||
-        confidence_threshold_ > 1.0) {
+    validate_horizontal_crop_ratio(configuration.horizontal_crop_ratio);
+    if (!std::isfinite(configuration.confidence_threshold) ||
+        configuration.confidence_threshold < 0.0 ||
+        configuration.confidence_threshold > 1.0) {
       throw std::invalid_argument("conf must be finite and in [0, 1]");
     }
-    if (!std::isfinite(inference_rate_) || inference_rate_ <= 0.0) {
+    if (!std::isfinite(configuration.inference_rate) ||
+        configuration.inference_rate < 0.001 ||
+        configuration.inference_rate > 1000.0) {
       throw std::invalid_argument("inference_rate must be finite and positive");
     }
-    if (!std::isfinite(stale_timeout_sec_) || stale_timeout_sec_ <= 0.0) {
+    if (!std::isfinite(configuration.stale_timeout_sec) ||
+        configuration.stale_timeout_sec < 0.001 ||
+        configuration.stale_timeout_sec > 1000000.0) {
       throw std::invalid_argument(
           "frame_stale_timeout_sec must be finite and positive");
     }
-    if (!std::isfinite(default_vote_timeout_sec_) ||
-        default_vote_timeout_sec_ <= 0.0) {
+    if (!std::isfinite(configuration.default_vote_timeout_sec) ||
+        configuration.default_vote_timeout_sec < 0.001 ||
+        configuration.default_vote_timeout_sec > 1000000.0) {
       throw std::invalid_argument(
           "default_vote_timeout_sec must be finite and positive");
     }
     for (std::size_t index = 0; index < 3; ++index) {
-      if (!std::isfinite(mean[index]) || !std::isfinite(std[index]) ||
-          std[index] <= 0.0) {
+      if (!std::isfinite(configuration.mean[index]) ||
+          !std::isfinite(configuration.std[index]) ||
+          configuration.std[index] <= 0.0F) {
         throw std::invalid_argument(
             "model_mean/std must be finite and std positive");
       }
     }
+  }
+
+  void replace_inference_timer(double rate) {
+    const auto period = std::chrono::duration<double>(1.0 / rate);
+    auto replacement = create_wall_timer(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+        std::bind(&FusedKfsNode::run_inference, this),
+        inference_callback_group_);
+    if (inference_timer_) {
+      inference_timer_->cancel();
+    }
+    inference_timer_ = std::move(replacement);
   }
 
   void on_image(std::size_t index, CameraFrame::ConstSharedPtr message) {
@@ -582,6 +859,8 @@ private:
 
   void run_inference() {
     const auto started = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> engine_lock(engine_mutex_);
+    const auto configuration = std::atomic_load(&configuration_);
     std::vector<PendingFrame> pending;
     {
       std::lock_guard<std::mutex> lock(frame_mutex_);
@@ -595,7 +874,7 @@ private:
         state.processed_generation = state.generation;
         const double age =
             std::chrono::duration<double>(now - state.received_at).count();
-        if (age <= stale_timeout_sec_) {
+        if (age <= configuration->stale_timeout_sec) {
           pending.push_back(PendingFrame{index, state.latest_frame});
         }
       }
@@ -608,7 +887,9 @@ private:
     std::vector<FrameView> views;
     for (const auto &item : pending) {
       try {
-        views.push_back(validate_frame(*item.message));
+        views.push_back(crop_frame_horizontally(
+            validate_frame(*item.message),
+            configuration->horizontal_crop_ratio));
         valid.push_back(item);
       } catch (const std::exception &error) {
         RCLCPP_ERROR(get_logger(), "Ignored invalid %s camera frame: %s",
@@ -629,7 +910,9 @@ private:
         const auto results = engine_->infer(chunk_views);
         for (std::size_t offset = 0; offset < results.size(); ++offset) {
           const PendingFrame &item = valid[begin + offset];
-          publish_result(item.camera_index, *item.message, results[offset]);
+          publish_result(item.camera_index, *item.message,
+                         views[begin + offset], results[offset],
+                         *configuration);
         }
       }
     } catch (const std::exception &error) {
@@ -641,10 +924,11 @@ private:
     const double elapsed = std::chrono::duration<double>(
                                std::chrono::steady_clock::now() - started)
                                .count();
-    if (elapsed > 1.0 / inference_rate_) {
+    if (elapsed > 1.0 / configuration->inference_rate) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                            "Fused KFS batch took %.2f ms, above %.2f ms target",
-                           elapsed * 1000.0, 1000.0 / inference_rate_);
+                           elapsed * 1000.0,
+                           1000.0 / configuration->inference_rate);
     }
   }
 
@@ -659,9 +943,12 @@ private:
   }
 
   void publish_result(std::size_t camera_index, const CameraFrame &frame,
-                      const Classification &classification) {
+                      const FrameView &view,
+                      const Classification &classification,
+                      const KfsConfiguration &configuration) {
     CameraState &state = *cameras_.at(camera_index);
-    const std::string &class_name = class_names_.at(classification.class_id);
+    const std::string &class_name =
+        configuration.class_names.at(classification.class_id);
     const auto header = make_header(frame);
 
     robot_r2_interfaces::msg::KfsRawBox box;
@@ -675,24 +962,26 @@ private:
 
     robot_r2_interfaces::msg::KfsProcessedDetection processed;
     processed.header = header;
-    processed.image_width = static_cast<std::int32_t>(frame.width);
-    processed.image_height = static_cast<std::int32_t>(frame.height);
-    if (classification.confidence >= confidence_threshold_) {
+    processed.image_width = static_cast<std::int32_t>(view.width);
+    processed.image_height = static_cast<std::int32_t>(view.height);
+    if (classification.confidence >= configuration.confidence_threshold) {
       processed.class_name = class_name;
       processed.confidence = classification.confidence;
     }
     state.processed_publisher->publish(processed);
     record_vote(state, processed.class_name);
 
-    if (visualization_enabled_ &&
+    if (configuration.visualization_enabled &&
         state.debug_publisher->get_subscription_count() > 0) {
-      publish_debug(state, frame, class_name, classification.confidence);
+      publish_debug(state, frame, view, class_name, classification.confidence,
+                    configuration.confidence_threshold);
     }
   }
 
   void publish_debug(CameraState &state, const CameraFrame &frame,
-                     const std::string &class_name, float confidence) {
-    const FrameView view = validate_frame(frame);
+                     const FrameView &view,
+                     const std::string &class_name, float confidence,
+                     double confidence_threshold) {
     cv::Mat source(view.height, view.width,
                    view.channels == 3 ? CV_8UC3 : CV_8UC1,
                    const_cast<std::uint8_t *>(view.data), view.step);
@@ -704,7 +993,7 @@ private:
     } else {
       bgr = source.clone();
     }
-    const bool accepted = confidence >= confidence_threshold_;
+    const bool accepted = confidence >= confidence_threshold;
     cv::putText(bgr, class_name + " " + std::to_string(confidence).substr(0, 4),
                 cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.8,
                 accepted ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 0, 255), 2);
@@ -763,9 +1052,10 @@ private:
       response->message = "timeout_sec must be finite";
       return;
     }
+    const auto configuration = std::atomic_load(&configuration_);
     const double timeout = request->timeout_sec > 0.0
                                ? request->timeout_sec
-                               : default_vote_timeout_sec_;
+                               : configuration->default_vote_timeout_sec;
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::duration<double>(timeout);
 
@@ -806,15 +1096,10 @@ private:
   rclcpp::CallbackGroup::SharedPtr service_callback_group_;
   rclcpp::TimerBase::SharedPtr inference_timer_;
   std::unique_ptr<TensorRtResNet> engine_;
-  int image_size_{};
-  std::vector<std::string> class_names_;
-  std::array<float, 3> mean_{};
-  std::array<float, 3> std_{};
-  double confidence_threshold_{};
-  bool visualization_enabled_{};
-  double inference_rate_{};
-  double stale_timeout_sec_{};
-  double default_vote_timeout_sec_{};
+  std::mutex engine_mutex_;
+  std::shared_ptr<const KfsConfiguration> configuration_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr
+      parameter_callback_handle_;
 };
 
 } // namespace

@@ -45,5 +45,7 @@ ros2 param set /hik_camera exposure_time_us 4000.0
 ros2 param set /hik_camera visualization_enabled true
 ```
 
-`bringup real2.launch.py` starts this node as `front_hik_camera` and remaps its
-three topics to `/r2/front_camera/*`.
+This driver is kept standalone. The front-camera role is now handled by the
+`yahboom_camera` package started by `bringup real2.launch.py`; launch this node
+manually with `ros2 launch hik_camera hik_camera.launch.py` when the HIKROBOT
+camera is needed.

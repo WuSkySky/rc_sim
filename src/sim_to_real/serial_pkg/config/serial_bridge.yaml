@@ -19,6 +19,7 @@ serial_bridge:
     # Set vx, vy, and vw to zero when cmd_vel stops updating.
     cmd_vel_timeout_sec: 0.25
     velocity_feedback_topic: /r2/velocity_feedback
+    odometry_topic: /r2/odometry
     lift_command_topic: /r2/lift/cmd_lift
     lift_feedback_topic: /r2/lift/position_feedback
     kfs_lift_topic: /r2/kfs_lift/cmd
@@ -35,10 +36,12 @@ serial_bridge:
     weapon_grip_feedback_topic: /r2/weapon/grip_feedback
 
     # vx, vy, vw, front lift, rear lift, KFS lift, KFS root,
-    # KFS tip, KFS grip, weapon rotate, weapon grip.
+    # KFS tip, KFS grip, weapon rotate, weapon grip,
+    # odometry x, odometry y, odometry yaw (command side ignored, send zero).
     initial_command_values: [
       0.0, 0.0, 0.0,
       0.0, 0.0,
       0.0, 0.0, 0.0, 0.209,
-      0.0, 0.0
+      0.0, 0.0,
+      0.0, 0.0, 0.0
     ]

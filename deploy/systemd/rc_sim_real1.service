@@ -1,0 +1,19 @@
+[Unit]
+Description=rc_sim real1 (control) bringup
+After=network.target
+
+[Service]
+User=jetson
+SupplementaryGroups=video dialout plugdev gpio i2c render
+Type=simple
+Environment=ROS_DOMAIN_ID=99
+Environment=ROS_HOME=/home/jetson/.ros
+Environment=ROS_LOG_DIR=/tmp
+ExecStartPre=/bin/sleep 6
+ExecStart=/bin/bash -c 'source /opt/ros/humble/setup.bash && source /home/jetson/workspaces/rc_sim/install/setup.bash && exec ros2 launch bringup real1.launch.py'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

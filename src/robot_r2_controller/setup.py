@@ -16,7 +16,6 @@ setup(
             [
                 'config/chassis_pose_servo.yaml',
                 'config/chassis_lift.yaml',
-                'config/kfs_alignment.yaml',
                 'config/kfs_lift.yaml',
                 'config/kfs_gripper_rotate.yaml',
                 'config/kfs_gripper_tip_rotate.yaml',
@@ -33,7 +32,6 @@ setup(
         'console_scripts': [
             'chassis_pose_servo = robot_r2_controller.chassis_pose_servo:main',
             'chassis_lift = robot_r2_controller.chassis_lift:main',
-            'kfs_alignment = robot_r2_controller.kfs_alignment:main',
             'kfs_lift = robot_r2_controller.kfs_lift:main',
             'kfs_gripper_rotate = robot_r2_controller.kfs_gripper_rotate:main',
             'kfs_gripper_tip_rotate = robot_r2_controller.kfs_gripper_tip_rotate:main',

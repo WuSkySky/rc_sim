@@ -3,7 +3,6 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
-#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -47,25 +46,12 @@ __global__ void preprocess_kernel(const std::uint8_t *source, int source_width,
     return;
   }
 
-  // Match torchvision Resize(round(image_size / 0.875)) + CenterCrop.
-  const int resize_short = static_cast<int>(roundf(image_size / 0.875f));
-  const float scale = static_cast<float>(resize_short) /
-                      static_cast<float>(min(source_width, source_height));
-  const int resized_width =
-      max(image_size, static_cast<int>(roundf(source_width * scale)));
-  const int resized_height =
-      max(image_size, static_cast<int>(roundf(source_height * scale)));
-  const int crop_left = (resized_width - image_size) / 2;
-  const int crop_top = (resized_height - image_size) / 2;
-  const float resize_scale_x = static_cast<float>(resized_width) / source_width;
-  const float resize_scale_y =
-      static_cast<float>(resized_height) / source_height;
-
+  // Resize the complete source image directly to the square model input.
   // OpenCV INTER_LINEAR uses half-pixel coordinates for resize.
   const float source_x =
-      (static_cast<float>(output_x + crop_left) + 0.5f) / resize_scale_x - 0.5f;
+      (static_cast<float>(output_x) + 0.5f) * source_width / image_size - 0.5f;
   const float source_y =
-      (static_cast<float>(output_y + crop_top) + 0.5f) / resize_scale_y - 0.5f;
+      (static_cast<float>(output_y) + 0.5f) * source_height / image_size - 0.5f;
   const int x0 = static_cast<int>(floorf(source_x));
   const int y0 = static_cast<int>(floorf(source_y));
   const int x1 = x0 + 1;
