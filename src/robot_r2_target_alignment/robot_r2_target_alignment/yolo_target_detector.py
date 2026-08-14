@@ -26,7 +26,7 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
-from robot_r2_interfaces.msg import CameraFrame, TargetDetection
+from robot_r2_interfaces.msg import CameraFrame, KfsRoiDetection
 from sensor_msgs.msg import Image
 from std_msgs.msg import Header
 
@@ -42,6 +42,9 @@ from robot_r2_target_alignment.detector_core import (
     parse_name_filter,
     select_target,
 )
+
+
+KFS_ROI_TOPIC = "/r2/kfs/roi"
 
 
 @dataclass(frozen=True)
@@ -148,22 +151,16 @@ class YoloTargetDetector(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
         )
-        detection_qos = QoSProfile(
-            history=HistoryPolicy.KEEP_LAST,
-            depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.VOLATILE,
-        )
         self._subscription = self.create_subscription(
             CameraFrame,
             self._config.input_video_topic,
             self._on_image,
             self._image_qos,
         )
-        self._detection_publisher = self.create_publisher(
-            TargetDetection,
-            "detections",
-            detection_qos,
+        self._kfs_roi_publisher = self.create_publisher(
+            KfsRoiDetection,
+            KFS_ROI_TOPIC,
+            self._image_qos,
         )
         self._debug_publisher = self.create_publisher(
             Image,
@@ -586,7 +583,13 @@ class YoloTargetDetector(Node):
                 return
             self._previous_target = selected
         header = message_header(frame)
-        self._publish_selected(header, width, height, selected)
+        self._publish_selected(
+            header,
+            width,
+            height,
+            selected,
+            int(frame.sequence),
+        )
         if config.visualization_enabled:
             debug = self._draw_debug(image, candidates, selected)
             self._debug_publisher.publish(bgr_to_image(debug, header))
@@ -630,37 +633,29 @@ class YoloTargetDetector(Node):
         width: int,
         height: int,
         selected: DetectionCandidate | None,
+        sequence: int,
     ) -> None:
-        message = TargetDetection()
+        message = KfsRoiDetection()
         message.header = header
+        message.sequence = max(0, sequence)
         message.image_width = width
         message.image_height = height
         message.valid = selected is not None
         if selected is not None:
             x1 = max(0, min(width - 1, int(round(selected.x1))))
-            y1 = max(0, min(height - 1, int(round(selected.y1))))
             x2 = max(0, min(width - 1, int(round(selected.x2))))
             y2 = max(0, min(height - 1, int(round(selected.y2))))
             center_u = max(
                 0,
                 min(width - 1, int(round(selected.center_x))),
             )
-            center_v = max(
-                0,
-                min(height - 1, int(round(selected.center_y))),
-            )
-            message.class_name = selected.class_name
-            message.class_id = selected.class_id
-            message.confidence = selected.confidence
             message.x1 = x1
-            message.y1 = y1
             message.x2 = x2
-            message.y2 = y2
+            message.left_bottom_y = y2
+            message.right_bottom_y = y2
             message.center_u = center_u
-            message.center_v = center_v
             message.center_offset_x = center_u - width // 2
-            message.center_offset_y = center_v - height // 2
-        self._detection_publisher.publish(message)
+        self._kfs_roi_publisher.publish(message)
 
     def _publish_invalid(self, frame: CameraFrame) -> None:
         try:
@@ -673,6 +668,7 @@ class YoloTargetDetector(Node):
             max(0, int(frame.width)),
             max(0, int(frame.height)),
             None,
+            int(frame.sequence),
         )
 
     @staticmethod
