@@ -17,7 +17,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (
             os.path.join('share', package_name, 'config'),
-            ['config/serial_bridge.yaml'],
+            ['config/serial_bridge.yaml', 'config/odometry_tf.yaml'],
         ),
     ],
     install_requires=['setuptools'],
@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'serial_bridge = serial_pkg.serial_bridge:main',
+            'odometry_tf = serial_pkg.odometry_tf:main',
         ],
     },
 )

@@ -5,8 +5,10 @@ import threading
 import time
 
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from robot_r2_interfaces.msg import LiftCommand, LiftFeedback
 import serial
 from std_msgs.msg import Float64, String
@@ -31,6 +33,9 @@ class SerialBridge(Node):
     KFS_GRIP = 8
     WEAPON_ROTATE = 9
     WEAPON_GRIP = 10
+    ODOM_X = 11
+    ODOM_Y = 12
+    ODOM_YAW = 13
 
     def __init__(self):
         super().__init__('serial_bridge')
@@ -52,6 +57,7 @@ class SerialBridge(Node):
         self.declare_parameter('cmd_vel_timeout_sec', 0.25)
         self.declare_parameter(
             'velocity_feedback_topic', '/r2/velocity_feedback')
+        self.declare_parameter('odometry_topic', '/r2/odometry')
         self.declare_parameter('lift_command_topic', '/r2/lift/cmd_lift')
         self.declare_parameter(
             'lift_feedback_topic', '/r2/lift/position_feedback')
@@ -142,6 +148,15 @@ class SerialBridge(Node):
             str(self.get_parameter('velocity_feedback_topic').value),
             10,
         )
+        self.odometry_publisher = self.create_publisher(
+            Odometry,
+            str(self.get_parameter('odometry_topic').value),
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                durability=DurabilityPolicy.VOLATILE,
+            ),
+        )
         self.lift_feedback_publisher = self.create_publisher(
             LiftFeedback,
             str(self.get_parameter('lift_feedback_topic').value),
@@ -217,6 +232,11 @@ class SerialBridge(Node):
         if not 0 <= value <= 0xFF:
             raise ValueError(f'{name} must be between 0 and 255')
         return value
+
+    @staticmethod
+    def _quaternion_from_yaw(yaw):
+        half = yaw / 2.0
+        return (0.0, 0.0, math.sin(half), math.cos(half))
 
     def on_cmd_vel(self, message):
         values = (
@@ -374,6 +394,23 @@ class SerialBridge(Node):
         velocity.linear.y = values[self.VY]
         velocity.angular.z = values[self.VW]
         self.velocity_feedback_publisher.publish(velocity)
+
+        odometry = Odometry()
+        odometry.header.stamp = self.get_clock().now().to_msg()
+        odometry.header.frame_id = 'odom'
+        odometry.child_frame_id = 'base_link'
+        odometry.pose.pose.position.x = values[self.ODOM_X]
+        odometry.pose.pose.position.y = values[self.ODOM_Y]
+        odometry.pose.pose.position.z = 0.0
+        quaternion = self._quaternion_from_yaw(values[self.ODOM_YAW])
+        odometry.pose.pose.orientation.x = quaternion[0]
+        odometry.pose.pose.orientation.y = quaternion[1]
+        odometry.pose.pose.orientation.z = quaternion[2]
+        odometry.pose.pose.orientation.w = quaternion[3]
+        odometry.twist.twist.linear.x = values[self.VX]
+        odometry.twist.twist.linear.y = values[self.VY]
+        odometry.twist.twist.angular.z = values[self.VW]
+        self.odometry_publisher.publish(odometry)
 
         lift = LiftFeedback()
         lift.front_left_lift = values[self.FRONT_LIFT]

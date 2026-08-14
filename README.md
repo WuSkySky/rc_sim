@@ -56,7 +56,9 @@ GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘�
 两个热点属于独立接入点，不用于替代两台 Jetson 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐、Odin 后摄像头及 LED 检测：
+Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐，以及由下位机（串口）里程计
+驱动的定位 TF（`odometry_tf`）；Odin 驱动保留但不再接入，后摄像头/LED 检测路线
+暂时断开：
 
 ```bash
 source install/setup.bash
@@ -179,10 +181,9 @@ ros2 service call /r2/set_base_pose \
   "{x: 1.5, y: -0.5, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 1.5708}"
 ```
 
-该服务由 `real1.launch.py` 启动的 `odometry_postprocess` 提供。它根据 Odin
-里程计和外参更新 `map -> odom`，从而校正 `/r2/pose_feedback` 和底盘位置伺服
-使用的地图位姿；不会清空 Odin 发布的原始里程计数据。尚未收到 Odin 里程计时，
-服务会返回失败。
+该服务由 `real1.launch.py` 启动的 `odometry_tf` 提供。它根据下位机（串口）里程计
+更新 `map -> odom`，从而校正 `/r2/pose_feedback` 和底盘位置伺服使用的地图位姿；
+不会清空下位机发布的原始里程计数据。尚未收到下位机里程计时，服务会返回失败。
 
 四轮抬升：
 
@@ -264,9 +265,7 @@ ros2 service call /r2/align_to_tip \
 ros2 param set /kfs_roi visualization_enabled true
 # 实机检测节点：
 ros2 param set /kfs_detect_fused visualization_enabled true
-ros2 param set /led_detect visualization_enabled true
 ros2 param set /r2/front_camera_controller visualization_enabled true
-ros2 param set /camera_frame_postprocess visualization_enabled true
 ros2 param set /front_yahboom_camera visualization_enabled true
 ros2 param set /left_mipi_camera visualization_enabled true
 ros2 param set /right_mipi_camera visualization_enabled true
@@ -274,9 +273,9 @@ ros2 param set /right_mipi_camera visualization_enabled true
 
 将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的五阶段调试图像发布在
 `/r2/kfs/roi/debug`；实机三路检测分别为
-`/r2/detection/{front,left,right}/debug`；
-LED 调试图像为 `/r2/led_detection/debug`。仿真前相机、Odin 后摄像头后处理、前置
-Yahboom 相机以及左右 MIPI 相机也使用同一个动态参数控制各自的 `/debug` 图像。
+`/r2/detection/{front,left,right}/debug`。
+仿真前相机、前置 Yahboom 相机以及左右 MIPI 相机也使用同一个动态参数控制各自的
+`/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
 
 实机 KFS 类型检测，以前相机为例：

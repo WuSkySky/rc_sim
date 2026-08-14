@@ -13,24 +13,24 @@ from serial_pkg.protocol import (
 )
 
 
-def test_encode_frame_is_46_bytes_and_little_endian():
-    values = tuple(float(index) for index in range(11))
+def test_encode_frame_is_58_bytes_and_little_endian():
+    values = tuple(float(index) for index in range(14))
     frame = encode_frame(values)
 
     assert len(frame) == FRAME_SIZE
     assert frame[0] == 0xAA
     assert frame[-1] == 0x55
-    assert struct.unpack('<11f', frame[1:-1]) == values
+    assert struct.unpack('<14f', frame[1:-1]) == values
 
 
 def test_decode_frame_returns_all_little_endian_float_values():
-    values = tuple(float(index) / 4.0 for index in range(11))
+    values = tuple(float(index) / 4.0 for index in range(14))
 
     assert decode_frame(encode_frame(values)) == values
 
 
 def test_decode_frame_supports_big_endian():
-    values = tuple(float(index) for index in range(11))
+    values = tuple(float(index) for index in range(14))
     frame = encode_frame(values, endianness='big')
 
     assert decode_frame(frame, endianness='big') == values
@@ -40,8 +40,8 @@ def test_decode_frame_supports_big_endian():
     'frame',
     [
         b'',
-        bytes((0x00,)) + encode_frame([0.0] * 11)[1:],
-        encode_frame([0.0] * 11)[:-1] + bytes((0x00,)),
+        bytes((0x00,)) + encode_frame([0.0] * 14)[1:],
+        encode_frame([0.0] * 14)[:-1] + bytes((0x00,)),
     ],
 )
 def test_decode_frame_rejects_invalid_structure(frame):
@@ -50,7 +50,7 @@ def test_decode_frame_rejects_invalid_structure(frame):
 
 
 def test_decode_frame_rejects_non_finite_values():
-    frame = bytearray(encode_frame([0.0] * 11))
+    frame = bytearray(encode_frame([0.0] * 14))
     frame[1:5] = struct.pack('<f', math.nan)
 
     with pytest.raises(ValueError):
@@ -58,8 +58,8 @@ def test_decode_frame_rejects_non_finite_values():
 
 
 def test_parser_handles_noise_fragmentation_and_multiple_frames():
-    first = encode_frame([0.0] * 11)
-    second = encode_frame([math.pi] * 11)
+    first = encode_frame([0.0] * 14)
+    second = encode_frame([math.pi] * 14)
     parser = FrameParser()
 
     assert parser.feed(b'noise' + first[:20]) == []
@@ -67,9 +67,9 @@ def test_parser_handles_noise_fragmentation_and_multiple_frames():
 
 
 def test_parser_recovers_after_invalid_tail():
-    invalid = bytearray(encode_frame([0.0] * 11))
+    invalid = bytearray(encode_frame([0.0] * 14))
     invalid[-1] = 0x00
-    valid = encode_frame([1.0] * 11)
+    valid = encode_frame([1.0] * 14)
     parser = FrameParser()
 
     assert parser.feed(invalid + valid) == [valid]

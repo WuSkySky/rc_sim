@@ -4,8 +4,8 @@ import math
 import struct
 
 
-FLOAT_FIELD_COUNT = 11
-FRAME_SIZE = 46
+FLOAT_FIELD_COUNT = 14
+FRAME_SIZE = 58
 
 
 def _byte_order_prefix(endianness):

@@ -1,0 +1,7 @@
+# odometry_tf runtime configuration.
+odometry_tf:
+  ros__parameters:
+    # 默认 base_link 在 map 中的初始位姿（平移单位米，RPY 单位弧度）。
+    default_base_xyz: [0.0, 0.0, 0.0]
+    default_base_rpy: [0.0, 0.0, 0.0]
+    publish_rate: 50.0
