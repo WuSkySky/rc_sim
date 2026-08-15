@@ -61,6 +61,7 @@ class DetectorConfig:
     rate_hz: float
     class_names: tuple[str, ...]
     class_ids: tuple[int, ...]
+    selection_mode: str
     max_track_distance_ratio: float
     switch_confidence_margin: float
     visualization_enabled: bool
@@ -118,6 +119,7 @@ class YoloTargetDetector(Node):
         "inference.rate_hz",
         "target.class_names",
         "target.class_ids",
+        "target.selection_mode",
         "target.max_track_distance_ratio",
         "target.switch_confidence_margin",
         "visualization.enabled",
@@ -246,6 +248,16 @@ class YoloTargetDetector(Node):
             ),
         )
         self.declare_parameter(
+            "target.selection_mode",
+            "center",
+            ParameterDescriptor(
+                description=(
+                    "Target selection mode: center selects the box closest "
+                    "to the image alignment point; confidence uses YOLO confidence."
+                )
+            ),
+        )
+        self.declare_parameter(
             "target.max_track_distance_ratio",
             0.2,
             _float_descriptor(
@@ -333,6 +345,7 @@ class YoloTargetDetector(Node):
             rate_hz=float(values["inference.rate_hz"]),
             class_names=parse_name_filter(str(values["target.class_names"])),
             class_ids=parse_id_filter(str(values["target.class_ids"])),
+            selection_mode=str(values["target.selection_mode"]).strip().lower(),
             max_track_distance_ratio=float(
                 values["target.max_track_distance_ratio"]
             ),
@@ -354,6 +367,10 @@ class YoloTargetDetector(Node):
             raise ValueError("model.device must not be empty")
         if not config.input_video_topic:
             raise ValueError("input_video_topic must not be empty")
+        if config.selection_mode not in ("center", "confidence"):
+            raise ValueError(
+                "target.selection_mode must be 'center' or 'confidence'"
+            )
         if config.input_size <= 0 or config.max_detections <= 0:
             raise ValueError("model size and maximum detections must be positive")
         if config.input_size % 32 != 0:
@@ -577,6 +594,7 @@ class YoloTargetDetector(Node):
             height,
             config.max_track_distance_ratio,
             config.switch_confidence_margin,
+            config.selection_mode,
         )
         with self._runtime_lock:
             if self._config is not config or self._model is not model:

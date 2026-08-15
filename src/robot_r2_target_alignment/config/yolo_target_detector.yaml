@@ -21,6 +21,9 @@
       # When both are set, a detection must match both filters.
       class_names: ""
       class_ids: ""
+      # center selects the detection closest to the image center (alignment
+      # point). confidence retains the previous confidence-first behavior.
+      selection_mode: center
       max_track_distance_ratio: 0.2
       switch_confidence_margin: 0.15
 

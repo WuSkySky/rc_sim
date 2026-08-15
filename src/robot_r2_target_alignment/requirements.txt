@@ -1,2 +1,4 @@
-# Ultralytics provides YOLO11 model loading and inference.
-ultralytics>=8.3.59
+# Keep the TensorRT exporter/runtime aligned with the engine format used by
+# this package. Older 8.3.x releases leave YOLO11 raw head outputs undecoded
+# when loading an engine without embedded metadata.
+ultralytics==8.4.100

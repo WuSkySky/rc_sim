@@ -51,8 +51,26 @@ def test_highest_confidence_allowed_target_is_selected():
         100,
         0.2,
         0.15,
+        "confidence",
     )
     assert selected is detections[1]
+
+
+def test_center_mode_selects_target_closest_to_alignment_point():
+    left = candidate(0, "target", 0.95, 20.0)
+    centered = candidate(0, "target", 0.60, 48.0)
+    selected = select_target(
+        [left, centered],
+        (),
+        (),
+        None,
+        100,
+        100,
+        0.2,
+        0.15,
+        "center",
+    )
+    assert selected is centered
 
 
 def test_tracking_hysteresis_keeps_nearby_previous_target():
@@ -68,5 +86,6 @@ def test_tracking_hysteresis_keeps_nearby_previous_target():
         100,
         0.2,
         0.15,
+        "confidence",
     )
     assert selected is nearby

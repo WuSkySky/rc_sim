@@ -99,10 +99,18 @@ def select_target(
     image_height: int,
     max_track_distance_ratio: float,
     switch_confidence_margin: float,
+    selection_mode: str = "center",
 ) -> DetectionCandidate | None:
-    """Select one allowed target while avoiding unnecessary target switching."""
+    """Select one allowed target while avoiding unnecessary target switching.
+
+    ``center`` selects the detection whose center is closest to the image
+    center (the alignment point). ``confidence`` preserves the original
+    confidence-first behavior with temporal hysteresis.
+    """
     if image_width <= 0 or image_height <= 0:
         raise ValueError("image dimensions must be positive")
+    if selection_mode not in ("center", "confidence"):
+        raise ValueError("selection_mode must be 'center' or 'confidence'")
     diagonal = math.hypot(image_width, image_height)
     allowed: list[DetectionCandidate] = []
     for candidate in candidates:
@@ -113,6 +121,25 @@ def select_target(
             allowed.append(candidate)
     if not allowed:
         return None
+
+    if selection_mode == "center":
+        image_center_x = image_width * 0.5
+        image_center_y = image_height * 0.5
+        best = min(
+            allowed,
+            key=lambda item: (
+                math.hypot(
+                    item.center_x - image_center_x,
+                    item.center_y - image_center_y,
+                ),
+                -item.confidence,
+                -item.area,
+            ),
+        )
+        # Center-priority selection is intentionally evaluated independently
+        # every frame; the controller must always align the closest candidate
+        # to the alignment point rather than hold a previous target.
+        return best
 
     best = max(allowed, key=lambda item: (item.confidence, item.area))
     if previous is None:

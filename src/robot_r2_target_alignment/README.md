@@ -100,10 +100,13 @@ ros2 launch robot_r2_target_alignment target_alignment.launch.py \
 target:
   class_names: "person"
   class_ids: ""
+  selection_mode: center
 ```
 
 多个值使用逗号分隔，例如 `"person,sports ball"`。名称和 ID 同时设置时，
 检测结果必须同时匹配二者。两个过滤器都为空时允许所有类别。
+`selection_mode: center` 会选择检测框中心距离图像中心（对齐位）最近的目标；
+设置为 `confidence` 可恢复按置信度选择并进行连续帧保持。
 
 ## 动态参数
 
