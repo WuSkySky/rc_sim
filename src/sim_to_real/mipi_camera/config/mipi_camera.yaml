@@ -1,4 +1,4 @@
-# Common parameters shared by both physical MIPI cameras.
+# Common parameters shared by all physical MIPI cameras.
 /**:
   ros__parameters:
     # [width, height, framerate]. Supported modes:
@@ -17,3 +17,9 @@ left_mipi_camera:
 right_mipi_camera:
   ros__parameters:
     device: /dev/mipi_right
+
+# Weapon-tip camera on real1 (Jetson1). Same IMX219 model as left/right,
+# wired to the 9-0010 connector on that host.
+tip_mipi_camera:
+  ros__parameters:
+    device: /dev/mipi_tip

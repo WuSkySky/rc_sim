@@ -17,6 +17,9 @@ def generate_launch_description():
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
     serial_pkg = get_package_share_directory('serial_pkg')
     control_pkg = get_package_share_directory('robot_r2_control')
+    mipi_camera_pkg = get_package_share_directory('mipi_camera')
+    target_alignment_pkg = get_package_share_directory(
+        'robot_r2_target_alignment')
     fastdds_profile = os.path.join(
         interfaces_pkg,
         'config',
@@ -94,6 +97,48 @@ def generate_launch_description():
         output='screen',
     )
 
+    # Weapon-tip MIPI camera (IMX219, same model as left/right). Its CameraFrame
+    # is published on /r2/tip_camera/image_raw for the tip-detection upstream.
+    mipi_camera_config = os.path.join(
+        mipi_camera_pkg,
+        'config',
+        'mipi_camera.yaml',
+    )
+    tip_mipi_camera = Node(
+        package='mipi_camera',
+        executable='mipi_camera',
+        name='tip_mipi_camera',
+        parameters=[mipi_camera_config],
+        remappings=[
+            ('/r2/mipi_camera/image_raw', '/r2/tip_camera/image_raw'),
+            (
+                '/r2/mipi_camera/image_raw/debug',
+                '/r2/tip_camera/image_raw/debug',
+            ),
+            ('/r2/mipi_camera/camera_info', '/r2/tip_camera/camera_info'),
+        ],
+        output='screen',
+    )
+
+    # Tip YOLO detector: subscribes the tip camera and publishes
+    # AlignmentDetection to /r2/tip/roi (consumed by tip_alignment above).
+    detector_config = os.path.join(
+        target_alignment_pkg,
+        'config',
+        'yolo_target_detector.yaml',
+    )
+    yolo_target_detector = Node(
+        package='robot_r2_target_alignment',
+        executable='yolo_target_detector',
+        namespace='r2/target_alignment',
+        name='yolo_target_detector',
+        parameters=[
+            detector_config,
+            {'input_video_topic': '/r2/tip_camera/image_raw'},
+        ],
+        output='screen',
+    )
+
     return LaunchDescription([
         SetEnvironmentVariable(
             'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
@@ -113,4 +158,6 @@ def generate_launch_description():
         odometry_tf,
         kfs_alignment,
         tip_alignment,
+        tip_mipi_camera,
+        yolo_target_detector,
     ])

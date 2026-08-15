@@ -42,7 +42,7 @@ def main() -> None:
         YOLO(str(source), task="detect").export(
             format="engine",
             imgsz=args.input_size,
-            quantize=16,
+            half=True,
             dynamic=False,
             batch=1,
             device=args.device,

@@ -157,6 +157,9 @@ private:
     if (node_name == "right_mipi_camera") {
       return "r2_right_camera_optical_frame";
     }
+    if (node_name == "tip_mipi_camera") {
+      return "r2_tip_camera_optical_frame";
+    }
     return "r2_mipi_camera_optical_frame";
   }
 

@@ -39,7 +39,7 @@ install(
   DESTINATION lib/${PROJECT_NAME}
 )
 install(
-  DIRECTORY config
+  DIRECTORY config udev
   DESTINATION share/${PROJECT_NAME}
 )
 install(

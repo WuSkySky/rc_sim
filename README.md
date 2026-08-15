@@ -56,9 +56,10 @@ GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘�
 两个热点属于独立接入点，不用于替代两台 Jetson 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐，以及由下位机（串口）里程计
-驱动的定位 TF（`odometry_tf`）；Odin 驱动保留但不再接入，后摄像头/LED 检测路线
-暂时断开：
+Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐、端头 MIPI 相机，以及由下位机
+（串口）里程计驱动的定位 TF（`odometry_tf`）。端头 MIPI 相机（IMX219，与左右同
+型号）发布 `/r2/tip_camera/image_raw`，供端头检测上游使用；Odin 驱动保留但不再
+接入，后摄像头/LED 检测路线暂时断开：
 
 ```bash
 source install/setup.bash
