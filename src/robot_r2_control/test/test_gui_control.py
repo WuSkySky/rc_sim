@@ -72,6 +72,7 @@ def make_node_stub():
     node.kfs_alignment_request_in_flight = False
     node.relocalization_request_in_flight = False
     node.step_test_request_in_flight = False
+    node.step_test_direction = None
     node.kfs_action_request_in_flight = False
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()

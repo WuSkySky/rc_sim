@@ -9,15 +9,15 @@ step_traverse:
     move_timeout_sec: 35.0
     lift_timeout_sec: 15.0
 
-    a1: 0.05
-    a2: 0.42
-    a3: 0.35
+    a1: 0.07
+    a2: 0.48
+    a3: 0.38
     up_pre_lift_clearance: 0.05
-    b1: 0.23
-    b2: 0.42
-    b3: 0.10
+    b1: 0.22
+    b2: 0.44
+    b3: 0.16
 
-    lift_all_front: 0.20
+    lift_all_front: 0.21
     lift_all_rear: 0.20
     lift_front_only_front: 0.20
     lift_front_only_rear: 0.0

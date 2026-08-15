@@ -20,8 +20,16 @@
 
 - 常用构建命令：`colcon build --symlink-install`；运行前执行 `source install/setup.bash`。
 - 仿真入口：`ros2 launch bringup sim.launch.py`。
-- 实车分两台 ROS 2 主机：`real1.launch.py` 负责控制、串口、Odin 和 LED 检测，`real2.launch.py` 负责 MIPI 相机和 KFS 视觉。
+- 实车分两台 ROS 2 主机：`real1.launch.py` 负责控制、串口和下位机里程计，`real2.launch.py` 负责 MIPI 相机和 KFS 视觉。
 - 具体启动参数和 Service 用法见 `README.md`。
+
+## 同步与部署
+
+- **工作流程**：本地开发 → 使用仓库自带 `rsync.sh` 同步到实车 → Jetson 上 `colcon build` 构建运行。Jetson 上的 git 落后/不一致是正常现象（rsync 排除了 `.git`），不要用 git 状态判断是否已同步，以实际源码文件为准。
+- **同步命令**：`./rsync.sh`（默认同步到两台实车 `10.42.0.2` 和 `10.42.0.3`，可通过 `ROBOT_HOSTS` 覆盖）。必须使用 `rsync.sh`，它带有保护实车端特有文件的 filter；不要用自行编写的 `rsync --delete` 简化命令，否则会误删实车端关键文件（如 `COLCON_IGNORE`）。
+- **构建忽略**：实车端通过 `COLCON_IGNORE` 文件跳过 Gazebo 仿真包（`src/rc2026_field`、`src/robot_r2_description`），本地开发机无此文件。同步后若发现这两个文件丢失，需在实车端恢复，否则 `colcon build` 会因缺少 `gazebo_dev` 而失败。
+- **实车构建**：`colcon build --symlink-install`；`robot_r2_detect_cpp` 依赖 CUDA 编译器，构建前需 `export PATH=/usr/local/cuda/bin:$PATH`。
+- 同步后若新增/删除了可执行文件或消息定义，需在实车端重新构建；构建失败时可清除 `build/`、`install/` 后重新构建。
 
 ## 架构与设计原则
 
