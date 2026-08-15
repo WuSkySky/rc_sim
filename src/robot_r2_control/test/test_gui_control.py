@@ -17,7 +17,7 @@ from robot_r2_control.gui_control import (
     summarize_parameter_load_result,
     velocity_test_twist_components,
 )
-from robot_r2_interfaces.srv import KfsAction, TraverseStep
+from robot_r2_interfaces.srv import KfsAction, StageTwoPointTwo, TraverseStep
 
 
 class FakePublisher:
@@ -70,19 +70,24 @@ def make_node_stub():
     node.velocity_test_deadline = None
     node.pose_request_in_flight = False
     node.kfs_alignment_request_in_flight = False
+    node.tip_alignment_request_in_flight = False
     node.relocalization_request_in_flight = False
     node.step_test_request_in_flight = False
     node.step_test_direction = None
     node.stage_two_point_one_request_in_flight = False
     node.stage_two_point_one_skip = None
+    node.stage_two_point_two_request_in_flight = False
+    node.stage_two_point_two_skip = None
     node.kfs_action_request_in_flight = False
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()
     node.kfs_alignment_client = FakeClient()
+    node.tip_alignment_client = FakeClient()
     node.kfs_action_client = FakeClient()
     node.set_base_pose_client = FakeClient()
     node.step_traverse_client = FakeClient()
     node.stage_two_point_one_client = FakeClient()
+    node.stage_two_point_two_client = FakeClient()
     node.status_events = []
     return node
 
@@ -177,20 +182,20 @@ def test_motion_control_text_uses_parameter_values():
         '2.5 rad/s 逆时针旋转 1.25 s')
     assert text['pose']['forward'] == '位置伺服前进 0.8 m'
     assert text['pose']['rotate_left'] == '位置伺服逆时针旋转 0.785 rad'
-    assert text['kfs_alignment'] == 'KFS 对齐（容忍 10 px，超时 3 s）'
+    assert text['kfs_alignment'] == 'KFS 对齐'
+    assert text['tip_alignment'] == '端头对齐'
 
 
-def test_kfs_alignment_uses_configured_tolerance_and_timeout():
+def test_kfs_alignment_defers_tolerance_to_node_parameters():
     node = make_node_stub()
 
     success, message = node.request_kfs_alignment()
 
     assert success
-    assert '容忍 10 px' in message
-    assert '超时 3 s' in message
+    assert message == '已发送 KFS 对齐请求'
     request = node.kfs_alignment_client.requests[0]
-    assert request.pixel_tolerance == pytest.approx(10.0)
-    assert request.timeout_sec == pytest.approx(3.0)
+    assert request.pixel_tolerance == 0.0
+    assert request.timeout_sec == 0.0
     assert node.kfs_alignment_request_in_flight
     command = node.cmd_vel_publisher.messages[-1]
     assert command.linear.x == 0.0
@@ -215,6 +220,65 @@ def test_kfs_alignment_reports_unavailable_service():
     assert not success
     assert message == '/r2/align_to_kfs 服务不可用'
     assert not node.kfs_alignment_request_in_flight
+    assert not node.cmd_vel_publisher.messages
+
+
+def test_tip_alignment_defers_tolerance_to_node_parameters():
+    node = make_node_stub()
+
+    success, message = node.request_tip_alignment()
+
+    assert success
+    assert message == '已发送端头对齐请求'
+    request = node.tip_alignment_client.requests[0]
+    assert request.pixel_tolerance == 0.0
+    assert request.timeout_sec == 0.0
+    assert node.tip_alignment_request_in_flight
+    command = node.cmd_vel_publisher.messages[-1]
+    assert command.linear.x == 0.0
+    assert command.linear.y == 0.0
+    assert command.angular.z == 0.0
+
+    node.tip_alignment_client.future.complete(SimpleNamespace(
+        success=True,
+        message='ok',
+        final_offset_x=4,
+    ))
+    assert not node.tip_alignment_request_in_flight
+    assert node.pop_status_events() == ['端头对齐完成：最终偏差 4 px']
+
+
+def test_tip_alignment_reports_unavailable_service():
+    node = make_node_stub()
+    node.tip_alignment_client = FakeClient(ready=False)
+
+    success, message = node.request_tip_alignment()
+
+    assert not success
+    assert message == '/r2/align_to_tip 服务不可用'
+    assert not node.tip_alignment_request_in_flight
+    assert not node.cmd_vel_publisher.messages
+
+
+def test_kfs_alignment_is_blocked_while_tip_alignment_runs():
+    node = make_node_stub()
+    node.tip_alignment_request_in_flight = True
+
+    success, message = node.request_kfs_alignment()
+
+    assert not success
+    assert message == '端头对齐正在执行'
+    assert not node.cmd_vel_publisher.messages
+
+
+def test_tip_alignment_is_blocked_while_kfs_alignment_runs():
+    node = make_node_stub()
+    node.kfs_alignment_request_in_flight = True
+
+    success, message = node.request_tip_alignment()
+
+    assert not success
+    assert message == 'KFS 对齐正在执行'
     assert not node.cmd_vel_publisher.messages
 
 
@@ -379,6 +443,38 @@ def test_stage_two_point_one_normal_passes_skip_false():
     step_request = node.stage_two_point_one_client.requests[0]
     assert step_request.loaded_count == 0
     assert step_request.skip_kfs_detection is False
+
+
+def test_stage_two_point_two_relocalizes_then_calls_service():
+    node = make_node_stub()
+
+    success, message = node.request_stage_two_point_two(skip=True)
+
+    assert success
+    assert message == '2.2 skip测试：正在重定位到 (5,2)-(4,2) 边界'
+    request = node.set_base_pose_client.requests[0]
+    assert (request.x, request.y, request.yaw) == (3.15, -3.0, math.pi)
+    assert node.stage_two_point_two_request_in_flight
+    assert not node.stage_two_point_two_client.requests
+
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    step_request = node.stage_two_point_two_client.requests[0]
+    assert step_request.fake_kfs_decision == StageTwoPointTwo.Request.LEFT
+    assert step_request.loaded_count == 0
+    assert step_request.skip_kfs_detection is True
+
+    node.stage_two_point_two_client.future.complete(SimpleNamespace(
+        success=True,
+        message='Stage 2.2 completed at (0, 1)',
+    ))
+    assert not node.stage_two_point_two_request_in_flight
+    assert node.pop_status_events() == [
+        '2.2 skip测试：重定位完成，正在调用 2.2',
+        '2.2 skip测试完成：Stage 2.2 completed at (0, 1)',
+    ]
 
 
 def test_parse_relocalization_values_requires_six_values():
@@ -593,8 +689,6 @@ def test_relative_rotation_is_counterclockwise_and_normalized():
         ('motion_publish_rate', 0.0),
         ('manual_linear_speed', -0.1),
         ('velocity_test_duration_sec', math.inf),
-        ('kfs_alignment_pixel_tolerance', 0.0),
-        ('kfs_alignment_timeout_sec', -1.0),
     ],
 )
 def test_invalid_motion_parameters_are_rejected(name, value):

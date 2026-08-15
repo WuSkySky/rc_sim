@@ -1,6 +1,6 @@
 /**:
   ros__parameters:
-    pixel_tolerance: 20
+    pixel_tolerance: 5
     stable_cycles: 10
     default_timeout_sec: 10.0
     # Reverse only the published lateral velocity command.

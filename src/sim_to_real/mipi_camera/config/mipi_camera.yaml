@@ -23,3 +23,5 @@ right_mipi_camera:
 tip_mipi_camera:
   ros__parameters:
     device: /dev/mipi_tip
+    # nvvidconv: 2 = rotate 180 degrees. Camera mounted rotated 180 degrees.
+    flip_method: 2

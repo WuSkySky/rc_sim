@@ -21,6 +21,7 @@ from robot_r2_interfaces.srv import (
     MoveToPose,
     SetBasePose,
     StageTwoPointOne,
+    StageTwoPointTwo,
     TraverseStep,
 )
 from std_msgs.msg import Float64
@@ -115,10 +116,6 @@ def motion_control_text(config):
     pose_distance = format_parameter_value(
         config['pose_test_linear_distance'])
     pose_yaw = format_parameter_value(config['pose_test_yaw'])
-    kfs_tolerance = format_parameter_value(
-        config['kfs_alignment_pixel_tolerance'])
-    kfs_timeout = format_parameter_value(
-        config['kfs_alignment_timeout_sec'])
     return {
         'keyboard_hint': (
             '键盘控制（GUI 窗口聚焦时）\n'
@@ -137,10 +134,8 @@ def motion_control_text(config):
             'left': f'位置伺服左平移 {pose_distance} m',
             'rotate_left': f'位置伺服逆时针旋转 {pose_yaw} rad',
         },
-        'kfs_alignment': (
-            f'KFS 对齐（容忍 {kfs_tolerance} px，'
-            f'超时 {kfs_timeout} s）'
-        ),
+        'kfs_alignment': 'KFS 对齐',
+        'tip_alignment': '端头对齐',
     }
 
 
@@ -218,10 +213,12 @@ class GuiControlNode(Node):
     POSE_FEEDBACK_TOPIC = '/r2/pose_feedback'
     MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
     KFS_ALIGNMENT_SERVICE = '/r2/align_to_kfs'
+    TIP_ALIGNMENT_SERVICE = '/r2/align_to_tip'
     KFS_ACTION_SERVICE = '/r2/kfs/action'
     SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
     STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
     STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
+    STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
 
     # 半车长：base_link 原点到车头的距离（米）。
@@ -280,8 +277,6 @@ class GuiControlNode(Node):
         'pose_test_linear_distance': 0.5,
         'pose_test_yaw': 1.57,
         'move_timeout_sec': 20.0,
-        'kfs_alignment_pixel_tolerance': 10.0,
-        'kfs_alignment_timeout_sec': 3.0,
     }
 
     def __init__(self):
@@ -300,11 +295,14 @@ class GuiControlNode(Node):
         self.velocity_test_deadline = None
         self.pose_request_in_flight = False
         self.kfs_alignment_request_in_flight = False
+        self.tip_alignment_request_in_flight = False
         self.relocalization_request_in_flight = False
         self.step_test_request_in_flight = False
         self.step_test_direction = None
         self.stage_two_point_one_request_in_flight = False
         self.stage_two_point_one_skip = None
+        self.stage_two_point_two_request_in_flight = False
+        self.stage_two_point_two_skip = None
         self.kfs_action_request_in_flight = False
         self.kfs_parameter_load_in_flight = False
         self.kfs_loader_config_path = resolve_kfs_loader_source_config(
@@ -370,6 +368,8 @@ class GuiControlNode(Node):
             MoveToPose, self.MOVE_TO_POSE_SERVICE)
         self.kfs_alignment_client = self.create_client(
             Align, self.KFS_ALIGNMENT_SERVICE)
+        self.tip_alignment_client = self.create_client(
+            Align, self.TIP_ALIGNMENT_SERVICE)
         self.kfs_action_client = self.create_client(
             KfsAction, self.KFS_ACTION_SERVICE)
         self.set_base_pose_client = self.create_client(
@@ -378,6 +378,8 @@ class GuiControlNode(Node):
             TraverseStep, self.STEP_TRAVERSE_SERVICE)
         self.stage_two_point_one_client = self.create_client(
             StageTwoPointOne, self.STAGE_TWO_POINT_ONE_SERVICE)
+        self.stage_two_point_two_client = self.create_client(
+            StageTwoPointTwo, self.STAGE_TWO_POINT_TWO_SERVICE)
         self.motion_timer = self.create_timer(
             1.0 / self.motion_config['motion_publish_rate'],
             self._publish_motion_tick,
@@ -631,6 +633,8 @@ class GuiControlNode(Node):
                 return False, '位置伺服正在执行'
             if self.kfs_alignment_request_in_flight:
                 return False, 'KFS 对齐正在执行'
+            if self.tip_alignment_request_in_flight:
+                return False, '端头对齐正在执行'
             if (
                 self.relocalization_request_in_flight or
                 self.step_test_request_in_flight
@@ -701,6 +705,8 @@ class GuiControlNode(Node):
         with self.state_lock:
             if self.kfs_alignment_request_in_flight:
                 return False, 'KFS 对齐正在执行'
+            if self.tip_alignment_request_in_flight:
+                return False, '端头对齐正在执行'
             if self.pose_request_in_flight:
                 return False, '位置伺服正在执行'
             if (
@@ -711,10 +717,6 @@ class GuiControlNode(Node):
             if not self.kfs_alignment_client.service_is_ready():
                 return False, '/r2/align_to_kfs 服务不可用'
 
-            pixel_tolerance = self.motion_config[
-                'kfs_alignment_pixel_tolerance']
-            timeout_sec = self.motion_config[
-                'kfs_alignment_timeout_sec']
             self.active_manual_keys.clear()
             self.velocity_test_kind = None
             self.velocity_test_deadline = None
@@ -722,8 +724,10 @@ class GuiControlNode(Node):
 
         self.cmd_vel_publisher.publish(Twist())
         request = Align.Request()
-        request.pixel_tolerance = pixel_tolerance
-        request.timeout_sec = timeout_sec
+        # 0.0 -> the alignment node uses its own pixel_tolerance / timeout
+        # parameters (dynamic ros2 params on /kfs_alignment).
+        request.pixel_tolerance = 0.0
+        request.timeout_sec = 0.0
         try:
             future = self.kfs_alignment_client.call_async(request)
         except Exception as exc:
@@ -731,10 +735,7 @@ class GuiControlNode(Node):
                 self.kfs_alignment_request_in_flight = False
             return False, f'KFS 对齐请求发送失败：{exc}'
         future.add_done_callback(self._on_kfs_alignment_complete)
-        return True, (
-            f'已发送 KFS 对齐请求：容忍 {pixel_tolerance:g} px，'
-            f'超时 {timeout_sec:g} s'
-        )
+        return True, '已发送 KFS 对齐请求'
 
     def _on_kfs_alignment_complete(self, future):
         with self.state_lock:
@@ -752,6 +753,59 @@ class GuiControlNode(Node):
                 f'{response.final_offset_x} px')
         else:
             self._queue_status(f'KFS 对齐失败：{response.message}')
+
+    def request_tip_alignment(self):
+        with self.state_lock:
+            if self.tip_alignment_request_in_flight:
+                return False, '端头对齐正在执行'
+            if self.kfs_alignment_request_in_flight:
+                return False, 'KFS 对齐正在执行'
+            if self.pose_request_in_flight:
+                return False, '位置伺服正在执行'
+            if (
+                self.relocalization_request_in_flight or
+                self.step_test_request_in_flight
+            ):
+                return False, '底盘操作正在执行'
+            if not self.tip_alignment_client.service_is_ready():
+                return False, '/r2/align_to_tip 服务不可用'
+
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.tip_alignment_request_in_flight = True
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = Align.Request()
+        # 0.0 -> the alignment node uses its own pixel_tolerance / timeout
+        # parameters (dynamic ros2 params on /tip_alignment).
+        request.pixel_tolerance = 0.0
+        request.timeout_sec = 0.0
+        try:
+            future = self.tip_alignment_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.tip_alignment_request_in_flight = False
+            return False, f'端头对齐请求发送失败：{exc}'
+        future.add_done_callback(self._on_tip_alignment_complete)
+        return True, '已发送端头对齐请求'
+
+    def _on_tip_alignment_complete(self, future):
+        with self.state_lock:
+            self.tip_alignment_request_in_flight = False
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._queue_status(f'端头对齐调用异常：{exc}')
+            return
+        if response is None:
+            self._queue_status('端头对齐调用失败：无响应')
+        elif response.success:
+            self._queue_status(
+                f'端头对齐完成：最终偏差 '
+                f'{response.final_offset_x} px')
+        else:
+            self._queue_status(f'端头对齐失败：{response.message}')
 
     @staticmethod
     def _make_set_base_pose_request(values):
@@ -964,6 +1018,93 @@ class GuiControlNode(Node):
             self.stage_two_point_one_skip = None
         self._queue_status(message)
 
+    def request_stage_two_point_two(self, skip):
+        with self.state_lock:
+            if self._chassis_service_in_flight_locked():
+                return False, '底盘操作正在执行'
+            if not self.set_base_pose_client.service_is_ready():
+                return False, '/r2/set_base_pose 服务不可用'
+            if not self.stage_two_point_two_client.service_is_ready():
+                return False, '/r2/stage_two_point_two 服务不可用'
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.stage_two_point_two_request_in_flight = True
+            self.stage_two_point_two_skip = bool(skip)
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = self._make_set_base_pose_request(
+            self._middle_step_edge_center())
+        try:
+            future = self.set_base_pose_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.stage_two_point_two_request_in_flight = False
+                self.stage_two_point_two_skip = None
+            return False, f'2.2 测试重定位请求发送失败：{exc}'
+        future.add_done_callback(
+            self._on_stage_two_point_two_relocalization_complete)
+        skip_name = 'skip' if skip else '正常'
+        return True, f'2.2 {skip_name}测试：正在重定位到 (5,2)-(4,2) 边界'
+
+    def _on_stage_two_point_two_relocalization_complete(self, future):
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_two_point_two(
+                f'2.2 测试重定位调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_two_point_two('2.2 测试重定位失败：无响应')
+            return
+        if not response.success:
+            self._finish_stage_two_point_two(
+                f'2.2 测试重定位失败：{response.message}')
+            return
+
+        with self.state_lock:
+            skip = self.stage_two_point_two_skip
+        skip_name = 'skip' if skip else '正常'
+        self._queue_status(f'2.2 {skip_name}测试：重定位完成，正在调用 2.2')
+
+        request = StageTwoPointTwo.Request()
+        request.fake_kfs_decision = StageTwoPointTwo.Request.LEFT
+        request.loaded_count = 0
+        request.skip_kfs_detection = bool(skip)
+        try:
+            step_future = self.stage_two_point_two_client.call_async(request)
+        except Exception as exc:
+            self._finish_stage_two_point_two(
+                f'2.2 {skip_name}测试请求发送失败：{exc}')
+            return
+        step_future.add_done_callback(self._on_stage_two_point_two_complete)
+
+    def _on_stage_two_point_two_complete(self, future):
+        with self.state_lock:
+            skip = self.stage_two_point_two_skip
+        skip_name = 'skip' if skip else '正常'
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_two_point_two(
+                f'2.2 {skip_name}测试调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_two_point_two(
+                f'2.2 {skip_name}测试失败：无响应')
+        elif response.success:
+            self._finish_stage_two_point_two(
+                f'2.2 {skip_name}测试完成：{response.message}')
+        else:
+            self._finish_stage_two_point_two(
+                f'2.2 {skip_name}测试失败：{response.message}')
+
+    def _finish_stage_two_point_two(self, message):
+        with self.state_lock:
+            self.stage_two_point_two_request_in_flight = False
+            self.stage_two_point_two_skip = None
+        self._queue_status(message)
+
     def request_kfs_action(self, action, mode=0):
         if action == KfsAction.Request.LOAD:
             mode_labels = {
@@ -1032,9 +1173,11 @@ class GuiControlNode(Node):
         return (
             self.pose_request_in_flight or
             self.kfs_alignment_request_in_flight or
+            self.tip_alignment_request_in_flight or
             self.relocalization_request_in_flight or
             self.step_test_request_in_flight or
-            self.stage_two_point_one_request_in_flight
+            self.stage_two_point_one_request_in_flight or
+            self.stage_two_point_two_request_in_flight
         )
 
     def is_pose_request_in_flight(self):
@@ -1215,7 +1358,10 @@ class GuiControlApp:
         self.down_step_test_button = None
         self.stage_two_point_one_skip_button = None
         self.stage_two_point_one_normal_button = None
+        self.stage_two_point_two_skip_button = None
+        self.stage_two_point_two_normal_button = None
         self.kfs_test_button = None
+        self.tip_test_button = None
         self.kfs_action_buttons = []
         self.kfs_parameter_load_button = None
 
@@ -1345,15 +1491,46 @@ class GuiControlApp:
             row=0, column=1, sticky='ew', padx=(8, 0))
         self.chassis_buttons.append(self.stage_two_point_one_normal_button)
 
+        stage_two_point_two_frame = ttk.LabelFrame(
+            chassis_column, text='Step2.2 测试', padding=12)
+        stage_two_point_two_frame.grid(
+            row=5, column=0, sticky='ew', pady=(10, 0))
+        self.stage_two_point_two_skip_button = ttk.Button(
+            stage_two_point_two_frame,
+            text='2.2 测试（skip 识别）',
+            command=self._start_stage_two_point_two_skip,
+        )
+        self.stage_two_point_two_skip_button.grid(
+            row=0, column=0, sticky='ew')
+        self.chassis_buttons.append(self.stage_two_point_two_skip_button)
+        self.stage_two_point_two_normal_button = ttk.Button(
+            stage_two_point_two_frame,
+            text='2.2 测试（正常识别）',
+            command=self._start_stage_two_point_two_normal,
+        )
+        self.stage_two_point_two_normal_button.grid(
+            row=0, column=1, sticky='ew', padx=(8, 0))
+        self.chassis_buttons.append(self.stage_two_point_two_normal_button)
+
         kfs_test_frame = ttk.LabelFrame(
             chassis_column, text='KFS 测试', padding=12)
-        kfs_test_frame.grid(row=5, column=0, sticky='ew', pady=(10, 0))
+        kfs_test_frame.grid(row=6, column=0, sticky='ew', pady=(10, 0))
         self.kfs_test_button = ttk.Button(
             kfs_test_frame,
             command=self._start_kfs_alignment_test,
         )
         self.kfs_test_button.grid(row=0, column=0, sticky='ew')
         self.chassis_buttons.append(self.kfs_test_button)
+        tip_alignment_frame = ttk.LabelFrame(
+            chassis_column, text='端头对齐', padding=12)
+        tip_alignment_frame.grid(
+            row=7, column=0, sticky='ew', pady=(10, 0))
+        self.tip_test_button = ttk.Button(
+            tip_alignment_frame,
+            command=self._start_tip_alignment_test,
+        )
+        self.tip_test_button.grid(row=0, column=0, sticky='ew')
+        self.chassis_buttons.append(self.tip_test_button)
         kfs_actions = (
             (
                 '模式 1：前方，数量 0，装载到车上',
@@ -1543,6 +1720,10 @@ class GuiControlApp:
         _, message = self.node.request_kfs_alignment()
         self.status_text.set(message)
 
+    def _start_tip_alignment_test(self):
+        _, message = self.node.request_tip_alignment()
+        self.status_text.set(message)
+
     def _start_relocalization(self):
         raw_values = tuple(
             self.relocalization_values[name].get()
@@ -1565,6 +1746,14 @@ class GuiControlApp:
 
     def _start_stage_two_point_one_normal(self):
         _, message = self.node.request_stage_two_point_one(skip=False)
+        self.status_text.set(message)
+
+    def _start_stage_two_point_two_skip(self):
+        _, message = self.node.request_stage_two_point_two(skip=True)
+        self.status_text.set(message)
+
+    def _start_stage_two_point_two_normal(self):
+        _, message = self.node.request_stage_two_point_two(skip=False)
         self.status_text.set(message)
 
     def _start_kfs_action_test(self, action, mode):
@@ -1643,6 +1832,8 @@ class GuiControlApp:
             button.configure(text=control_text['pose'][kind])
         self.kfs_test_button.configure(
             text=control_text['kfs_alignment'])
+        self.tip_test_button.configure(
+            text=control_text['tip_alignment'])
 
     def _sync_kfs_load_feedback(self):
         generation, feedback = (

@@ -609,6 +609,19 @@ class YoloTargetDetector(Node):
             confidences,
             class_ids,
         ):
+            confidence_value = float(confidence)
+            x1 = float(coordinates_row[0])
+            y1 = float(coordinates_row[1])
+            x2 = float(coordinates_row[2])
+            y2 = float(coordinates_row[3])
+            # The FP16 TensorRT engine occasionally emits NaN confidence; drop
+            # such detections instead of failing the whole frame.
+            if not math.isfinite(confidence_value) or not (
+                0.0 <= confidence_value <= 1.0
+            ):
+                continue
+            if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
+                continue
             class_id = int(class_id_value)
             if isinstance(names, dict):
                 class_name = str(names.get(class_id, class_id))
@@ -618,11 +631,11 @@ class YoloTargetDetector(Node):
                 DetectionCandidate(
                     class_id=class_id,
                     class_name=class_name,
-                    confidence=float(confidence),
-                    x1=float(coordinates_row[0]),
-                    y1=float(coordinates_row[1]),
-                    x2=float(coordinates_row[2]),
-                    y2=float(coordinates_row[3]),
+                    confidence=confidence_value,
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
                 )
             )
         return candidates

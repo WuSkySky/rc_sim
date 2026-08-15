@@ -22,6 +22,7 @@ class StageTwoPointTwoController(Node):
     LEFT = (0, -1)
     RIGHT = (0, 1)
     POINT_ONE_COVERED_ENTRY = (4, 2)
+    KFS_TRUE_CLASS = 'true'
 
     def __init__(self):
         super().__init__('stage_two_point_two')
@@ -31,6 +32,7 @@ class StageTwoPointTwoController(Node):
         self.current_pose = None
         self.loaded_count = 0
         self.arrival_direction = None
+        self._skip_kfs_detection = False
 
         self.declare_parameter('service_name', '/r2/stage_two_point_two')
         self.declare_parameter('current_pose_topic', '/r2/pose_feedback')
@@ -58,7 +60,6 @@ class StageTwoPointTwoController(Node):
         self.declare_parameter('lower_kfs_edge_offset', 0.4)
         self.declare_parameter('release_edge_offset', 0.2)
         self.declare_parameter('detection_sample_count', 10)
-        self.declare_parameter('target_class_name', 'r2')
 
         service_name = self.get_parameter('service_name').value
         pose_topic = self.get_parameter('current_pose_topic').value
@@ -116,10 +117,6 @@ class StageTwoPointTwoController(Node):
             self.get_parameter('detection_sample_count').value)
         if self.detection_sample_count <= 0:
             raise ValueError('detection_sample_count must be positive')
-        self.target_class_name = str(
-            self.get_parameter('target_class_name').value)
-        if not self.target_class_name:
-            raise ValueError('target_class_name must not be empty')
 
         self.get_cell(self.initial_index)
         if not 0 <= self.terminal_forward_index < len(self.forward_x):
@@ -224,6 +221,7 @@ class StageTwoPointTwoController(Node):
     def handle_task(self, request, response):
         with self.service_lock:
             self.loaded_count = int(request.loaded_count)
+            self._skip_kfs_detection = bool(request.skip_kfs_detection)
             self.arrival_direction = None
             try:
                 self.validate_decision(request.fake_kfs_decision)
@@ -260,12 +258,13 @@ class StageTwoPointTwoController(Node):
                 f'{loaded_count}')
 
     def wait_for_dependencies(self):
-        dependencies = (
+        dependencies = [
             (self.move_client, 'MoveToPose'),
             (self.traverse_client, 'TraverseStep'),
-            (self.detection_client, 'GetKfsType'),
             (self.kfs_action_client, 'KfsAction'),
-        )
+        ]
+        if not self._skip_kfs_detection:
+            dependencies.append((self.detection_client, 'GetKfsType'))
         for client, name in dependencies:
             if not client.wait_for_service(
                 timeout_sec=self.dependency_timeout_sec
@@ -301,6 +300,10 @@ class StageTwoPointTwoController(Node):
             raise RuntimeError(f'MoveToPose failed: {response.message}')
 
     def detect_kfs_type(self):
+        """Return (front, left, right) class names; skip returns all empty."""
+        if self._skip_kfs_detection:
+            return '', '', ''
+
         request = GetKfsType.Request()
         request.sample_count = self.detection_sample_count
         request.timeout_sec = self.detection_timeout_sec
@@ -309,9 +312,12 @@ class StageTwoPointTwoController(Node):
             self.detection_timeout_sec,
             'GetKfsType',
         )
-        if not response.success:
-            raise RuntimeError(f'GetKfsType failed: {response.message}')
-        return response.class_name
+        # 只看各相机结果；超时/低置信度时 class_name 为空，静默视为非 true。
+        return (
+            response.front.class_name,
+            response.left.class_name,
+            response.right.class_name,
+        )
 
     def load_kfs(self, mode):
         request = KfsAction.Request()
@@ -358,6 +364,16 @@ class StageTwoPointTwoController(Node):
     @staticmethod
     def add_index(index, delta):
         return index[0] + delta[0], index[1] + delta[1]
+
+    @staticmethod
+    def rotate_left(delta):
+        # 机器人左侧摄像头对应的网格方向：逆时针 90°。
+        return -delta[1], delta[0]
+
+    @staticmethod
+    def rotate_right(delta):
+        # 机器人右侧摄像头对应的网格方向：顺时针 90°。
+        return delta[1], -delta[0]
 
     def cell_direction(self, source_index, target_index):
         index_distance = (
@@ -452,7 +468,7 @@ class StageTwoPointTwoController(Node):
 
         return tuple(deltas)
 
-    def pickup_kfs(self, current_index, target_index):
+    def pickup_kfs(self, current_index, target_index, return_to_center=True):
         current = self.get_cell(current_index)
         target = self.get_cell(target_index)
         direction_x, direction_y = self.cell_direction(
@@ -502,53 +518,67 @@ class StageTwoPointTwoController(Node):
             self.move_to_pose(edge_x, edge_y, direction_yaw)
 
         self.load_kfs(load_modes[self.loaded_count])
-        self.move_to_pose(current[0], current[1], direction_yaw)
+        if return_to_center:
+            self.move_to_pose(current[0], current[1], direction_yaw)
 
-    def detect_direction(self, current_index, delta):
-        current = self.get_cell(current_index)
-        target_index = self.add_index(current_index, delta)
-        target_forward_index, target_lateral_index = target_index
-        self.get_cell(target_index)
-        cached_result = self.cell_detection_results[
-            target_forward_index
-        ][target_lateral_index - 1]
-        if cached_result is not None:
-            displayed_class = (
-                cached_result if cached_result else '<empty>')
-            self.get_logger().info(
-                f'Cached detection {current_index}->{target_index}: '
-                f'{displayed_class}')
-            return cached_result
+    def detect_directions(self, current_index, arrival_delta):
+        """One fused detection; return {delta: class_name} for 3 directions."""
+        if self._skip_kfs_detection:
+            return {}
 
-        direction_x, direction_y = self.cell_direction(
-            current_index, target_index)
-        direction_yaw = math.atan2(direction_y, direction_x)
-        self.move_to_pose(current[0], current[1], direction_yaw)
+        front_class, left_class, right_class = self.detect_kfs_type()
+        direction_to_class = {
+            arrival_delta: front_class,
+            self.rotate_left(arrival_delta): left_class,
+            self.rotate_right(arrival_delta): right_class,
+        }
 
-        class_name = self.detect_kfs_type()
-        displayed_class = class_name if class_name else '<empty>'
-        self.get_logger().info(
-            f'Detection {current_index}->{target_index}: '
-            f'{displayed_class}')
-
-        if class_name == self.target_class_name:
-            self.pickup_kfs(current_index, target_index)
-
-        self.cell_detection_results[target_forward_index][
-            target_lateral_index - 1
-        ] = class_name
-        return class_name
-
-    def scan_current_cell(self, current_index, arrival_delta):
-        scan_results = {}
-
-        for delta in self.scan_deltas(current_index, arrival_delta):
-            if self.loaded_count == 3 and delta != self.FORWARD:
+        direction_results = {}
+        for delta, detected_class in direction_to_class.items():
+            target_index = self.add_index(current_index, delta)
+            target_forward, target_lateral = target_index
+            try:
+                self.get_cell(target_index)
+            except ValueError:
                 continue
-            scan_results[delta] = self.detect_direction(
-                current_index, delta)
+            cached = self.cell_detection_results[
+                target_forward
+            ][target_lateral - 1]
+            direction_results[delta] = (
+                cached if cached is not None else detected_class
+            )
+        return direction_results
 
-        return scan_results
+    def load_directions(
+        self, current_index, direction_results, load_deltas, next_delta
+    ):
+        """Load KFS on load_deltas; next_delta last and stays at the edge."""
+        if self._skip_kfs_detection:
+            return
+        ordered = [delta for delta in load_deltas if delta != next_delta]
+        if next_delta in load_deltas:
+            ordered.append(next_delta)
+        for delta in ordered:
+            target_index = self.add_index(current_index, delta)
+            target_forward, target_lateral = target_index
+            if self.cell_detection_results[
+                target_forward
+            ][target_lateral - 1] is not None:
+                continue
+            class_name = direction_results.get(delta, '')
+            if class_name == self.KFS_TRUE_CLASS:
+                self.pickup_kfs(
+                    current_index,
+                    target_index,
+                    return_to_center=(delta != next_delta),
+                )
+                self.cell_detection_results[target_forward][
+                    target_lateral - 1
+                ] = class_name
+            else:
+                self.cell_detection_results[target_forward][
+                    target_lateral - 1
+                ] = class_name
 
     def selected_lateral_delta(self, decision, current_index):
         lateral_index = current_index[1]
@@ -568,35 +598,39 @@ class StageTwoPointTwoController(Node):
             target_index = self.add_index(current_index, next_delta)
             self.move_one_cell(current_index, target_index)
             current_index = target_index
+            arrival_delta = next_delta
 
             if current_index[0] == self.terminal_forward_index:
                 self.get_logger().info(
                     f'Reached terminal cell {current_index}')
                 return current_index
 
-            scan_results = self.scan_current_cell(
-                current_index, next_delta)
-            front_result = scan_results.get(self.FORWARD)
+            direction_results = self.detect_directions(
+                current_index, arrival_delta)
+            front_result = direction_results.get(self.FORWARD)
 
             force_lateral = current_index == (1, 2)
             front_is_blocked = (
                 front_result is not None and
                 front_result != '' and
-                front_result != self.target_class_name
+                front_result != self.KFS_TRUE_CLASS
             )
             if force_lateral or front_is_blocked:
                 next_delta = self.selected_lateral_delta(
                     decision, current_index)
-                if (
-                    self.loaded_count == 3 and
-                    next_delta not in scan_results
-                ):
-                    self.detect_direction(current_index, next_delta)
                 reason = '(1, 2)' if force_lateral else 'front blocked'
                 self.get_logger().info(
                     f'Next move is lateral due to {reason}')
             else:
                 next_delta = self.FORWARD
+
+            # 观察范围 = scan_deltas + (满 3 个时被迫横向的 next_delta)。
+            load_deltas = list(
+                self.scan_deltas(current_index, arrival_delta))
+            if self.loaded_count == 3 and next_delta not in load_deltas:
+                load_deltas.append(next_delta)
+            self.load_directions(
+                current_index, direction_results, load_deltas, next_delta)
 
     @staticmethod
     def yaw_from_quaternion(quaternion):

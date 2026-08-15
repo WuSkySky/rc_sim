@@ -35,4 +35,3 @@ stage_two_point_two:
     release_edge_offset: 0.20
 
     detection_sample_count: 10
-    target_class_name: r2
