@@ -6,6 +6,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from robot_r2_interfaces.srv import (
+    Align,
     GetKfsType,
     KfsAction,
     MoveToPose,
@@ -32,10 +33,13 @@ class StageTwoPointOneController(Node):
         self.declare_parameter('set_lift_service', '/r2/lift/set')
         self.declare_parameter(
             'get_kfs_type_service', '/r2/detection/get_type')
+        self.declare_parameter(
+            'align_to_kfs_service', '/r2/align_to_kfs')
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('move_timeout_sec', 35.0)
         self.declare_parameter('lift_timeout_sec', 15.0)
         self.declare_parameter('detection_timeout_sec', 10.0)
+        self.declare_parameter('align_timeout_sec', 15.0)
         self.declare_parameter('load_timeout_sec', 70.0)
         self.declare_parameter('release_timeout_sec', 70.0)
 
@@ -60,6 +64,8 @@ class StageTwoPointOneController(Node):
         lift_service = self.get_parameter('set_lift_service').value
         detection_service = self.get_parameter(
             'get_kfs_type_service').value
+        align_service = self.get_parameter(
+            'align_to_kfs_service').value
         self.dependency_timeout_sec = self._positive_float_parameter(
             'dependency_timeout_sec')
         self.move_timeout_sec = self._positive_float_parameter(
@@ -68,6 +74,8 @@ class StageTwoPointOneController(Node):
             'lift_timeout_sec')
         self.detection_timeout_sec = self._positive_float_parameter(
             'detection_timeout_sec')
+        self.align_timeout_sec = self._positive_float_parameter(
+            'align_timeout_sec')
         self.load_timeout_sec = self._positive_float_parameter(
             'load_timeout_sec')
         self.release_timeout_sec = self._positive_float_parameter(
@@ -105,6 +113,11 @@ class StageTwoPointOneController(Node):
         self.detection_client = self.create_client(
             GetKfsType,
             detection_service,
+            callback_group=self.callback_group,
+        )
+        self.align_client = self.create_client(
+            Align,
+            align_service,
             callback_group=self.callback_group,
         )
         self.kfs_action_client = self.create_client(
@@ -177,6 +190,7 @@ class StageTwoPointOneController(Node):
         ]
         if not self._skip_kfs_detection:
             dependencies.append((self.detection_client, 'GetKfsType'))
+            dependencies.append((self.align_client, 'AlignToKfs'))
         for client, name in dependencies:
             if not client.wait_for_service(
                 timeout_sec=self.dependency_timeout_sec
@@ -267,6 +281,20 @@ class StageTwoPointOneController(Node):
                 f'KfsAction release failed: {response.message}')
         self.loaded_count -= 1
 
+    def align_kfs(self):
+        request = Align.Request()
+        # 0.0 -> the alignment node uses its own pixel_tolerance / timeout.
+        request.pixel_tolerance = 0.0
+        request.timeout_sec = 0.0
+        response = self.wait_for_future(
+            self.align_client.call_async(request),
+            self.align_timeout_sec,
+            'AlignToKfs',
+        )
+        if not response.success:
+            self.get_logger().warn(
+                f'KFS 对齐未完成，继续装载：{response.message}')
+
     def cell_center_from_edge_pose(self, edge_pose):
         return (
             edge_pose[0] - (
@@ -316,6 +344,9 @@ class StageTwoPointOneController(Node):
 
         if self.loaded_count == 3:
             self.release_at_arrival_edge(loading_edge_pose)
+
+        # 识别之后、装载之前，在装载边缘点调用视觉对齐。
+        self.align_kfs()
 
         load_mode = (
             KfsAction.Request.MODE_2

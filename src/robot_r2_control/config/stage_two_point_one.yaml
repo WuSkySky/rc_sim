@@ -4,10 +4,12 @@ stage_two_point_one:
     move_to_pose_service: /r2/move_to_pose
     set_lift_service: /r2/lift/set
     get_kfs_type_service: /r2/detection/get_type
+    align_to_kfs_service: /r2/align_to_kfs
     dependency_timeout_sec: 2.0
     move_timeout_sec: 35.0
     lift_timeout_sec: 15.0
     detection_timeout_sec: 10.0
+    align_timeout_sec: 15.0
     load_timeout_sec: 70.0
     release_timeout_sec: 70.0
 
