@@ -13,9 +13,13 @@
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <robot_r2_interfaces/msg/camera_frame.hpp>
+#include <robot_r2_interfaces/msg/kfs_fused_debug_images.hpp>
+#include <robot_r2_interfaces/msg/kfs_fused_processed_detections.hpp>
+#include <robot_r2_interfaces/msg/kfs_fused_raw_detections.hpp>
 #include <robot_r2_interfaces/msg/kfs_processed_detection.hpp>
 #include <robot_r2_interfaces/msg/kfs_raw_box.hpp>
 #include <robot_r2_interfaces/msg/kfs_raw_detections.hpp>
+#include <robot_r2_interfaces/msg/kfs_type_result.hpp>
 #include <robot_r2_interfaces/srv/get_kfs_type.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/header.hpp>
@@ -48,6 +52,11 @@ namespace {
 
 using CameraFrame = robot_r2_interfaces::msg::CameraFrame;
 using GetKfsType = robot_r2_interfaces::srv::GetKfsType;
+
+constexpr char kRawTopic[] = "/r2/detection/raw";
+constexpr char kProcessedTopic[] = "/r2/detection/processed";
+constexpr char kDebugTopic[] = "/r2/detection/debug";
+constexpr char kServiceName[] = "/r2/detection/get_type";
 
 void check_cuda(cudaError_t status, const char *operation) {
   if (status != cudaSuccess) {
@@ -396,25 +405,15 @@ private:
 struct CameraState {
   std::string name;
   std::string image_topic;
-  std::string raw_topic;
-  std::string processed_topic;
-  std::string debug_topic;
-  std::string service_name;
   CameraFrame::ConstSharedPtr latest_frame;
   std::chrono::steady_clock::time_point received_at{};
   std::uint64_t generation{};
   std::uint64_t processed_generation{};
   std::mutex vote_mutex;
   std::condition_variable vote_condition;
-  std::mutex service_mutex;
   bool vote_active{};
   std::size_t vote_target{};
   std::vector<std::string> vote_samples;
-  rclcpp::Publisher<robot_r2_interfaces::msg::KfsRawDetections>::SharedPtr
-      raw_publisher;
-  rclcpp::Publisher<robot_r2_interfaces::msg::KfsProcessedDetection>::SharedPtr
-      processed_publisher;
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_publisher;
 };
 
 struct PendingFrame {
@@ -525,22 +524,21 @@ public:
     service_callback_group_ =
         create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
+    raw_publisher_ =
+        create_publisher<robot_r2_interfaces::msg::KfsFusedRawDetections>(
+            kRawTopic, 10);
+    processed_publisher_ =
+        create_publisher<
+            robot_r2_interfaces::msg::KfsFusedProcessedDetections>(
+            kProcessedTopic, 10);
+    debug_publisher_ =
+        create_publisher<robot_r2_interfaces::msg::KfsFusedDebugImages>(
+            kDebugTopic, sensor_qos);
+
     for (std::size_t index = 0; index < names.size(); ++index) {
       auto state = std::make_unique<CameraState>();
       state->name = names[index];
       state->image_topic = "/r2/" + names[index] + "_camera/image_raw";
-      state->raw_topic = "/r2/detection/" + names[index] + "/raw";
-      state->processed_topic = "/r2/detection/" + names[index] + "/processed";
-      state->debug_topic = "/r2/detection/" + names[index] + "/debug";
-      state->service_name = "/r2/detection/" + names[index] + "/get_type";
-      state->raw_publisher =
-          create_publisher<robot_r2_interfaces::msg::KfsRawDetections>(
-              state->raw_topic, 10);
-      state->processed_publisher =
-          create_publisher<robot_r2_interfaces::msg::KfsProcessedDetection>(
-              state->processed_topic, 10);
-      state->debug_publisher = create_publisher<sensor_msgs::msg::Image>(
-          state->debug_topic, sensor_qos);
       cameras_.push_back(std::move(state));
 
       rclcpp::SubscriptionOptions options;
@@ -551,15 +549,15 @@ public:
             on_image(index, std::move(message));
           },
           options));
-
-      services_.push_back(create_service<GetKfsType>(
-          cameras_[index]->service_name,
-          [this, index](const std::shared_ptr<GetKfsType::Request> request,
-                        std::shared_ptr<GetKfsType::Response> response) {
-            handle_vote_service(index, request, response);
-          },
-          rmw_qos_profile_services_default, service_callback_group_));
     }
+
+    service_ = create_service<GetKfsType>(
+        kServiceName,
+        [this](const std::shared_ptr<GetKfsType::Request> request,
+               std::shared_ptr<GetKfsType::Response> response) {
+          handle_vote_service(request, response);
+        },
+        rmw_qos_profile_services_default, service_callback_group_);
 
     replace_inference_timer(configuration->inference_rate);
     RCLCPP_INFO(get_logger(),
@@ -900,6 +898,13 @@ private:
       return;
     }
 
+    robot_r2_interfaces::msg::KfsFusedRawDetections raw_batch;
+    robot_r2_interfaces::msg::KfsFusedProcessedDetections processed_batch;
+    const bool publish_debug =
+        configuration->visualization_enabled &&
+        debug_publisher_->get_subscription_count() > 0;
+    robot_r2_interfaces::msg::KfsFusedDebugImages debug_batch;
+
     try {
       const int chunk_size = std::max(1, engine_->preferred_chunk_size());
       for (std::size_t begin = 0; begin < valid.size(); begin += chunk_size) {
@@ -910,15 +915,25 @@ private:
         const auto results = engine_->infer(chunk_views);
         for (std::size_t offset = 0; offset < results.size(); ++offset) {
           const PendingFrame &item = valid[begin + offset];
-          publish_result(item.camera_index, *item.message,
-                         views[begin + offset], results[offset],
-                         *configuration);
+          fill_result(item.camera_index, *item.message, views[begin + offset],
+                      results[offset], *configuration, raw_batch,
+                      processed_batch);
+          if (publish_debug) {
+            fill_debug(item.camera_index, *item.message, views[begin + offset],
+                       results[offset], *configuration, debug_batch);
+          }
         }
       }
     } catch (const std::exception &error) {
       RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000,
                             "Fused TensorRT inference failed: %s",
                             error.what());
+    }
+
+    raw_publisher_->publish(raw_batch);
+    processed_publisher_->publish(processed_batch);
+    if (publish_debug) {
+      debug_publisher_->publish(debug_batch);
     }
 
     const double elapsed = std::chrono::duration<double>(
@@ -942,10 +957,52 @@ private:
     return header;
   }
 
-  void publish_result(std::size_t camera_index, const CameraFrame &frame,
-                      const FrameView &view,
-                      const Classification &classification,
-                      const KfsConfiguration &configuration) {
+  static robot_r2_interfaces::msg::KfsRawDetections &
+  raw_slot(robot_r2_interfaces::msg::KfsFusedRawDetections &batch,
+           std::size_t camera_index) {
+    switch (camera_index) {
+    case 0:
+      return batch.front;
+    case 1:
+      return batch.left;
+    default:
+      return batch.right;
+    }
+  }
+
+  static robot_r2_interfaces::msg::KfsProcessedDetection &
+  processed_slot(robot_r2_interfaces::msg::KfsFusedProcessedDetections &batch,
+                 std::size_t camera_index) {
+    switch (camera_index) {
+    case 0:
+      return batch.front;
+    case 1:
+      return batch.left;
+    default:
+      return batch.right;
+    }
+  }
+
+  static sensor_msgs::msg::Image &
+  debug_slot(robot_r2_interfaces::msg::KfsFusedDebugImages &batch,
+             std::size_t camera_index) {
+    switch (camera_index) {
+    case 0:
+      return batch.front;
+    case 1:
+      return batch.left;
+    default:
+      return batch.right;
+    }
+  }
+
+  void fill_result(std::size_t camera_index, const CameraFrame &frame,
+                   const FrameView &view,
+                   const Classification &classification,
+                   const KfsConfiguration &configuration,
+                   robot_r2_interfaces::msg::KfsFusedRawDetections &raw_batch,
+                   robot_r2_interfaces::msg::KfsFusedProcessedDetections
+                       &processed_batch) {
     CameraState &state = *cameras_.at(camera_index);
     const std::string &class_name =
         configuration.class_names.at(classification.class_id);
@@ -955,12 +1012,11 @@ private:
     box.class_name = class_name;
     box.class_id = classification.class_id;
     box.confidence = classification.confidence;
-    robot_r2_interfaces::msg::KfsRawDetections raw;
+    auto &raw = raw_slot(raw_batch, camera_index);
     raw.header = header;
     raw.boxes.push_back(std::move(box));
-    state.raw_publisher->publish(std::move(raw));
 
-    robot_r2_interfaces::msg::KfsProcessedDetection processed;
+    auto &processed = processed_slot(processed_batch, camera_index);
     processed.header = header;
     processed.image_width = static_cast<std::int32_t>(view.width);
     processed.image_height = static_cast<std::int32_t>(view.height);
@@ -968,20 +1024,26 @@ private:
       processed.class_name = class_name;
       processed.confidence = classification.confidence;
     }
-    state.processed_publisher->publish(processed);
     record_vote(state, processed.class_name);
-
-    if (configuration.visualization_enabled &&
-        state.debug_publisher->get_subscription_count() > 0) {
-      publish_debug(state, frame, view, class_name, classification.confidence,
-                    configuration.confidence_threshold);
-    }
   }
 
-  void publish_debug(CameraState &state, const CameraFrame &frame,
-                     const FrameView &view,
-                     const std::string &class_name, float confidence,
-                     double confidence_threshold) {
+  void fill_debug(std::size_t camera_index, const CameraFrame &frame,
+                  const FrameView &view,
+                  const Classification &classification,
+                  const KfsConfiguration &configuration,
+                  robot_r2_interfaces::msg::KfsFusedDebugImages &debug_batch) {
+    const std::string &class_name =
+        configuration.class_names.at(classification.class_id);
+    auto &output = debug_slot(debug_batch, camera_index);
+    output = make_debug_image(frame, view, class_name,
+                              classification.confidence,
+                              configuration.confidence_threshold);
+  }
+
+  static sensor_msgs::msg::Image
+  make_debug_image(const CameraFrame &frame, const FrameView &view,
+                   const std::string &class_name, float confidence,
+                   double confidence_threshold) {
     cv::Mat source(view.height, view.width,
                    view.channels == 3 ? CV_8UC3 : CV_8UC1,
                    const_cast<std::uint8_t *>(view.data), view.step);
@@ -1006,7 +1068,7 @@ private:
     output.step =
         static_cast<sensor_msgs::msg::Image::_step_type>(bgr.cols * 3);
     output.data.assign(bgr.datastart, bgr.dataend);
-    state.debug_publisher->publish(std::move(output));
+    return output;
   }
 
   static void record_vote(CameraState &state, const std::string &class_name) {
@@ -1036,12 +1098,21 @@ private:
     return selected;
   }
 
-  void
-  handle_vote_service(std::size_t camera_index,
-                      const std::shared_ptr<GetKfsType::Request> request,
-                      const std::shared_ptr<GetKfsType::Response> response) {
-    CameraState &state = *cameras_.at(camera_index);
-    std::unique_lock<std::mutex> service_lock(state.service_mutex);
+  static robot_r2_interfaces::msg::KfsTypeResult &
+  type_result_slot(GetKfsType::Response &response, std::size_t camera_index) {
+    switch (camera_index) {
+    case 0:
+      return response.front;
+    case 1:
+      return response.left;
+    default:
+      return response.right;
+    }
+  }
+
+  void handle_vote_service(
+      const std::shared_ptr<GetKfsType::Request> request,
+      const std::shared_ptr<GetKfsType::Response> response) {
     if (request->sample_count == 0) {
       response->success = false;
       response->message = "sample_count must be positive";
@@ -1052,6 +1123,7 @@ private:
       response->message = "timeout_sec must be finite";
       return;
     }
+    const std::size_t sample_count = request->sample_count;
     const auto configuration = std::atomic_load(&configuration_);
     const double timeout = request->timeout_sec > 0.0
                                ? request->timeout_sec
@@ -1059,38 +1131,81 @@ private:
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::duration<double>(timeout);
 
-    std::unique_lock<std::mutex> vote_lock(state.vote_mutex);
-    state.vote_samples.clear();
-    state.vote_target = request->sample_count;
-    state.vote_active = true;
-    while (rclcpp::ok() && state.vote_samples.size() < state.vote_target) {
-      if (state.vote_condition.wait_until(vote_lock, deadline) ==
-          std::cv_status::timeout) {
+    // Serialize concurrent GetKfsType requests so they never fight over the
+    // shared per-camera vote state.
+    std::unique_lock<std::mutex> service_lock(service_mutex_);
+    for (auto &camera : cameras_) {
+      std::lock_guard<std::mutex> vote_lock(camera->vote_mutex);
+      camera->vote_samples.clear();
+      camera->vote_target = sample_count;
+      camera->vote_active = true;
+    }
+
+    // Poll all three cameras until every one collected enough samples or the
+    // deadline expires. Per-camera conditions fire independently, so a short
+    // poll is simpler than waiting on three condition variables at once.
+    while (rclcpp::ok()) {
+      bool all_complete = true;
+      for (const auto &camera : cameras_) {
+        std::lock_guard<std::mutex> vote_lock(camera->vote_mutex);
+        if (camera->vote_samples.size() < sample_count) {
+          all_complete = false;
+        }
+      }
+      if (all_complete) {
         break;
       }
+      if (std::chrono::steady_clock::now() >= deadline) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    const auto samples = state.vote_samples;
-    state.vote_active = false;
-    state.vote_target = 0;
-    vote_lock.unlock();
 
-    if (samples.size() < request->sample_count) {
-      response->success = false;
-      response->message = "Detection vote timed out after collecting " +
-                          std::to_string(samples.size()) + "/" +
-                          std::to_string(request->sample_count) + " samples";
-      return;
+    bool all_succeeded = true;
+    for (std::size_t index = 0; index < cameras_.size(); ++index) {
+      CameraState &camera = *cameras_[index];
+      std::vector<std::string> samples;
+      {
+        std::lock_guard<std::mutex> vote_lock(camera.vote_mutex);
+        samples = camera.vote_samples;
+        camera.vote_active = false;
+        camera.vote_target = 0;
+      }
+      auto &result = type_result_slot(*response, index);
+      if (samples.size() < sample_count) {
+        all_succeeded = false;
+        result.success = false;
+        result.message =
+            "Detection vote timed out after collecting " +
+            std::to_string(samples.size()) + "/" +
+            std::to_string(sample_count) + " samples";
+        result.class_name = "";
+        continue;
+      }
+      result.success = true;
+      result.message = "Selected most frequent class from " +
+                       std::to_string(samples.size()) + " samples";
+      result.class_name = select_vote(samples);
     }
-    response->success = true;
-    response->message = "Selected most frequent class from " +
-                        std::to_string(samples.size()) + " samples";
-    response->class_name = select_vote(samples);
+
+    response->success = all_succeeded;
+    response->message =
+        all_succeeded ? "Selected most frequent classes for all cameras"
+                      : "One or more cameras timed out during voting";
   }
 
   std::mutex frame_mutex_;
   std::vector<std::unique_ptr<CameraState>> cameras_;
   std::vector<rclcpp::Subscription<CameraFrame>::SharedPtr> subscriptions_;
-  std::vector<rclcpp::Service<GetKfsType>::SharedPtr> services_;
+  rclcpp::Publisher<robot_r2_interfaces::msg::KfsFusedRawDetections>::SharedPtr
+      raw_publisher_;
+  rclcpp::Publisher<
+      robot_r2_interfaces::msg::KfsFusedProcessedDetections>::SharedPtr
+      processed_publisher_;
+  rclcpp::Publisher<robot_r2_interfaces::msg::KfsFusedDebugImages>::SharedPtr
+      debug_publisher_;
+  rclcpp::Service<GetKfsType>::SharedPtr service_;
+  std::mutex service_mutex_;
   rclcpp::CallbackGroup::SharedPtr image_callback_group_;
   rclcpp::CallbackGroup::SharedPtr inference_callback_group_;
   rclcpp::CallbackGroup::SharedPtr service_callback_group_;

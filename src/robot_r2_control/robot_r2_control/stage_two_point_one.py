@@ -16,12 +16,14 @@ from robot_r2_interfaces.srv import (
 
 class StageTwoPointOneController(Node):
     KFS_ACTION_SERVICE = '/r2/kfs/action'
+    KFS_TRUE_CLASS = 'true'
 
     def __init__(self):
         super().__init__('stage_two_point_one')
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
         self.loaded_count = 0
+        self._skip_kfs_detection = False
         self.arrival_direction = None
         self.current_cell_center = None
 
@@ -46,11 +48,12 @@ class StageTwoPointOneController(Node):
         self.declare_parameter('high_kfs_edge_offset', 0.2)
         self.declare_parameter('release_edge_offset', 0.2)
         self.declare_parameter('detection_sample_count', 10)
-        self.declare_parameter('target_class_name', 'r2')
         self.declare_parameter('lift_up_front', 0.2)
         self.declare_parameter('lift_up_rear', 0.2)
-        self.declare_parameter('lift_down_front', 0.0)
-        self.declare_parameter('lift_down_rear', 0.0)
+        self.declare_parameter('lift_initial_front', 0.01)
+        self.declare_parameter('lift_initial_rear', 0.01)
+        self.declare_parameter('lift_down_front', 0.01)
+        self.declare_parameter('lift_down_rear', 0.01)
 
         service_name = self.get_parameter('service_name').value
         move_service = self.get_parameter('move_to_pose_service').value
@@ -84,12 +87,9 @@ class StageTwoPointOneController(Node):
             self.get_parameter('detection_sample_count').value)
         if self.detection_sample_count <= 0:
             raise ValueError('detection_sample_count must be positive')
-        self.target_class_name = str(
-            self.get_parameter('target_class_name').value)
-        if not self.target_class_name:
-            raise ValueError('target_class_name must not be empty')
 
         self.lift_up = self._lift_pair('lift_up')
+        self.lift_initial = self._lift_pair('lift_initial')
         self.lift_down = self._lift_pair('lift_down')
 
         self.move_client = self.create_client(
@@ -144,6 +144,7 @@ class StageTwoPointOneController(Node):
     def handle_task(self, request, response):
         with self.service_lock:
             self.loaded_count = int(request.loaded_count)
+            self._skip_kfs_detection = bool(request.skip_kfs_detection)
             self.arrival_direction = None
             self.current_cell_center = None
             try:
@@ -169,12 +170,13 @@ class StageTwoPointOneController(Node):
                 f'{loaded_count}')
 
     def wait_for_dependencies(self):
-        dependencies = (
+        dependencies = [
             (self.move_client, 'MoveToPose'),
             (self.lift_client, 'SetLift'),
-            (self.detection_client, 'GetKfsType'),
             (self.kfs_action_client, 'KfsAction'),
-        )
+        ]
+        if not self._skip_kfs_detection:
+            dependencies.append((self.detection_client, 'GetKfsType'))
         for client, name in dependencies:
             if not client.wait_for_service(
                 timeout_sec=self.dependency_timeout_sec
@@ -224,6 +226,10 @@ class StageTwoPointOneController(Node):
             raise RuntimeError(f'SetLift failed: {response.message}')
 
     def detect_kfs_type(self):
+        if self._skip_kfs_detection:
+            # 跳过识别，视为 Unlabeled（非 true，不 load）。
+            return ''
+
         request = GetKfsType.Request()
         request.sample_count = self.detection_sample_count
         request.timeout_sec = self.detection_timeout_sec
@@ -232,9 +238,8 @@ class StageTwoPointOneController(Node):
             self.detection_timeout_sec,
             'GetKfsType',
         )
-        if not response.success:
-            raise RuntimeError(f'GetKfsType failed: {response.message}')
-        return response.class_name
+        # 只看前摄像头；超时/低置信度时 class_name 为空，静默不 load。
+        return response.front.class_name
 
     def load_front_kfs(self, mode):
         request = KfsAction.Request()
@@ -306,7 +311,7 @@ class StageTwoPointOneController(Node):
 
     def detect_and_maybe_load(self, loading_edge_pose):
         class_name = self.detect_kfs_type()
-        if class_name != self.target_class_name:
+        if class_name != self.KFS_TRUE_CLASS:
             return
 
         if self.loaded_count == 3:
@@ -320,6 +325,7 @@ class StageTwoPointOneController(Node):
         self.load_front_kfs(load_mode)
 
     def execute_task(self):
+        self.set_lift(self.lift_initial)
         self.move_to_loading_edge(self.cell_5_3_edge_pose)
         self.set_lift(self.lift_up)
         self.detect_and_maybe_load(self.cell_5_3_edge_pose)

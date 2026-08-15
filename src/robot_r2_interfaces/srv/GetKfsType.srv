@@ -3,4 +3,6 @@ float64 timeout_sec
 ---
 bool success
 string message
-string class_name
+KfsTypeResult front
+KfsTypeResult left
+KfsTypeResult right

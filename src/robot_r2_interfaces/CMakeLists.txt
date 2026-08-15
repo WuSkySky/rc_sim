@@ -3,6 +3,7 @@ project(robot_r2_interfaces)
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -12,6 +13,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/KfsRawBox.msg"
   "msg/KfsRawDetections.msg"
   "msg/KfsProcessedDetection.msg"
+  "msg/KfsFusedRawDetections.msg"
+  "msg/KfsFusedProcessedDetections.msg"
+  "msg/KfsFusedDebugImages.msg"
+  "msg/KfsTypeResult.msg"
   "msg/AlignmentDetection.msg"
   "msg/LedDetection.msg"
   "msg/TargetDetection.msg"
@@ -27,7 +32,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StageTwoPointTwo.srv"
   "srv/TraverseStep.srv"
   "srv/Align.srv"
-  DEPENDENCIES std_msgs
+  DEPENDENCIES sensor_msgs std_msgs
 )
 
 install(

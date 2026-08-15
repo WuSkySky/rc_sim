@@ -73,6 +73,8 @@ def make_node_stub():
     node.relocalization_request_in_flight = False
     node.step_test_request_in_flight = False
     node.step_test_direction = None
+    node.stage_two_point_one_request_in_flight = False
+    node.stage_two_point_one_skip = None
     node.kfs_action_request_in_flight = False
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()
@@ -80,6 +82,7 @@ def make_node_stub():
     node.kfs_action_client = FakeClient()
     node.set_base_pose_client = FakeClient()
     node.step_traverse_client = FakeClient()
+    node.stage_two_point_one_client = FakeClient()
     node.status_events = []
     return node
 
@@ -289,32 +292,19 @@ def test_invalid_relocalization_values_are_rejected(values, error):
     assert not node.set_base_pose_client.requests
 
 
-def test_up_step_test_relocalizes_then_traverses_at_zero_distance():
+def test_up_step_test_traverses_at_zero_distance():
     node = make_node_stub()
 
     success, message = node.request_up_step_test()
 
     assert success
-    assert message == '跨越测试：正在重定位到原点'
-    request = node.set_base_pose_client.requests[0]
-    assert (
-        request.x,
-        request.y,
-        request.z,
-        request.roll,
-        request.pitch,
-        request.yaw,
-    ) == (0.0,) * 6
+    assert message == '上台阶测试：正在跨越（距离 0.0 m）'
+    assert not node.set_base_pose_client.requests
     assert node.step_test_request_in_flight
 
-    node.set_base_pose_client.future.complete(SimpleNamespace(
-        success=True,
-        message='base_link pose updated',
-    ))
     step_request = node.step_traverse_client.requests[0]
     assert step_request.direction == TraverseStep.Request.UP
     assert step_request.distance_to_step == 0.0
-    assert node.step_test_request_in_flight
 
     node.step_traverse_client.future.complete(SimpleNamespace(
         success=True,
@@ -322,25 +312,7 @@ def test_up_step_test_relocalizes_then_traverses_at_zero_distance():
     ))
     assert not node.step_test_request_in_flight
     assert node.pop_status_events() == [
-        '跨越测试：重定位完成，正在上台阶',
         '上台阶测试完成：up step traversal completed',
-    ]
-
-
-def test_up_step_test_stops_when_relocalization_fails():
-    node = make_node_stub()
-
-    success, _ = node.request_up_step_test()
-    assert success
-    node.set_base_pose_client.future.complete(SimpleNamespace(
-        success=False,
-        message='failed to read current base_link pose',
-    ))
-
-    assert not node.step_traverse_client.requests
-    assert not node.step_test_request_in_flight
-    assert node.pop_status_events() == [
-        '跨越测试重定位失败：failed to read current base_link pose',
     ]
 
 
@@ -349,10 +321,6 @@ def test_up_step_test_reports_step_failure_and_releases_busy_state():
 
     success, _ = node.request_up_step_test()
     assert success
-    node.set_base_pose_client.future.complete(SimpleNamespace(
-        success=True,
-        message='base_link pose updated',
-    ))
     node.step_traverse_client.future.complete(SimpleNamespace(
         success=False,
         message='Pose feedback unavailable',
@@ -361,6 +329,56 @@ def test_up_step_test_reports_step_failure_and_releases_busy_state():
     assert not node.step_test_request_in_flight
     assert node.pop_status_events()[-1] == (
         '上台阶失败：Pose feedback unavailable')
+
+
+def test_stage_two_point_one_relocalizes_to_middle_edge_then_calls_service():
+    node = make_node_stub()
+
+    success, message = node.request_stage_two_point_one(skip=True)
+
+    assert success
+    assert message == '2.1 skip测试：正在重定位到中间台阶边缘'
+    request = node.set_base_pose_client.requests[0]
+    assert (request.x, request.y, request.yaw) == (3.15, -3.0, math.pi)
+    assert request.z == 0.0
+    assert request.roll == 0.0
+    assert request.pitch == 0.0
+    assert node.stage_two_point_one_request_in_flight
+    assert not node.stage_two_point_one_client.requests
+
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    step_request = node.stage_two_point_one_client.requests[0]
+    assert step_request.loaded_count == 0
+    assert step_request.skip_kfs_detection is True
+    assert node.stage_two_point_one_request_in_flight
+
+    node.stage_two_point_one_client.future.complete(SimpleNamespace(
+        success=True,
+        message='Stage 2.1 completed',
+    ))
+    assert not node.stage_two_point_one_request_in_flight
+    assert node.pop_status_events() == [
+        '2.1 skip测试：重定位完成，正在调用 2.1',
+        '2.1 skip测试完成：Stage 2.1 completed',
+    ]
+
+
+def test_stage_two_point_one_normal_passes_skip_false():
+    node = make_node_stub()
+
+    success, _ = node.request_stage_two_point_one(skip=False)
+    assert success
+
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    step_request = node.stage_two_point_one_client.requests[0]
+    assert step_request.loaded_count == 0
+    assert step_request.skip_kfs_detection is False
 
 
 def test_parse_relocalization_values_requires_six_values():

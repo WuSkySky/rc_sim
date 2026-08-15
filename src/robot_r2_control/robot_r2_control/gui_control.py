@@ -20,6 +20,7 @@ from robot_r2_interfaces.srv import (
     KfsAction,
     MoveToPose,
     SetBasePose,
+    StageTwoPointOne,
     TraverseStep,
 )
 from std_msgs.msg import Float64
@@ -220,7 +221,15 @@ class GuiControlNode(Node):
     KFS_ACTION_SERVICE = '/r2/kfs/action'
     SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
     STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
+    STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
+
+    # 半车长：base_link 原点到车头的距离（米）。
+    CHASSIS_FRONT_OFFSET = 0.35
+    # 中间车道 (5,2) 与 (4,2) 的边界（车头目标位姿）：x, y, yaw。
+    # (5,2) 中心 (3.4, -3.0)，(4,2) 中心 (2.2, -3.0)，边界 x=2.8；
+    # yaw=pi 使车头朝 -x，从 (5,2) 面向 (4,2)。
+    MIDDLE_STEP_EDGE_POSE = (2.8, -3.0, math.pi)
 
     KFS_LOAD_MOTOR_FEEDBACK_TOPICS = {
         'root_rotate': '/r2/gripper/rotate_feedback',
@@ -294,6 +303,8 @@ class GuiControlNode(Node):
         self.relocalization_request_in_flight = False
         self.step_test_request_in_flight = False
         self.step_test_direction = None
+        self.stage_two_point_one_request_in_flight = False
+        self.stage_two_point_one_skip = None
         self.kfs_action_request_in_flight = False
         self.kfs_parameter_load_in_flight = False
         self.kfs_loader_config_path = resolve_kfs_loader_source_config(
@@ -365,6 +376,8 @@ class GuiControlNode(Node):
             SetBasePose, self.SET_BASE_POSE_SERVICE)
         self.step_traverse_client = self.create_client(
             TraverseStep, self.STEP_TRAVERSE_SERVICE)
+        self.stage_two_point_one_client = self.create_client(
+            StageTwoPointOne, self.STAGE_TWO_POINT_ONE_SERVICE)
         self.motion_timer = self.create_timer(
             1.0 / self.motion_config['motion_publish_rate'],
             self._publish_motion_tick,
@@ -806,8 +819,6 @@ class GuiControlNode(Node):
         with self.state_lock:
             if self._chassis_service_in_flight_locked():
                 return False, '底盘操作正在执行'
-            if not self.set_base_pose_client.service_is_ready():
-                return False, '/r2/set_base_pose 服务不可用'
             if not self.step_traverse_client.service_is_ready():
                 return False, '/r2/step_traverse 服务不可用'
             self.active_manual_keys.clear()
@@ -816,47 +827,19 @@ class GuiControlNode(Node):
             self.step_test_request_in_flight = True
             self.step_test_direction = direction
 
-        self.cmd_vel_publisher.publish(Twist())
-        request = self._make_set_base_pose_request((0.0,) * 6)
-        try:
-            future = self.set_base_pose_client.call_async(request)
-        except Exception as exc:
-            with self.state_lock:
-                self.step_test_request_in_flight = False
-                self.step_test_direction = None
-            return False, f'跨越测试重定位请求发送失败：{exc}'
-        future.add_done_callback(self._on_step_test_relocalization_complete)
-        return True, '跨越测试：正在重定位到原点'
-
-    def _on_step_test_relocalization_complete(self, future):
-        try:
-            response = future.result()
-        except Exception as exc:
-            self._finish_step_test(
-                f'跨越测试重定位调用异常：{exc}')
-            return
-        if response is None:
-            self._finish_step_test('跨越测试重定位失败：无响应')
-            return
-        if not response.success:
-            self._finish_step_test(
-                f'跨越测试重定位失败：{response.message}')
-            return
-
-        with self.state_lock:
-            direction = self.step_test_direction
         direction_name = (
             '上' if direction == TraverseStep.Request.UP else '下')
-        self._queue_status(f'跨越测试：重定位完成，正在{direction_name}台阶')
+        self.cmd_vel_publisher.publish(Twist())
         request = TraverseStep.Request()
         request.direction = direction
         request.distance_to_step = 0.0
         try:
-            step_future = self.step_traverse_client.call_async(request)
+            future = self.step_traverse_client.call_async(request)
         except Exception as exc:
             self._finish_step_test(f'{direction_name}台阶请求发送失败：{exc}')
-            return
-        step_future.add_done_callback(self._on_step_test_complete)
+            return False, f'{direction_name}台阶请求发送失败：{exc}'
+        future.add_done_callback(self._on_step_test_complete)
+        return True, f'{direction_name}台阶测试：正在跨越（距离 0.0 m）'
 
     def _on_step_test_complete(self, future):
         with self.state_lock:
@@ -881,6 +864,104 @@ class GuiControlNode(Node):
         with self.state_lock:
             self.step_test_request_in_flight = False
             self.step_test_direction = None
+        self._queue_status(message)
+
+    @classmethod
+    def _middle_step_edge_center(cls):
+        edge_x, edge_y, edge_yaw = cls.MIDDLE_STEP_EDGE_POSE
+        return (
+            edge_x - cls.CHASSIS_FRONT_OFFSET * math.cos(edge_yaw),
+            edge_y - cls.CHASSIS_FRONT_OFFSET * math.sin(edge_yaw),
+            0.0,
+            0.0,
+            0.0,
+            edge_yaw,
+        )
+
+    def request_stage_two_point_one(self, skip):
+        with self.state_lock:
+            if self._chassis_service_in_flight_locked():
+                return False, '底盘操作正在执行'
+            if not self.set_base_pose_client.service_is_ready():
+                return False, '/r2/set_base_pose 服务不可用'
+            if not self.stage_two_point_one_client.service_is_ready():
+                return False, '/r2/stage_two_point_one 服务不可用'
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.stage_two_point_one_request_in_flight = True
+            self.stage_two_point_one_skip = bool(skip)
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = self._make_set_base_pose_request(
+            self._middle_step_edge_center())
+        try:
+            future = self.set_base_pose_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.stage_two_point_one_request_in_flight = False
+                self.stage_two_point_one_skip = None
+            return False, f'2.1 测试重定位请求发送失败：{exc}'
+        future.add_done_callback(
+            self._on_stage_two_point_one_relocalization_complete)
+        skip_name = 'skip' if skip else '正常'
+        return True, f'2.1 {skip_name}测试：正在重定位到中间台阶边缘'
+
+    def _on_stage_two_point_one_relocalization_complete(self, future):
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_two_point_one(
+                f'2.1 测试重定位调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_two_point_one('2.1 测试重定位失败：无响应')
+            return
+        if not response.success:
+            self._finish_stage_two_point_one(
+                f'2.1 测试重定位失败：{response.message}')
+            return
+
+        with self.state_lock:
+            skip = self.stage_two_point_one_skip
+        skip_name = 'skip' if skip else '正常'
+        self._queue_status(f'2.1 {skip_name}测试：重定位完成，正在调用 2.1')
+
+        request = StageTwoPointOne.Request()
+        request.loaded_count = 0
+        request.skip_kfs_detection = bool(skip)
+        try:
+            step_future = self.stage_two_point_one_client.call_async(request)
+        except Exception as exc:
+            self._finish_stage_two_point_one(
+                f'2.1 {skip_name}测试请求发送失败：{exc}')
+            return
+        step_future.add_done_callback(self._on_stage_two_point_one_complete)
+
+    def _on_stage_two_point_one_complete(self, future):
+        with self.state_lock:
+            skip = self.stage_two_point_one_skip
+        skip_name = 'skip' if skip else '正常'
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_two_point_one(
+                f'2.1 {skip_name}测试调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_two_point_one(
+                f'2.1 {skip_name}测试失败：无响应')
+        elif response.success:
+            self._finish_stage_two_point_one(
+                f'2.1 {skip_name}测试完成：{response.message}')
+        else:
+            self._finish_stage_two_point_one(
+                f'2.1 {skip_name}测试失败：{response.message}')
+
+    def _finish_stage_two_point_one(self, message):
+        with self.state_lock:
+            self.stage_two_point_one_request_in_flight = False
+            self.stage_two_point_one_skip = None
         self._queue_status(message)
 
     def request_kfs_action(self, action, mode=0):
@@ -952,7 +1033,8 @@ class GuiControlNode(Node):
             self.pose_request_in_flight or
             self.kfs_alignment_request_in_flight or
             self.relocalization_request_in_flight or
-            self.step_test_request_in_flight
+            self.step_test_request_in_flight or
+            self.stage_two_point_one_request_in_flight
         )
 
     def is_pose_request_in_flight(self):
@@ -1131,6 +1213,8 @@ class GuiControlApp:
         self.relocalization_button = None
         self.up_step_test_button = None
         self.down_step_test_button = None
+        self.stage_two_point_one_skip_button = None
+        self.stage_two_point_one_normal_button = None
         self.kfs_test_button = None
         self.kfs_action_buttons = []
         self.kfs_parameter_load_button = None
@@ -1226,23 +1310,44 @@ class GuiControlApp:
             row=3, column=0, sticky='ew', pady=(10, 0))
         self.up_step_test_button = ttk.Button(
             traverse_test_frame,
-            text='上一个台阶（先重定位，距离 0.0 m）',
+            text='上一个台阶（距离 0.0 m）',
             command=self._start_up_step_test,
         )
         self.up_step_test_button.grid(row=0, column=0, sticky='ew')
         self.chassis_buttons.append(self.up_step_test_button)
         self.down_step_test_button = ttk.Button(
             traverse_test_frame,
-            text='下一个台阶（先重定位，距离 0.0 m）',
+            text='下一个台阶（距离 0.0 m）',
             command=self._start_down_step_test,
         )
         self.down_step_test_button.grid(
             row=0, column=1, sticky='ew', padx=(8, 0))
         self.chassis_buttons.append(self.down_step_test_button)
 
+        stage_two_point_one_frame = ttk.LabelFrame(
+            chassis_column, text='Step2.1 测试', padding=12)
+        stage_two_point_one_frame.grid(
+            row=4, column=0, sticky='ew', pady=(10, 0))
+        self.stage_two_point_one_skip_button = ttk.Button(
+            stage_two_point_one_frame,
+            text='2.1 测试（skip 识别）',
+            command=self._start_stage_two_point_one_skip,
+        )
+        self.stage_two_point_one_skip_button.grid(
+            row=0, column=0, sticky='ew')
+        self.chassis_buttons.append(self.stage_two_point_one_skip_button)
+        self.stage_two_point_one_normal_button = ttk.Button(
+            stage_two_point_one_frame,
+            text='2.1 测试（正常识别）',
+            command=self._start_stage_two_point_one_normal,
+        )
+        self.stage_two_point_one_normal_button.grid(
+            row=0, column=1, sticky='ew', padx=(8, 0))
+        self.chassis_buttons.append(self.stage_two_point_one_normal_button)
+
         kfs_test_frame = ttk.LabelFrame(
             chassis_column, text='KFS 测试', padding=12)
-        kfs_test_frame.grid(row=4, column=0, sticky='ew', pady=(10, 0))
+        kfs_test_frame.grid(row=5, column=0, sticky='ew', pady=(10, 0))
         self.kfs_test_button = ttk.Button(
             kfs_test_frame,
             command=self._start_kfs_alignment_test,
@@ -1452,6 +1557,14 @@ class GuiControlApp:
 
     def _start_down_step_test(self):
         _, message = self.node.request_down_step_test()
+        self.status_text.set(message)
+
+    def _start_stage_two_point_one_skip(self):
+        _, message = self.node.request_stage_two_point_one(skip=True)
+        self.status_text.set(message)
+
+    def _start_stage_two_point_one_normal(self):
+        _, message = self.node.request_stage_two_point_one(skip=False)
         self.status_text.set(message)
 
     def _start_kfs_action_test(self, action, mode):

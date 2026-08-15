@@ -16,70 +16,6 @@ DEFAULT_IMAGE_TOPICS = {
     "right": "/r2/right_camera/image_raw",
 }
 
-def _camera_arguments(camera):
-    detection_prefix = f"/r2/detection/{camera}"
-    return [
-        DeclareLaunchArgument(
-            f"{camera}_image_topic",
-            default_value=DEFAULT_IMAGE_TOPICS[camera],
-        ),
-        DeclareLaunchArgument(
-            f"{camera}_raw_topic",
-            default_value=f"{detection_prefix}/raw",
-        ),
-        DeclareLaunchArgument(
-            f"{camera}_processed_topic",
-            default_value=f"{detection_prefix}/processed",
-        ),
-        DeclareLaunchArgument(
-            f"{camera}_debug_topic",
-            default_value=f"{detection_prefix}/debug",
-        ),
-        DeclareLaunchArgument(
-            f"{camera}_get_type_service",
-            default_value=f"{detection_prefix}/get_type",
-        ),
-    ]
-
-
-def _fused_detector_node(detect_config):
-    remappings = []
-    for camera in CAMERAS:
-        detection_prefix = f"/r2/detection/{camera}"
-        remappings.extend(
-            [
-                (
-                    DEFAULT_IMAGE_TOPICS[camera],
-                    LaunchConfiguration(f"{camera}_image_topic"),
-                ),
-                (
-                    f"{detection_prefix}/raw",
-                    LaunchConfiguration(f"{camera}_raw_topic"),
-                ),
-                (
-                    f"{detection_prefix}/processed",
-                    LaunchConfiguration(f"{camera}_processed_topic"),
-                ),
-                (
-                    f"{detection_prefix}/debug",
-                    LaunchConfiguration(f"{camera}_debug_topic"),
-                ),
-                (
-                    f"{detection_prefix}/get_type",
-                    LaunchConfiguration(f"{camera}_get_type_service"),
-                ),
-            ]
-        )
-
-    return Node(
-        package="robot_r2_detect_cpp",
-        executable="kfs_detect_fused",
-        name="kfs_detect_fused",
-        output="screen",
-        parameters=[detect_config],
-        remappings=remappings,
-    )
-
 
 def generate_launch_description():
     interfaces_share = get_package_share_directory("robot_r2_interfaces")
@@ -96,23 +32,61 @@ def generate_launch_description():
         "kfs_detect.yaml",
     )
 
+    remappings = [
+        (
+            DEFAULT_IMAGE_TOPICS[camera],
+            LaunchConfiguration(f"{camera}_image_topic"),
+        )
+        for camera in CAMERAS
+    ]
+    remappings.extend(
+        [
+            ("/r2/detection/raw", LaunchConfiguration("raw_topic")),
+            ("/r2/detection/processed", LaunchConfiguration("processed_topic")),
+            ("/r2/detection/debug", LaunchConfiguration("debug_topic")),
+            ("/r2/detection/get_type", LaunchConfiguration("get_type_service")),
+        ]
+    )
+
+    fused_detector = Node(
+        package="robot_r2_detect_cpp",
+        executable="kfs_detect_fused",
+        name="kfs_detect_fused",
+        output="screen",
+        parameters=[detect_config],
+        remappings=remappings,
+    )
+
     actions = [
-        SetEnvironmentVariable(
-            "RMW_IMPLEMENTATION", "rmw_fastrtps_cpp"
-        ),
-        SetEnvironmentVariable(
-            "RMW_FASTRTPS_USE_QOS_FROM_XML", "1"
-        ),
-        SetEnvironmentVariable(
-            "FASTDDS_DEFAULT_PROFILES_FILE", fastdds_profile
-        ),
-        SetEnvironmentVariable(
-            "FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile
-        ),
+        SetEnvironmentVariable("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp"),
+        SetEnvironmentVariable("RMW_FASTRTPS_USE_QOS_FROM_XML", "1"),
+        SetEnvironmentVariable("FASTDDS_DEFAULT_PROFILES_FILE", fastdds_profile),
+        SetEnvironmentVariable("FASTRTPS_DEFAULT_PROFILES_FILE", fastdds_profile),
     ]
 
     for camera in CAMERAS:
-        actions.extend(_camera_arguments(camera))
-    actions.append(_fused_detector_node(detect_config))
+        actions.append(
+            DeclareLaunchArgument(
+                f"{camera}_image_topic",
+                default_value=DEFAULT_IMAGE_TOPICS[camera],
+            )
+        )
+    actions.extend(
+        [
+            DeclareLaunchArgument(
+                "raw_topic", default_value="/r2/detection/raw"
+            ),
+            DeclareLaunchArgument(
+                "processed_topic", default_value="/r2/detection/processed"
+            ),
+            DeclareLaunchArgument(
+                "debug_topic", default_value="/r2/detection/debug"
+            ),
+            DeclareLaunchArgument(
+                "get_type_service", default_value="/r2/detection/get_type"
+            ),
+        ]
+    )
+    actions.append(fused_detector)
 
     return LaunchDescription(actions)

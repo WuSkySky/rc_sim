@@ -58,7 +58,7 @@ sync_host() {
         --exclude='htmlcov/' \
         --exclude='*.swp' \
         --exclude='*.swo' \
-        --exclude='src/robot_r2_detect/model'
+        --exclude='src/robot_r2_detect/model' \
         --exclude='*~' \
         --exclude='.DS_Store' \
         --filter='P /src/rc2026_field/COLCON_IGNORE' \

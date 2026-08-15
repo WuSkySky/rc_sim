@@ -21,9 +21,12 @@ stage_two_point_one:
     release_edge_offset: 0.20
 
     detection_sample_count: 10
-    target_class_name: r2
 
     lift_up_front: 0.20
     lift_up_rear: 0.20
-    lift_down_front: 0.0
-    lift_down_rear: 0.0
+    # 任务开始时先把升降抬到这个高度，避免机构贴地。
+    lift_initial_front: 0.01
+    lift_initial_rear: 0.01
+    # 结束时下降到 0.01，而不是 0.0。
+    lift_down_front: 0.01
+    lift_down_rear: 0.01

@@ -1,4 +1,5 @@
 uint8 loaded_count
+bool skip_kfs_detection
 ---
 bool success
 string message
