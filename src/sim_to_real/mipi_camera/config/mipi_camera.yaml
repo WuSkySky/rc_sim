@@ -9,6 +9,20 @@
     flip_method: 0
     visualization_enabled: false
 
+    # --- Camera intrinsics (pinhole model) ---
+    # IMX219 sensor pixel size is ~1.12 um. Leave focal_length_mm and
+    # pixel_size_um at 0.0 to fall back to f=max(width, height). Fill these
+    # after calibrating the camera and lens for accurate pose estimation.
+    focal_length_mm: 0.0
+    pixel_size_um: 0.0
+    # plumb_bob distortion coefficients from calibration. Zero (undistorted)
+    # until the camera and lens are calibrated.
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0
+
 # Stable aliases bind each node to one physical Jetson MIPI connector.
 left_mipi_camera:
   ros__parameters:

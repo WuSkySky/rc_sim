@@ -36,6 +36,8 @@ _RUNTIME_PARAMS = frozenset({
     "publish_tf",
     "target_processing_rate",
     "marker_size_mm",
+    "processing_width",
+    "publish_debug",
 })
 
 
@@ -160,8 +162,29 @@ class ArucoPoseDetector:
         else:
             gray = image
         corners, ids, rejected = self._detector.detectMarkers(gray)
+        self._refine_corners(gray, corners, ids)
         rejected_count = len(rejected) if rejected is not None else 0
         return corners, ids, rejected_count
+
+    @staticmethod
+    def _refine_corners(
+        gray: np.ndarray,
+        corners: list,
+        ids: np.ndarray | None,
+    ) -> None:
+        """Refine marker corners to subpixel accuracy before pose estimation.
+
+        ``detectMarkers`` returns integer-pixel corners (up to half a pixel
+        of error); ``cornerSubPix`` sharpens them to ~0.1 px, which measurably
+        improves the pose (especially the ``tvec`` distance) for small markers.
+        """
+        if ids is None:
+            return
+        criteria = (
+            cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001,
+        )
+        for corner in corners:
+            cv2.cornerSubPix(gray, corner, (5, 5), (-1, -1), criteria)
 
     def estimate_pose(
         self,
@@ -308,7 +331,7 @@ class ArucoDetectNode(Node):
             CameraInfo,
             "camera_info",
             self._on_camera_info,
-            image_qos,
+            _param_qos(),
             callback_group=self._camera_info_callback_group,
         )
         self._detection_publisher = self.create_publisher(
@@ -342,7 +365,9 @@ class ArucoDetectNode(Node):
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("axis_length_mm", 50.0)
         self.declare_parameter("visualization_enabled", True)
+        self.declare_parameter("publish_debug", True)
         self.declare_parameter("target_processing_rate", 30.0)
+        self.declare_parameter("processing_width", 640)
 
     def _load_parameters(self) -> None:
         target_marker_id = int(
@@ -391,8 +416,14 @@ class ArucoDetectNode(Node):
         visualization_enabled = bool(
             self.get_parameter("visualization_enabled").value
         )
+        publish_debug = bool(
+            self.get_parameter("publish_debug").value
+        )
         target_processing_rate = float(
             self.get_parameter("target_processing_rate").value
+        )
+        processing_width = int(
+            self.get_parameter("processing_width").value
         )
 
         # Validate.
@@ -423,6 +454,10 @@ class ArucoDetectNode(Node):
             raise ValueError(
                 "target_processing_rate must be finite and positive"
             )
+        if processing_width < 0:
+            raise ValueError(
+                "processing_width must be >= 0 (0 disables downscaling)"
+            )
 
         detector_params = _build_detector_parameters(
             adaptive_thresh_win_size_min=adaptive_thresh_win_size_min,
@@ -440,9 +475,11 @@ class ArucoDetectNode(Node):
         with self._state_lock:
             self._target_marker_id = target_marker_id
             self._visualization_enabled = visualization_enabled
+            self._publish_debug = publish_debug
             self._publish_tf = publish_tf
             self._axis_length_mm = axis_length_mm
             self._target_processing_rate = target_processing_rate
+            self._processing_width = processing_width
             self._processing_deadline_sec = 1.0 / target_processing_rate
             self._processing_period_sec = 1.0 / target_processing_rate
             # Kept for marker_size_mm runtime rebuilds.
@@ -492,6 +529,34 @@ class ArucoDetectNode(Node):
                     f"processing rate limit changed to {value:g} Hz"
                 )
 
+            elif parameter.name == "processing_width":
+                if isinstance(parameter.value, bool) or not isinstance(
+                    parameter.value, int
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason="processing_width must be an integer",
+                    )
+                value = int(parameter.value)
+                if value < 0:
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            "processing_width must be >= 0 "
+                            "(0 disables downscaling)"
+                        ),
+                    )
+                with self._state_lock:
+                    self._processing_width = value
+                self.get_logger().info(
+                    "processing width "
+                    + (
+                        f"set to {value}"
+                        if value > 0
+                        else "disabled (full resolution)"
+                    )
+                )
+
             elif parameter.name == "visualization_enabled":
                 if not isinstance(parameter.value, bool):
                     return SetParametersResult(
@@ -502,6 +567,19 @@ class ArucoDetectNode(Node):
                     self._visualization_enabled = parameter.value
                 self.get_logger().info(
                     "aruco visualization "
+                    + ("enabled" if parameter.value else "disabled")
+                )
+
+            elif parameter.name == "publish_debug":
+                if not isinstance(parameter.value, bool):
+                    return SetParametersResult(
+                        successful=False,
+                        reason="publish_debug must be a boolean",
+                    )
+                with self._state_lock:
+                    self._publish_debug = parameter.value
+                self.get_logger().info(
+                    "debug image publication "
                     + ("enabled" if parameter.value else "disabled")
                 )
 
@@ -633,8 +711,10 @@ class ArucoDetectNode(Node):
             detector = self._detector
             target_marker_id = self._target_marker_id
             visualization_enabled = self._visualization_enabled
+            publish_debug = self._publish_debug
             publish_tf = self._publish_tf
             axis_length_mm = self._axis_length_mm
+            processing_width = self._processing_width
             deadline_sec = self._processing_deadline_sec
 
         if camera_matrix is None:
@@ -642,6 +722,21 @@ class ArucoDetectNode(Node):
                 "waiting for camera_info", throttle_duration_sec=5.0
             )
             return
+
+        # Optional downscale for detection on high-resolution feeds. The
+        # original frame is kept for visualization; detected corners are
+        # scaled back so pose estimation stays in original pixel coordinates.
+        #这里 image 变成 480 宽的小图，original_image 还是 720p，corner_scale = 1.5（意思是「原图是小图的 1.5 倍」）
+        original_image = image
+        corner_scale = 1.0
+        if processing_width > 0 and image.shape[1] > processing_width:
+            corner_scale = float(image.shape[1]) / float(processing_width)
+            target_height = max(1, int(round(image.shape[0] / corner_scale)))
+            image = cv2.resize(
+                image,
+                (processing_width, target_height),  # 缩成 480
+                interpolation=cv2.INTER_AREA,
+            )
 
         # ---- Detect ----
         try:
@@ -668,8 +763,13 @@ class ArucoDetectNode(Node):
                     continue
 
                 try:
+                    marker_corners = corners[i]
+                    if corner_scale != 1.0:
+                        marker_corners = np.asarray(
+                            marker_corners, dtype=np.float32
+                        ) * corner_scale
                     success, rvec, tvec = detector.estimate_pose(
-                        corners[i], camera_matrix, dist_coeffs
+                        marker_corners, camera_matrix, dist_coeffs
                     )
                 except Exception as exc:
                     self.get_logger().debug(
@@ -733,20 +833,35 @@ class ArucoDetectNode(Node):
         )
         self._detection_publisher.publish(detection_msg)
 
-        # ---- Publish debug visualization (always, so the camera feed is visible) ----
-        if image is not None:
+        # ---- Publish debug visualization (optional; always skips on disable) ----
+        if publish_debug and original_image is not None:
+            if corner_scale != 1.0:
+                # Draw on the downscaled detection image so the debug frame is
+                # small and cheap to serialize; scale intrinsics to match.
+                debug_image = image   # ← 直接用 480 小图，不用 720p 原图
+                debug_corners = corners if corners is not None else []
+                debug_matrix = camera_matrix.copy()
+                debug_matrix[0, 0] /= corner_scale
+                debug_matrix[1, 1] /= corner_scale
+                debug_matrix[0, 2] /= corner_scale
+                debug_matrix[1, 2] /= corner_scale
+            else:
+                debug_image = original_image   # ← 没降采样时，才用 720p 原图
+                debug_corners = corners if corners is not None else []
+                debug_matrix = camera_matrix
+
             if visualization_enabled:
                 debug_image = detector.draw_detections(
-                    image,
-                    corners if corners is not None else [],
+                    debug_image,
+                    debug_corners,
                     ids,
                     poses,
-                    camera_matrix,
+                    debug_matrix,
                     dist_coeffs,
                     axis_length_mm,
                 )
             else:
-                debug_image = image.copy()
+                debug_image = debug_image.copy()
 
             status_text = f"markers: {marker_count}"
             if target_marker_id != -1:

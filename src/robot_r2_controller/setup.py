@@ -15,6 +15,7 @@ setup(
         (os.path.join('share', package_name, 'config'),
             [
                 'config/chassis_pose_servo.yaml',
+                'config/aruco_chassis_pose_servo.yaml',
                 'config/chassis_lift.yaml',
                 'config/kfs_lift.yaml',
                 'config/kfs_gripper_rotate.yaml',

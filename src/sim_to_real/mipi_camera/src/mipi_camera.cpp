@@ -59,6 +59,17 @@ public:
     frame_id_ = frame_id_for_node(get_name());
     visualization_enabled_.store(
       declare_parameter<bool>("visualization_enabled", false));
+    focal_length_mm_.store(declare_parameter<double>("focal_length_mm", 0.0));
+    pixel_size_um_.store(declare_parameter<double>("pixel_size_um", 0.0));
+    k1_.store(declare_parameter<double>("k1", 0.0));
+    k2_.store(declare_parameter<double>("k2", 0.0));
+    p1_.store(declare_parameter<double>("p1", 0.0));
+    p2_.store(declare_parameter<double>("p2", 0.0));
+    k3_.store(declare_parameter<double>("k3", 0.0));
+    validate_intrinsic_parameters(focal_length_mm_.load(),
+                                  pixel_size_um_.load(), k1_.load(),
+                                  k2_.load(), p1_.load(), p2_.load(),
+                                  k3_.load());
 
     const auto mode = validate_mode(mode_values);
     width_ = static_cast<int>(mode[0]);
@@ -164,22 +175,60 @@ private:
     const std::vector<rclcpp::Parameter> & parameters)
   {
     rcl_interfaces::msg::SetParametersResult result;
+    result.successful = false;
+
+    const bool previous_visualization = visualization_enabled_.load();
+    bool next_visualization = previous_visualization;
+    double next_focal_length_mm = focal_length_mm_.load();
+    double next_pixel_size_um = pixel_size_um_.load();
+    double next_k1 = k1_.load();
+    double next_k2 = k2_.load();
+    double next_p1 = p1_.load();
+    double next_p2 = p2_.load();
+    double next_k3 = k3_.load();
+
+    try {
+      for (const auto & parameter : parameters) {
+        const auto & name = parameter.get_name();
+        if (name == "visualization_enabled") {
+          next_visualization = parameter.as_bool();
+        } else if (name == "focal_length_mm") {
+          next_focal_length_mm = parameter.as_double();
+        } else if (name == "pixel_size_um") {
+          next_pixel_size_um = parameter.as_double();
+        } else if (name == "k1") {
+          next_k1 = parameter.as_double();
+        } else if (name == "k2") {
+          next_k2 = parameter.as_double();
+        } else if (name == "p1") {
+          next_p1 = parameter.as_double();
+        } else if (name == "p2") {
+          next_p2 = parameter.as_double();
+        } else if (name == "k3") {
+          next_k3 = parameter.as_double();
+        }
+      }
+      validate_intrinsic_parameters(next_focal_length_mm, next_pixel_size_um,
+                                    next_k1, next_k2, next_p1, next_p2,
+                                    next_k3);
+    } catch (const std::exception & error) {
+      result.reason = error.what();
+      return result;
+    }
+
+    visualization_enabled_.store(next_visualization);
+    focal_length_mm_.store(next_focal_length_mm);
+    pixel_size_um_.store(next_pixel_size_um);
+    k1_.store(next_k1);
+    k2_.store(next_k2);
+    p1_.store(next_p1);
+    p2_.store(next_p2);
+    k3_.store(next_k3);
     result.successful = true;
-    for (const auto & parameter : parameters) {
-      if (parameter.get_name() != "visualization_enabled") {
-        continue;
-      }
-      if (parameter.get_type() !=
-        rclcpp::ParameterType::PARAMETER_BOOL)
-      {
-        result.successful = false;
-        result.reason = "visualization_enabled must be a boolean";
-        return result;
-      }
-      visualization_enabled_.store(parameter.as_bool());
+    if (next_visualization != previous_visualization) {
       RCLCPP_INFO(
         get_logger(), "Camera debug image publication %s",
-        parameter.as_bool() ? "enabled" : "disabled");
+        next_visualization ? "enabled" : "disabled");
     }
     return result;
   }
@@ -208,6 +257,51 @@ private:
     throw std::invalid_argument(
             "unsupported camera mode " + mode_to_string(mode) +
             "; supported modes: " + supported.str());
+  }
+
+  static void validate_intrinsic_parameters(double focal_length_mm,
+                                            double pixel_size_um, double k1,
+                                            double k2, double p1, double p2,
+                                            double k3)
+  {
+    if (!std::isfinite(focal_length_mm) || focal_length_mm < 0.0) {
+      throw std::invalid_argument("focal_length_mm must be finite and >= 0");
+    }
+    if (!std::isfinite(pixel_size_um) || pixel_size_um < 0.0) {
+      throw std::invalid_argument("pixel_size_um must be finite and >= 0");
+    }
+    if (focal_length_mm > 0.0 && pixel_size_um <= 0.0) {
+      throw std::invalid_argument(
+        "pixel_size_um must be positive when focal_length_mm is positive");
+    }
+    for (double coefficient : {k1, k2, p1, p2, k3}) {
+      if (!std::isfinite(coefficient)) {
+        throw std::invalid_argument(
+          "distortion coefficients must be finite");
+      }
+    }
+  }
+
+  void fill_intrinsics(sensor_msgs::msg::CameraInfo & info, double width,
+                       double height) const
+  {
+    const double focal_length_mm = focal_length_mm_.load();
+    const double pixel_size_um = pixel_size_um_.load();
+
+    double focal_length_px = std::max(width, height);
+    if (focal_length_mm > 0.0 && pixel_size_um > 0.0) {
+      focal_length_px = focal_length_mm * 1000.0 / pixel_size_um;
+    }
+
+    const double cx = width / 2.0;
+    const double cy = height / 2.0;
+
+    info.k = {focal_length_px, 0.0, cx, 0.0, focal_length_px, cy, 0.0, 0.0,
+              1.0};
+    info.p = {focal_length_px, 0.0, cx, 0.0, 0.0, focal_length_px, cy, 0.0,
+              0.0, 0.0, 1.0, 0.0};
+    info.d = {k1_.load(), k2_.load(), p1_.load(), p2_.load(), k3_.load()};
+    info.distortion_model = "plumb_bob";
   }
 
   static int sensor_id_from_device(const std::string & device)
@@ -441,6 +535,8 @@ private:
     camera_info.header.frame_id = frame_id_;
     camera_info.height = static_cast<uint32_t>(height);
     camera_info.width = static_cast<uint32_t>(width);
+    fill_intrinsics(camera_info, static_cast<double>(width),
+                    static_cast<double>(height));
 
     camera_info_publisher_->publish(std::move(camera_info));
     return GST_FLOW_OK;
@@ -501,6 +597,13 @@ private:
   int framerate_{0};
   int sensor_id_{0};
   int64_t flip_method_{0};
+  std::atomic<double> focal_length_mm_{0.0};
+  std::atomic<double> pixel_size_um_{0.0};
+  std::atomic<double> k1_{0.0};
+  std::atomic<double> k2_{0.0};
+  std::atomic<double> p1_{0.0};
+  std::atomic<double> p2_{0.0};
+  std::atomic<double> k3_{0.0};
 
   rclcpp::Publisher<CameraFrame>::SharedPtr image_publisher_;
   CameraFrame image_message_;

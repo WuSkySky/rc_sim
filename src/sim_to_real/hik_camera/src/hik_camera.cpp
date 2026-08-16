@@ -1,6 +1,7 @@
 #include "MvCameraControl.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -79,16 +80,28 @@ public:
         declare_parameter<double>("acquisition_frame_rate_hz", 30.0);
     exposure_time_us_ = declare_parameter<double>("exposure_time_us", 3000.0);
     gain_db_ = declare_parameter<double>("gain_db", 0.0);
-    binning_2x2_enabled_ = declare_parameter<bool>("binning_2x2_enabled", true);
+    binning_2x2_enabled_.store(
+        declare_parameter<bool>("binning_2x2_enabled", true));
     visualization_enabled_.store(
         declare_parameter<bool>("visualization_enabled", false));
     frame_timeout_ms_.store(
         declare_parameter<int64_t>("frame_timeout_ms", 1000));
     max_consecutive_failures_.store(
         declare_parameter<int64_t>("max_consecutive_failures", 5));
+    focal_length_mm_.store(declare_parameter<double>("focal_length_mm", 0.0));
+    pixel_size_um_.store(declare_parameter<double>("pixel_size_um", 0.0));
+    k1_.store(declare_parameter<double>("k1", 0.0));
+    k2_.store(declare_parameter<double>("k2", 0.0));
+    p1_.store(declare_parameter<double>("p1", 0.0));
+    p2_.store(declare_parameter<double>("p2", 0.0));
+    k3_.store(declare_parameter<double>("k3", 0.0));
 
     validate_integer_parameters(frame_timeout_ms_.load(),
                                 max_consecutive_failures_.load());
+    validate_intrinsic_parameters(focal_length_mm_.load(),
+                                  pixel_size_um_.load(), k1_.load(),
+                                  k2_.load(), p1_.load(), p2_.load(),
+                                  k3_.load());
 
     frame_id_ = frame_id_for_node(get_name());
     if (frame_id_.size() > CameraFrame::FRAME_ID_CAPACITY) {
@@ -143,6 +156,28 @@ private:
         max_consecutive_failures > kMaximumConsecutiveFailures) {
       throw std::invalid_argument(
           "max_consecutive_failures must be in [1, 100]");
+    }
+  }
+
+  static void validate_intrinsic_parameters(double focal_length_mm,
+                                            double pixel_size_um, double k1,
+                                            double k2, double p1, double p2,
+                                            double k3) {
+    if (!std::isfinite(focal_length_mm) || focal_length_mm < 0.0) {
+      throw std::invalid_argument("focal_length_mm must be finite and >= 0");
+    }
+    if (!std::isfinite(pixel_size_um) || pixel_size_um < 0.0) {
+      throw std::invalid_argument("pixel_size_um must be finite and >= 0");
+    }
+    if (focal_length_mm > 0.0 && pixel_size_um <= 0.0) {
+      throw std::invalid_argument(
+          "pixel_size_um must be positive when focal_length_mm is positive");
+    }
+    for (double coefficient : {k1, k2, p1, p2, k3}) {
+      if (!std::isfinite(coefficient)) {
+        throw std::invalid_argument(
+            "distortion coefficients must be finite");
+      }
     }
   }
 
@@ -201,7 +236,7 @@ private:
         MV_CC_SetBoolValue(camera_handle_, "AcquisitionFrameRateEnable", true),
         "enable AcquisitionFrameRate");
 
-    apply_full_frame_binning(binning_2x2_enabled_);
+    apply_full_frame_binning(binning_2x2_enabled_.load());
 
     frame_rate_range_ = query_float_range("AcquisitionFrameRate");
     exposure_range_ = query_float_range("ExposureTime");
@@ -240,7 +275,7 @@ private:
                 "gain %.1f dB, 2x2 binning %s, output %ux%u; publishing %s",
                 model_name_.c_str(), serial_number_.c_str(),
                 acquisition_frame_rate_hz_, exposure_time_us_, gain_db_,
-                binning_2x2_enabled_ ? "enabled" : "disabled",
+                binning_2x2_enabled_.load() ? "enabled" : "disabled",
                 static_cast<unsigned int>(image_info.nWidthValue),
                 image_info.nHeightValue, kImageTopic);
   }
@@ -382,10 +417,17 @@ private:
     double next_frame_rate = acquisition_frame_rate_hz_;
     double next_exposure = exposure_time_us_;
     double next_gain = gain_db_;
-    bool next_binning_2x2_enabled = binning_2x2_enabled_;
+    bool next_binning_2x2_enabled = binning_2x2_enabled_.load();
     bool next_visualization = visualization_enabled_.load();
     int64_t next_timeout = frame_timeout_ms_.load();
     int64_t next_max_failures = max_consecutive_failures_.load();
+    double next_focal_length_mm = focal_length_mm_.load();
+    double next_pixel_size_um = pixel_size_um_.load();
+    double next_k1 = k1_.load();
+    double next_k2 = k2_.load();
+    double next_p1 = p1_.load();
+    double next_p2 = p2_.load();
+    double next_k3 = k3_.load();
 
     try {
       for (const auto &parameter : parameters) {
@@ -404,9 +446,26 @@ private:
           next_timeout = parameter.as_int();
         } else if (name == "max_consecutive_failures") {
           next_max_failures = parameter.as_int();
+        } else if (name == "focal_length_mm") {
+          next_focal_length_mm = parameter.as_double();
+        } else if (name == "pixel_size_um") {
+          next_pixel_size_um = parameter.as_double();
+        } else if (name == "k1") {
+          next_k1 = parameter.as_double();
+        } else if (name == "k2") {
+          next_k2 = parameter.as_double();
+        } else if (name == "p1") {
+          next_p1 = parameter.as_double();
+        } else if (name == "p2") {
+          next_p2 = parameter.as_double();
+        } else if (name == "k3") {
+          next_k3 = parameter.as_double();
         }
       }
       validate_integer_parameters(next_timeout, next_max_failures);
+      validate_intrinsic_parameters(next_focal_length_mm, next_pixel_size_um,
+                                    next_k1, next_k2, next_p1, next_p2,
+                                    next_k3);
     } catch (const std::exception &error) {
       result.reason = error.what();
       return result;
@@ -420,7 +479,7 @@ private:
     const double previous_frame_rate = acquisition_frame_rate_hz_;
     const double previous_exposure = exposure_time_us_;
     const double previous_gain = gain_db_;
-    const bool previous_binning_2x2_enabled = binning_2x2_enabled_;
+    const bool previous_binning_2x2_enabled = binning_2x2_enabled_.load();
     const bool binning_changed =
         next_binning_2x2_enabled != previous_binning_2x2_enabled;
     bool binning_reconfiguration_started = false;
@@ -465,14 +524,21 @@ private:
     acquisition_frame_rate_hz_ = next_frame_rate;
     exposure_time_us_ = next_exposure;
     gain_db_ = next_gain;
-    binning_2x2_enabled_ = next_binning_2x2_enabled;
+    binning_2x2_enabled_.store(next_binning_2x2_enabled);
+    focal_length_mm_.store(next_focal_length_mm);
+    pixel_size_um_.store(next_pixel_size_um);
+    k1_.store(next_k1);
+    k2_.store(next_k2);
+    p1_.store(next_p1);
+    p2_.store(next_p2);
+    k3_.store(next_k3);
     visualization_enabled_.store(next_visualization);
     frame_timeout_ms_.store(next_timeout);
     max_consecutive_failures_.store(next_max_failures);
     result.successful = true;
     if (binning_changed) {
       RCLCPP_INFO(get_logger(), "2x2 binning %s",
-                  binning_2x2_enabled_ ? "enabled" : "disabled");
+                  binning_2x2_enabled_.load() ? "enabled" : "disabled");
     }
     return result;
   }
@@ -549,6 +615,29 @@ private:
     }
   }
 
+  void fill_intrinsics(sensor_msgs::msg::CameraInfo &info, double width,
+                       double height) const {
+    const double focal_length_mm = focal_length_mm_.load();
+    const double pixel_size_um = pixel_size_um_.load();
+    const double binning_scale = binning_2x2_enabled_.load() ? 2.0 : 1.0;
+
+    double focal_length_px = std::max(width, height);
+    if (focal_length_mm > 0.0 && pixel_size_um > 0.0) {
+      focal_length_px =
+          focal_length_mm * 1000.0 / (pixel_size_um * binning_scale);
+    }
+
+    const double cx = width / 2.0;
+    const double cy = height / 2.0;
+
+    info.k = {focal_length_px, 0.0, cx, 0.0, focal_length_px, cy, 0.0, 0.0,
+              1.0};
+    info.p = {focal_length_px, 0.0, cx, 0.0, 0.0, focal_length_px, cy, 0.0,
+              0.0, 0.0, 1.0, 0.0};
+    info.d = {k1_.load(), k2_.load(), p1_.load(), p2_.load(), k3_.load()};
+    info.distortion_model = "plumb_bob";
+  }
+
   void publish_frame(uint32_t width, uint32_t height, std::size_t data_size) {
     const builtin_interfaces::msg::Time stamp = now();
     auto &image = image_message_;
@@ -577,6 +666,8 @@ private:
     camera_info_message_.header.stamp = stamp;
     camera_info_message_.width = width;
     camera_info_message_.height = height;
+    fill_intrinsics(camera_info_message_, static_cast<double>(width),
+                    static_cast<double>(height));
     camera_info_publisher_->publish(camera_info_message_);
     ++sequence_;
   }
@@ -617,7 +708,14 @@ private:
   double acquisition_frame_rate_hz_{30.0};
   double exposure_time_us_{3000.0};
   double gain_db_{0.0};
-  bool binning_2x2_enabled_{true};
+  std::atomic_bool binning_2x2_enabled_{true};
+  std::atomic<double> focal_length_mm_{0.0};
+  std::atomic<double> pixel_size_um_{0.0};
+  std::atomic<double> k1_{0.0};
+  std::atomic<double> k2_{0.0};
+  std::atomic<double> p1_{0.0};
+  std::atomic<double> p2_{0.0};
+  std::atomic<double> k3_{0.0};
   FloatRange frame_rate_range_;
   FloatRange exposure_range_;
   FloatRange gain_range_;

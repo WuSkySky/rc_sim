@@ -32,6 +32,8 @@ setup(
     entry_points={
         "console_scripts": [
             "aruco_detect = robot_r2_aruco.aruco_detect:main",
+            "aruco_camera_tf = robot_r2_aruco.aruco_camera_tf:main",
+            "aruco_pose_bridge = robot_r2_aruco.aruco_pose_bridge:main",
             "usb_camera_bridge = robot_r2_aruco.usb_camera_bridge:main",
             "debug_saver = robot_r2_aruco.debug_saver:main",
             "debug_viewer = robot_r2_aruco.debug_viewer:main",
