@@ -243,7 +243,7 @@ class GuiControlNode(Node):
         },
         'root_rotate': {
             'topic': '/r2/gripper/rotate_cmd',
-            'minimum': ('root_rotate_min', -math.radians(15.0)),
+            'minimum': ('root_rotate_min', -0.262),
             'maximum': ('root_rotate_max', 2.356194490192345),
         },
         'tip_rotate': {

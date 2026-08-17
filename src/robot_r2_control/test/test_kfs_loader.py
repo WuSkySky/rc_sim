@@ -157,12 +157,27 @@ def test_parse_sequence_accepts_ros_double_array_representation():
     )
 
 
+def test_parse_sequence_accepts_gui_root_lower_limit():
+    root_lower_limit = -0.262
+
+    sequence = parse_sequence(
+        'test_sequence',
+        [root_lower_limit, -0.5, 0.1, 0.01, 0.02, 0.003],
+    )
+
+    assert sequence == (
+        MotionStep(
+            root_lower_limit, -0.5, 0.1, 0.01, 0.02, 0.003),
+    )
+
+
 @pytest.mark.parametrize(
     'values, message',
     [
         ([], 'must not be empty'),
         ([0.0] * 5, 'multiple of 6'),
         ([0.0, 0.0, 0.1, 0.01, 0.01, float('nan')], 'must be finite'),
+        ([-0.263, 0.0, 0.1, 0.01, 0.01, 0.005], 'root position'),
         ([2.4, 0.0, 0.1, 0.01, 0.01, 0.005], 'root position'),
         ([0.0, 0.1, 0.1, 0.01, 0.01, 0.005], 'tip position'),
         ([0.0, 0.0, 0.21, 0.01, 0.01, 0.005], 'grip position'),

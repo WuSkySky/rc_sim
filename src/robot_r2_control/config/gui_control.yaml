@@ -5,7 +5,7 @@ gui_control:
 
     kfs_lift_min: 0.0
     kfs_lift_max: 0.42
-    root_rotate_min: -0.2617993877991494
+    root_rotate_min: -0.262
     root_rotate_max: 2.356194490192345
     tip_rotate_min: -3.141592653589793
     tip_rotate_max: 0.0
