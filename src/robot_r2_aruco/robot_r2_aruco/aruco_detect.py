@@ -153,6 +153,7 @@ class ArucoPoseDetector:
         self._detector = cv2.aruco.ArucoDetector(
             self._dictionary, self._parameters,
         )
+        self._marker_size_mm = marker_size_mm
         half = marker_size_mm / 2.0
         self._object_points = np.array(
             [
@@ -204,22 +205,24 @@ class ArucoPoseDetector:
         """Estimate the 6-DOF pose of a single marker.
 
         Returns (success, rvec, tvec).  tvec is in millimetres.
+
+        Uses ``estimatePoseSingleMarkers`` so the IPPE square ambiguity
+        (marker vs. its mirror) is resolved consistently instead of flipping
+        between frames when the marker is nearly head-on.
         """
-        flat_corners = np.asarray(corners, dtype=np.float32).reshape(-1, 2)
-        if flat_corners.shape[0] < 4:
-            return False, None, None
-        flat_corners = flat_corners[:4]
-        success, rvec, tvec = cv2.solvePnP(
-            self._object_points,
-            flat_corners,
+        marker_corners = np.asarray(corners, dtype=np.float32).reshape(1, 4, 2)
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+            marker_corners,
+            self._marker_size_mm,
             camera_matrix,
             dist_coeffs,
-            flags=cv2.SOLVEPNP_IPPE_SQUARE,
         )
-        if not success:
+        if rvecs is None or tvecs is None or len(tvecs) == 0:
             return False, None, None
+        rvec = np.asarray(rvecs[0], dtype=np.float64).reshape(3, 1)
+        tvec = np.asarray(tvecs[0], dtype=np.float64).reshape(3, 1)
         # Prefer the solution where the marker is in front of the camera.
-        if float(tvec.reshape(-1)[2]) < 0.0:
+        if float(tvec[2]) < 0.0:
             return False, None, None
         return True, rvec, tvec
 

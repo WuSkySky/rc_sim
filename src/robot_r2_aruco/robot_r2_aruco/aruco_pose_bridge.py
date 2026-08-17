@@ -19,6 +19,7 @@ import math
 import threading
 import time
 
+import numpy as np
 from geometry_msgs.msg import PoseStamped
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
@@ -37,9 +38,70 @@ _BASE_FRAME = "base_link"
 # TF child frame name convention used by ``aruco_detect``.
 _MARKER_FRAME_PREFIX = "marker_"
 
+# Rotation that "levels" a vertically-mounted ArUco marker into a ground frame.
+# Marker frame (OpenCV): Z = marker normal (horizontal, points at the camera,
+# i.e. the distance-to-marker axis), X = left/right, Y = downward (vertical).
+# Ground frame consumed by chassis_pose_servo: x = forward, y = lateral,
+# z = upward. The planar servo drops z, reads x/y, and takes yaw around z, so
+# feeding the raw marker-frame pose would lose the forward axis and misread
+# "up/down" as "left/right". This fixed rotation (verified pure rotation,
+# det = +1) maps marker -> ground.
+_MARKER_TO_GROUND = np.array(
+    [[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]
+)
+
 
 def _marker_frame(marker_id: int) -> str:
     return f"{_MARKER_FRAME_PREFIX}{marker_id}"
+
+
+def _quaternion_to_rotation_matrix(
+    qx: float, qy: float, qz: float, qw: float,
+) -> np.ndarray:
+    """Return the 3x3 rotation matrix of a normalized quaternion (x, y, z, w)."""
+    norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    if norm == 0.0:
+        return np.eye(3)
+    x, y, z, w = qx / norm, qy / norm, qz / norm, qw / norm
+    return np.array(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
+            [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
+            [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)],
+        ]
+    )
+
+
+def _rotation_matrix_to_quaternion(
+    R: np.ndarray,
+) -> tuple[float, float, float, float]:
+    """Convert a 3x3 rotation matrix to a normalized quaternion (x, y, z, w)."""
+    trace = float(np.trace(R))
+    if trace > 0.0:
+        s = math.sqrt(trace + 1.0) * 2.0
+        w = 0.25 * s
+        x = (float(R[2, 1]) - float(R[1, 2])) / s
+        y = (float(R[0, 2]) - float(R[2, 0])) / s
+        z = (float(R[1, 0]) - float(R[0, 1])) / s
+    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+        s = math.sqrt(1.0 + float(R[0, 0]) - float(R[1, 1]) - float(R[2, 2])) * 2.0
+        w = (float(R[2, 1]) - float(R[1, 2])) / s
+        x = 0.25 * s
+        y = (float(R[0, 1]) + float(R[1, 0])) / s
+        z = (float(R[0, 2]) + float(R[2, 0])) / s
+    elif R[1, 1] > R[2, 2]:
+        s = math.sqrt(1.0 + float(R[1, 1]) - float(R[0, 0]) - float(R[2, 2])) * 2.0
+        w = (float(R[0, 2]) - float(R[2, 0])) / s
+        x = (float(R[0, 1]) + float(R[1, 0])) / s
+        y = 0.25 * s
+        z = (float(R[1, 2]) + float(R[2, 1])) / s
+    else:
+        s = math.sqrt(1.0 + float(R[2, 2]) - float(R[0, 0]) - float(R[1, 1])) * 2.0
+        w = (float(R[1, 0]) - float(R[0, 1])) / s
+        x = (float(R[0, 2]) + float(R[2, 0])) / s
+        y = (float(R[1, 2]) + float(R[2, 1])) / s
+        z = 0.25 * s
+    return x, y, z, w
 
 
 def _yaw_from_quaternion(qx: float, qy: float, qz: float, qw: float) -> float:
@@ -185,19 +247,37 @@ class ArucoPoseBridge(Node):
         translation = transform.transform.translation
         rotation = transform.transform.rotation
 
+        # Level the marker-frame pose into a ground frame before publishing.
+        # The raw pose is base_link in the marker frame; because the marker is
+        # mounted vertically, its Z axis is horizontal (distance-to-marker) and
+        # its Y axis is vertical. A planar servo reads only x/y/yaw and drops
+        # z, so without this rotation the forward axis would be lost and the
+        # yaw would be misread. Left-multiply the fixed marker->ground rotation.
+        R_marker_base = _quaternion_to_rotation_matrix(
+            rotation.x, rotation.y, rotation.z, rotation.w
+        )
+        t_marker_base = np.array(
+            [translation.x, translation.y, translation.z], dtype=np.float64
+        )
+        R_ground_base = _MARKER_TO_GROUND @ R_marker_base
+        t_ground_base = _MARKER_TO_GROUND @ t_marker_base
+        qx, qy, qz, qw = _rotation_matrix_to_quaternion(R_ground_base)
+
+        ground_frame = f"{marker_frame}_ground"
+
         pose = PoseStamped()
         pose.header.stamp = transform.header.stamp
-        pose.header.frame_id = marker_frame
-        pose.pose.position.x = translation.x
-        pose.pose.position.y = translation.y
-        pose.pose.position.z = translation.z
-        pose.pose.orientation.x = rotation.x
-        pose.pose.orientation.y = rotation.y
-        pose.pose.orientation.z = rotation.z
-        pose.pose.orientation.w = rotation.w
+        pose.header.frame_id = ground_frame
+        pose.pose.position.x = float(t_ground_base[0])
+        pose.pose.position.y = float(t_ground_base[1])
+        pose.pose.position.z = float(t_ground_base[2])
+        pose.pose.orientation.x = qx
+        pose.pose.orientation.y = qy
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
         self._pose_publisher.publish(pose)
 
-        self._log_pose(marker_frame, translation, rotation)
+        self._log_pose(ground_frame, pose.pose.position, pose.pose.orientation)
 
     def _warn_missing_tf(self, marker_frame: str) -> None:
         now = time.monotonic()

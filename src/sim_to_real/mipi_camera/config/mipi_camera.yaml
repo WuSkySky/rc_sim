@@ -10,11 +10,11 @@
     visualization_enabled: false
 
     # --- Camera intrinsics (pinhole model) ---
-    # IMX219 sensor pixel size is ~1.12 um. Leave focal_length_mm and
-    # pixel_size_um at 0.0 to fall back to f=max(width, height). Fill these
-    # after calibrating the camera and lens for accurate pose estimation.
-    focal_length_mm: 0.0
-    pixel_size_um: 0.0
+    # IMX219 sensor pixel size 1.12 um, lens focal length ~3.04 mm (typical
+    # IMX219 module). fx = focal_length_mm * 1000 / pixel_size_um. Replace
+    # with chessboard-calibrated values for best accuracy.
+    focal_length_mm: 3.04
+    pixel_size_um: 1.12
     # plumb_bob distortion coefficients from calibration. Zero (undistorted)
     # until the camera and lens are calibrated.
     k1: 0.0
