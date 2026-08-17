@@ -1,0 +1,30 @@
+# Dedicated chassis_pose_servo instance for one-shot ArUco docking.
+# Communication names are fixed by the node and adapted in real1.launch.py
+# with remapping. Only control behavior belongs in this parameter file.
+aruco_chassis_pose_servo:
+  ros__parameters:
+    publish_rate: 50.0
+    position_tolerance: 0.01
+    yaw_tolerance: 0.02
+    yaw_stable_cycles: 10
+    completion_wait_sec: 0.3
+    default_timeout_sec: 20.0
+
+    x_kp: 1.0
+    x_ki: 0.0
+    x_kd: 0.03
+    x_integral_limit: 0.3
+    x_output_limit: 0.3
+
+    y_kp: 1.0
+    y_ki: 0.0
+    y_kd: 0.03
+    y_integral_limit: 0.3
+    y_output_limit: 0.3
+
+    yaw_kp: 0.3
+    yaw_ki: 0.0
+    yaw_kd: 0.02
+    yaw_integral_limit: 10.0
+    yaw_output_limit: 0.6
+    yaw_small_error_gain_multiplier: 11.0

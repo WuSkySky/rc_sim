@@ -1,0 +1,38 @@
+aruco_detect:
+  ros__parameters:
+    # --- Marker identification ---
+    # Set to -1 to accept all detected markers.
+    target_marker_id: 1
+
+    # --- ArUco configuration ---
+    aruco_dictionary: DICT_4X4_50
+    marker_size_mm: 100.0
+
+    # --- ArUco detector parameters (tunable at runtime) ---
+    # These are slightly more lenient than OpenCV defaults to work
+    # with phone-screen markers and laptop webcams.
+    adaptive_thresh_win_size_min: 7
+    adaptive_thresh_win_size_max: 13
+    adaptive_thresh_win_size_step: 6
+    adaptive_thresh_constant: 7.0
+    min_marker_perimeter_rate: 0.01
+    max_marker_perimeter_rate: 4.0
+    polygonal_approx_accuracy_rate: 0.05
+    min_corner_distance_rate: 0.01
+    min_marker_distance_rate: 0.01
+    marker_border_bits: 1
+
+    # --- Pose estimation ---
+    publish_tf: true
+    axis_length_mm: 50.0
+
+    # --- Output ---
+    # Sole switch for constructing and publishing the debug image.
+    visualization_enabled: false
+    # Maximum image processing rate in Hz. Extra frames are dropped.
+    # Match this to the camera frame rate (30 for USB, 10 for the Odin).
+    target_processing_rate: 30.0
+    # Downscale wider images before ArUco detection. Detection cost scales
+    # with pixel count, so this is the main lever for high-resolution feeds
+    # (e.g. the Odin RGB). 0 = keep the full camera resolution.
+    processing_width: 480

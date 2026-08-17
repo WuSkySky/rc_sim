@@ -21,3 +21,14 @@
     mode: [1920, 1080, 30]
 
     visualization_enabled: false
+
+    # Approximate pinhole intrinsics until this camera/lens is calibrated.
+    # With both values at zero the driver uses f=max(width, height), centered
+    # principal point, and the zero distortion coefficients below.
+    focal_length_mm: 0.0
+    pixel_size_um: 0.0
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0

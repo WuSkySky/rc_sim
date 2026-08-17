@@ -1,0 +1,15 @@
+aruco_camera_tf:
+  ros__parameters:
+    # Camera mount position in base_link (x forward, y left, z up), in meters.
+    # Approximate is fine: the one-shot teach-in absorbs the translation error.
+    # A rear-mounted camera (Odin on the tail) would use a negative x.
+    camera_xyz: [-0.2, 0.0, 0.3]
+
+    # Camera orientation relative to "facing forward, level", in radians:
+    #   roll  : rotation about the optical axis (0 = upright)
+    #   pitch : tilt down (positive = look down)
+    #   yaw   : horizontal heading (0 = forward +x, pi = rearward -x)
+    #
+    # Facing forward, level:            [0.0, 0.0, 0.0]
+    # Facing REARWARD (Odin on tail):   [0.0, 0.0, 3.14159]
+    camera_rpy: [0.0, 0.0, 3.14159]

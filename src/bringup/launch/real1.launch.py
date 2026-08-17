@@ -8,6 +8,7 @@ from launch.actions import (
     SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -18,6 +19,8 @@ def generate_launch_description():
     serial_pkg = get_package_share_directory('serial_pkg')
     control_pkg = get_package_share_directory('robot_r2_control')
     mipi_camera_pkg = get_package_share_directory('mipi_camera')
+    aruco_pkg = get_package_share_directory('robot_r2_aruco')
+    controller_pkg = get_package_share_directory('robot_r2_controller')
     target_alignment_pkg = get_package_share_directory(
         'robot_r2_target_alignment')
     fastdds_profile = os.path.join(
@@ -139,6 +142,39 @@ def generate_launch_description():
         output='screen',
     )
 
+    aruco_pipeline = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                aruco_pkg,
+                'launch',
+                'aruco_subscribe.launch.py',
+            )
+        ),
+        launch_arguments={
+            'image_topic': '/r2/tip_camera/image_raw',
+            'camera_info_topic': '/r2/tip_camera/camera_info',
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('enable_aruco')),
+    )
+
+    aruco_servo_config = os.path.join(
+        controller_pkg,
+        'config',
+        'aruco_chassis_pose_servo.yaml',
+    )
+    aruco_chassis_pose_servo = Node(
+        package='robot_r2_controller',
+        executable='chassis_pose_servo',
+        name='aruco_chassis_pose_servo',
+        parameters=[aruco_servo_config],
+        remappings=[
+            ('/r2/pose_feedback', '/r2/aruco/pose_feedback'),
+            ('/r2/move_to_pose', '/r2/aruco/move_to_pose'),
+        ],
+        condition=IfCondition(LaunchConfiguration('enable_aruco')),
+        output='screen',
+    )
+
     return LaunchDescription([
         SetEnvironmentVariable(
             'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
@@ -153,6 +189,11 @@ def generate_launch_description():
             default_value='/r2/detection/left/get_type',
             description='Remote KFS detection service used by control',
         ),
+        DeclareLaunchArgument(
+            'enable_aruco',
+            default_value='true',
+            description='Start tip-camera ArUco detection and chassis servo',
+        ),
         control_launch,
         serial_bridge,
         odometry_tf,
@@ -160,4 +201,6 @@ def generate_launch_description():
         tip_alignment,
         tip_mipi_camera,
         yolo_target_detector,
+        aruco_pipeline,
+        aruco_chassis_pose_servo,
     ])

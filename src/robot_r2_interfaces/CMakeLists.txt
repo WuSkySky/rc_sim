@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(robot_r2_interfaces)
 
 find_package(ament_cmake REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -19,6 +20,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AlignmentDetection.msg"
   "msg/LedDetection.msg"
   "msg/TargetDetection.msg"
+  "msg/ArucoMarkerPose.msg"
+  "msg/ArucoPoseDetection.msg"
   "srv/MoveToPose.srv"
   "srv/SetBasePose.srv"
   "srv/SetLift.srv"
@@ -31,7 +34,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StageTwoPointTwo.srv"
   "srv/TraverseStep.srv"
   "srv/Align.srv"
-  DEPENDENCIES sensor_msgs std_msgs
+  DEPENDENCIES geometry_msgs sensor_msgs std_msgs
 )
 
 install(

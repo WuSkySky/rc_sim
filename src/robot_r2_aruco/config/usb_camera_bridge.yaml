@@ -1,0 +1,6 @@
+usb_camera_bridge:
+  ros__parameters:
+    device: 0
+    width: 640
+    height: 480
+    target_fps: 30.0

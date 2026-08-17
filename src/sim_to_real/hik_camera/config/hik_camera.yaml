@@ -7,3 +7,19 @@
     visualization_enabled: false
     frame_timeout_ms: 1000
     max_consecutive_failures: 5
+
+    # --- Camera intrinsics (pinhole model from lens/sensor datasheet) ---
+    # Focal length of the lens in millimetres. Leave 0.0 to fall back to a
+    # rough f=max(width, height) estimate.
+    focal_length_mm: 6.0
+    # Sensor pixel size in micrometres. MV-CA016-10UC uses a 3.45 um pixel
+    # (Sony IMX273). With the active binning this gives the focal length in
+    # pixels: fx = focal_length_mm * 1000 / (pixel_size_um * binning_scale).
+    pixel_size_um: 3.45
+    # plumb_bob distortion coefficients from calibration. Zero (undistorted)
+    # until this camera and lens are calibrated.
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0

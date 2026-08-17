@@ -1,0 +1,8 @@
+aruco_pose_bridge:
+  ros__parameters:
+    # Marker whose TF is converted into the chassis pose. Must match the
+    # target_marker_id used by aruco_detect so marker_<id> exists in TF.
+    target_marker_id: 1
+    # Rate at which /r2/aruco/pose_feedback is published. Match this to the
+    # camera frame rate (30 for USB cameras, 10 for the Odin).
+    publish_rate: 30.0
