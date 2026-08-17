@@ -12,3 +12,6 @@ kfs_roi:
     column_threshold_ratio: 0.7
     morphology_kernel_size: 5
     min_mask_area_px: 100
+    # Pixel offset added to the final KFS center (center_u and
+    # center_offset_x) before publishing. Dynamic; positive shifts right.
+    center_offset_px: 0

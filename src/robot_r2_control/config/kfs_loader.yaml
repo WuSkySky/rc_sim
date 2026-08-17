@@ -2,11 +2,12 @@
   ros__parameters:
     service_timeout_sec: 10.0
 
-    # Each step contains:
-    # root_position, tip_position, grip_position,
-    # root_tolerance, tip_tolerance, grip_tolerance.
-    # All three motors are commanded concurrently in every step.
-    # Mode 1: front load, current loaded count 0, store onboard.
+    # 每连续六个数表示一个动作步骤，字段依次为：
+    # 根部目标角度、末端目标角度、夹爪目标开度、
+    # 根部到位容差、末端到位容差、夹爪到位容差。
+    # 每个步骤会同时向三个电机发送目标，三个电机全部到位后才执行下一步。
+
+    # 装载模式 1：从前方装载，当前车上数量为 0，装载后存入车上。
     mode_1_sequence: [
       1.192, -1.228, 0.046, 0.01, 0.01, 0.02,
       1.192, -1.228, 0.0, 0.01, 0.01, 0.02,
@@ -15,14 +16,14 @@
       0.0, -2.916, 0.046, 0.01, 0.01, 0.02,
     ]
 
-    # Mode 2: front load, current loaded count 2, keep gripped.
+    # 装载模式 2：从前方装载，当前车上数量为 2，装载后留在夹爪中。
     mode_2_sequence: [
       1.192, -1.228, 0.046, 0.01, 0.01, 0.02,
       1.192, -1.228, 0.0, 0.01, 0.01, 0.02,
       0.0, -1.562, 0.0, 0.01, 0.01, 0.02,
     ]
 
-    # Mode 3: top load, current loaded count 0, store onboard.
+    # 装载模式 3：从上方装载，当前车上数量为 0，装载后存入车上。
     mode_3_sequence: [
       1.53, 0.0, 0.046, 0.01, 0.01, 0.02,
       1.53, 0.0, 0.0, 0.01, 0.01, 0.02,
@@ -31,14 +32,14 @@
       0.129, -2.889, 0.046, 0.01, 0.01, 0.02,
     ]
 
-    # Mode 4: top load, current loaded count 2, keep gripped.
+    # 装载模式 4：从上方装载，当前车上数量为 2，装载后留在夹爪中。
     mode_4_sequence: [
       1.53, 0.0, 0.046, 0.01, 0.01, 0.02,
       1.53, 0.0, 0.0, 0.01, 0.01, 0.02,
       0.284, -1.761, 0.0, 0.01, 0.01, 0.02,
     ]
 
-    # Mode 5: top load, current loaded count 1.
+    # 装载模式 5：从上方装载，当前车上数量为 1。
     mode_5_sequence: [
       1.53, 0.0, 0.046, 0.01, 0.01, 0.02,
       1.53, 0.0, 0.0, 0.01, 0.01, 0.02,
@@ -47,13 +48,22 @@
       0.0, -1.688, 0.046, 0.01, 0.01, 0.02,
     ]
 
+    # 释放动作轨迹。
     release_sequence: [
       1.334, -1.46, 0.0, 0.01, 0.01, 0.02,
       1.334, -1.46, 0.046, 0.01, 0.01, 0.02,
     ]
 
-    pop_sequence: [
-      # Keep both rotation axes at zero, then pulse the gripper closed/open.
+    # 弹出模式 1：从夹爪直接放置 KFS。
+    # TODO：当前暂时沿用原弹出轨迹，请按实际机构动作填写。
+    pop_1_sequence: [
+      0.0, 0.0, 0.0, 0.01, 0.01, 0.005,
+      0.0, 0.0, 0.209, 0.01, 0.01, 0.005
+    ]
+
+    # 弹出模式 2：先从车上拿取 KFS，再执行放置。
+    # TODO：当前暂时沿用原弹出轨迹，请按实际机构动作填写。
+    pop_2_sequence: [
       0.0, 0.0, 0.0, 0.01, 0.01, 0.005,
       0.0, 0.0, 0.209, 0.01, 0.01, 0.005
     ]

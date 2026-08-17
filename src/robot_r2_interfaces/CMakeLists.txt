@@ -15,7 +15,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/KfsProcessedDetection.msg"
   "msg/KfsFusedRawDetections.msg"
   "msg/KfsFusedProcessedDetections.msg"
-  "msg/KfsFusedDebugImages.msg"
   "msg/KfsTypeResult.msg"
   "msg/AlignmentDetection.msg"
   "msg/LedDetection.msg"

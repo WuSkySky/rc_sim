@@ -68,10 +68,13 @@ def generate_launch_description():
         'fastdds_camera.xml',
     )
 
+    # Both robots' front USB cameras are the new HD model (05a3:9230),
+    # which only advertises 60 fps at 720p MJPG, so real2 uses the HD config
+    # (1920x1080@30). The old-model 720p config stays in yahboom_camera.yaml.
     yahboom_camera_config = os.path.join(
         yahboom_camera_pkg,
         'config',
-        'yahboom_camera.yaml',
+        'yahboom_camera_hd.yaml',
     )
     front_yahboom_camera = yahboom_camera_node(yahboom_camera_config)
 

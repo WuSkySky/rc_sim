@@ -1,8 +1,14 @@
 # yahboom_camera
 
-ROS 2 driver for the Yahboom USB UVC front camera. The device is a Sunplus
-`SDYH-8P0P` camera (USB `1bcf:0b09`) captured through GStreamer `v4l2src`, so
-the driver works on both the x86_64 development machine and the Jetson hosts.
+ROS 2 driver for the Yahboom USB UVC front camera, captured through
+GStreamer `v4l2src`, so the driver works on both the x86_64 development
+machine and the Jetson hosts. Two camera generations are supported with one
+config file each:
+
+- Old model: Sunplus `SDYH-8P0P` (USB `1bcf:0b09`) — `config/yahboom_camera.yaml`,
+  used by the robots' `real2.launch.py` (720p@30 default).
+- New model: HD USB Camera (USB `05a3:9230`) — `config/yahboom_camera_hd.yaml`,
+  selected by the standalone `yahboom_camera.launch.py` (1080p@30 default).
 
 The node publishes fixed generic topics. Robot-specific camera roles are
 configured only with launch remapping:
@@ -17,7 +23,7 @@ been calibrated.
 
 ## Supported modes
 
-MJPG (Motion-JPEG), all at 30 fps:
+Old model (Sunplus `SDYH-8P0P`), MJPG all at 30 fps:
 
 - `[1280, 720, 30]` (default; 720p keeps downstream KFS ROI/detection within 30 Hz)
 - `[1920, 1080, 30]`
@@ -27,6 +33,15 @@ MJPG (Motion-JPEG), all at 30 fps:
 - `[640, 360, 30]`
 - `[600, 600, 30]`
 - `[320, 240, 30]`
+
+New model (HD USB Camera `05a3:9230`), MJPG. GStreamer `v4l2src` negotiates
+strictly against the intervals the device advertises, so a framerate that is
+not listed for a size fails with `not-negotiated` (720p is 60 fps only):
+
+- `[1920, 1080, 30]` (default in `yahboom_camera_hd.yaml`)
+- `[1280, 720, 60]`, `[800, 600, 60]`
+- `[1024, 768, 30]`, `[1280, 1024, 30]`
+- `[640, 480, 120]`, `[320, 240, 120]`
 
 YUYV (raw) tops out at 5 fps at 1080p and 10 fps at 720p, so the 30 fps front
 camera configuration uses MJPG.
@@ -49,6 +64,10 @@ Then set `device: /dev/yahboom_front` in `config/yahboom_camera.yaml` (or pass
 node path, for example `/dev/video2` on the development machine.
 
 ## Run
+
+The standalone launch selects `config/yahboom_camera_hd.yaml` (new model,
+1920x1080@30); switch the `config` path in the launch to
+`yahboom_camera.yaml` to run the old model at 720p@30.
 
 ```bash
 ros2 launch yahboom_camera yahboom_camera.launch.py
@@ -73,7 +92,7 @@ All parameters are declared from `config/yahboom_camera.yaml`.
 | --- | --- | --- | --- |
 | `device` | string | `/dev/video2` | Video device node or stable udev alias. |
 | `pixel_format` | string | `MJPG` | `MJPG` or `YUYV`. |
-| `mode` | int array | `[1280, 720, 30]` | `[width, height, framerate]`. |
+| `mode` | int array | `[1280, 720, 30]` (`yahboom_camera.yaml`) / `[1920, 1080, 30]` (`yahboom_camera_hd.yaml`) | `[width, height, framerate]`. |
 | `visualization_enabled` | bool | `false` | Publish the `/debug` image. Dynamic. |
 
 `visualization_enabled` supports validated runtime updates:

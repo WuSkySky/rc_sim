@@ -43,7 +43,18 @@ def generate_launch_description():
         [
             ("/r2/detection/raw", LaunchConfiguration("raw_topic")),
             ("/r2/detection/processed", LaunchConfiguration("processed_topic")),
-            ("/r2/detection/debug", LaunchConfiguration("debug_topic")),
+            (
+                "/r2/detection/front/debug",
+                LaunchConfiguration("front_debug_topic"),
+            ),
+            (
+                "/r2/detection/left/debug",
+                LaunchConfiguration("left_debug_topic"),
+            ),
+            (
+                "/r2/detection/right/debug",
+                LaunchConfiguration("right_debug_topic"),
+            ),
             ("/r2/detection/get_type", LaunchConfiguration("get_type_service")),
         ]
     )
@@ -80,7 +91,13 @@ def generate_launch_description():
                 "processed_topic", default_value="/r2/detection/processed"
             ),
             DeclareLaunchArgument(
-                "debug_topic", default_value="/r2/detection/debug"
+                "front_debug_topic", default_value="/r2/detection/front/debug"
+            ),
+            DeclareLaunchArgument(
+                "left_debug_topic", default_value="/r2/detection/left/debug"
+            ),
+            DeclareLaunchArgument(
+                "right_debug_topic", default_value="/r2/detection/right/debug"
             ),
             DeclareLaunchArgument(
                 "get_type_service", default_value="/r2/detection/get_type"

@@ -27,7 +27,8 @@ TRAJECTORY_PARAMETER_NAMES = (
     'mode_4_sequence',
     'mode_5_sequence',
     'release_sequence',
-    'pop_sequence',
+    'pop_1_sequence',
+    'pop_2_sequence',
 )
 
 
@@ -296,6 +297,16 @@ class KfsLoaderController(Node):
             raise ValueError(f'unsupported KFS load mode: {request.mode}')
         return sequence_names[request.mode]
 
+    @staticmethod
+    def pop_sequence_name(request):
+        sequence_names = {
+            KfsAction.Request.MODE_1: 'pop_1_sequence',
+            KfsAction.Request.MODE_2: 'pop_2_sequence',
+        }
+        if request.mode not in sequence_names:
+            raise ValueError(f'unsupported KFS pop mode: {request.mode}')
+        return sequence_names[request.mode]
+
     @classmethod
     def action_sequence_name(cls, request):
         if request.action == KfsAction.Request.LOAD:
@@ -303,7 +314,7 @@ class KfsLoaderController(Node):
         if request.action == KfsAction.Request.RELEASE:
             return 'release_sequence'
         if request.action == KfsAction.Request.POP:
-            return 'pop_sequence'
+            return cls.pop_sequence_name(request)
         raise ValueError(f'unsupported KFS action: {request.action!r}')
 
     def handle_kfs_action(self, request, response):

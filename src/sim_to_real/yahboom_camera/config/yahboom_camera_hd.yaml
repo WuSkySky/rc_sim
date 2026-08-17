@@ -1,0 +1,23 @@
+# Yahboom HD USB camera (new model, USB 05a3:9230, "HD USB Camera").
+# Native full-HD MJPG mode 1920x1080@30. The old Sunplus SDYH-8P0P model
+# (1bcf:0b09) config stays in yahboom_camera.yaml and is used by the robots'
+# real2.launch.py; this HD config is selected by the standalone
+# yahboom_camera.launch.py.
+/**:
+  ros__parameters:
+    # Video device node. Install udev/90-yahboom-camera.rules for a stable
+    # /dev/yahboom_front alias, or use the by-id path under /dev/v4l/by-id/.
+    device: /dev/video2
+
+    # MJPG (Motion-JPEG, 30 fps at full HD) or YUYV (raw, lower framerate).
+    pixel_format: MJPG
+
+    # [width, height, framerate]. MJPG modes of this model:
+    # [1920, 1080, 30] (default), [1280, 720, 60], [1024, 768, 30],
+    # [1280, 1024, 30], [800, 600, 60], [640, 480, 120], [320, 240, 120].
+    # GStreamer v4l2src negotiates strictly against the intervals the device
+    # advertises: 720p only advertises 60 fps, so a 30/1 cap there fails with
+    # "not-negotiated".
+    mode: [1920, 1080, 30]
+
+    visualization_enabled: false

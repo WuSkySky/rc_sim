@@ -38,6 +38,7 @@ struct NodeConfig {
   KfsRoiConfig roi;
   double target_processing_rate{30.0};
   bool visualization_enabled{false};
+  int center_offset_px{0};
 };
 
 struct FrameView {
@@ -65,6 +66,9 @@ cv::Vec3b hsv_value(const std::vector<std::int64_t> &values,
                    static_cast<std::uint8_t>(values[2]));
 }
 
+constexpr int kMinCenterOffsetPx = -1000000;
+constexpr int kMaxCenterOffsetPx = 1000000;
+
 int positive_int(std::int64_t value, const std::string &name) {
   if (value <= 0 || value > std::numeric_limits<int>::max()) {
     throw std::invalid_argument(name + " must be a positive integer");
@@ -78,6 +82,11 @@ void validate_node_config(const NodeConfig &config) {
       config.target_processing_rate <= 0.0) {
     throw std::invalid_argument(
         "target_processing_rate must be finite and positive");
+  }
+  if (config.center_offset_px < kMinCenterOffsetPx ||
+      config.center_offset_px > kMaxCenterOffsetPx) {
+    throw std::invalid_argument(
+        "center_offset_px must be within +/-1000000 pixels");
   }
 }
 
@@ -185,103 +194,107 @@ cv::Mat mask_to_bgr(const cv::Mat &mask) {
   return view;
 }
 
-void draw_stage_label(cv::Mat &tile, const std::string &label) {
-  const int label_height = std::min(26, tile.rows);
-  cv::rectangle(tile, cv::Rect(0, 0, tile.cols, label_height),
-                cv::Scalar(0, 0, 0), cv::FILLED);
-  if (tile.rows >= 12 && tile.cols >= 20) {
-    cv::putText(tile, label, cv::Point(6, std::min(19, tile.rows - 2)),
-                cv::FONT_HERSHEY_SIMPLEX, 0.48, cv::Scalar(255, 255, 255), 1,
-                cv::LINE_AA);
+void draw_legend_item(cv::Mat &tile, int x, int y,
+                      const cv::Scalar &color, const std::string &label,
+                      bool marker = false) {
+  constexpr int kSymbolWidth = 18;
+  if (marker) {
+    cv::drawMarker(tile, cv::Point(x + kSymbolWidth / 2, y - 4), color,
+                   cv::MARKER_CROSS, 13, 2);
+  } else {
+    cv::line(tile, cv::Point(x, y - 4),
+             cv::Point(x + kSymbolWidth, y - 4), color, 3);
   }
+  cv::putText(tile, label, cv::Point(x + kSymbolWidth + 5, y),
+              cv::FONT_HERSHEY_SIMPLEX, 0.38, cv::Scalar(255, 255, 255), 1,
+              cv::LINE_AA);
 }
 
-cv::Mat make_roi_panel(const cv::Mat &image, const KfsRoiResult &result) {
-  cv::Mat panel(image.size(), CV_8UC3, cv::Scalar(24, 24, 24));
-  if (!result.valid) {
-    return panel;
+void draw_stage_legend(cv::Mat &tile, const std::string &title,
+                       const std::string &metrics) {
+  const int label_height = std::min(96, tile.rows);
+  cv::rectangle(tile, cv::Rect(0, 0, tile.cols, label_height),
+                cv::Scalar(0, 0, 0), cv::FILLED);
+  if (tile.rows < 84 || tile.cols < 280) {
+    return;
   }
+  cv::putText(tile, title, cv::Point(10, 22), cv::FONT_HERSHEY_SIMPLEX,
+              0.58, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
+  cv::putText(tile, metrics, cv::Point(10, 43), cv::FONT_HERSHEY_SIMPLEX,
+              0.42, cv::Scalar(210, 210, 210), 1, cv::LINE_AA);
 
-  const cv::Mat roi = image(cv::Rect(result.x1, 0,
-                                     result.x2 - result.x1 + 1,
-                                     image.rows));
-  const double scale = std::min(
-      static_cast<double>(panel.cols) / roi.cols,
-      static_cast<double>(panel.rows) / roi.rows);
-  const int width = std::max(1, static_cast<int>(roi.cols * scale));
-  const int height = std::max(1, static_cast<int>(roi.rows * scale));
-  cv::Mat resized;
-  cv::resize(roi, resized, cv::Size(width, height), 0.0, 0.0,
-             scale < 1.0 ? cv::INTER_AREA : cv::INTER_LINEAR);
-  const int x = (panel.cols - width) / 2;
-  const int y = (panel.rows - height) / 2;
-  resized.copyTo(panel(cv::Rect(x, y, width, height)));
-  return panel;
+  const int third = tile.cols / 3;
+  draw_legend_item(tile, 10, 66, cv::Scalar(255, 255, 0), "image ctr");
+  draw_legend_item(tile, third, 66, cv::Scalar(0, 0, 255),
+                   "adjusted ctr");
+  draw_legend_item(tile, third * 2, 66, cv::Scalar(0, 255, 0), "ROI bounds");
+  draw_legend_item(tile, 10, 88, cv::Scalar(255, 0, 255), "left bottom",
+                   true);
+  draw_legend_item(tile, third, 88, cv::Scalar(0, 255, 255), "right bottom",
+                   true);
 }
 
 cv::Mat make_visualization(const cv::Mat &image,
-                           const KfsRoiResult &result) {
+                           const KfsRoiResult &result,
+                           int center_offset_px) {
   cv::Mat source_view = image.clone();
-  cv::Mat axis_view = mask_to_bgr(result.opened_mask);
+  cv::Mat columns_view = mask_to_bgr(result.opened_mask);
   if (result.valid) {
-    const auto draw_geometry = [&result](cv::Mat &view) {
+    const int adjusted_center = result.center_u + center_offset_px;
+    const auto draw_geometry = [&](cv::Mat &view) {
+      // Image center (cyan), offset-adjusted KFS center (red), and qualified
+      // column bounds (green).
+      cv::line(view, cv::Point(image.cols / 2, 0),
+               cv::Point(image.cols / 2, image.rows - 1),
+               cv::Scalar(255, 255, 0), 2);
+      cv::line(view, cv::Point(adjusted_center, 0),
+               cv::Point(adjusted_center, image.rows - 1),
+               cv::Scalar(0, 0, 255), 2);
       cv::line(view, cv::Point(result.x1, 0),
-               cv::Point(result.x1, view.rows - 1),
+               cv::Point(result.x1, image.rows - 1),
                cv::Scalar(0, 255, 0), 2);
       cv::line(view, cv::Point(result.x2, 0),
-               cv::Point(result.x2, view.rows - 1),
+               cv::Point(result.x2, image.rows - 1),
                cv::Scalar(0, 255, 0), 2);
-      cv::line(view, cv::Point(result.center_u, 0),
-               cv::Point(result.center_u, view.rows - 1),
-               cv::Scalar(0, 0, 255), 1);
-      cv::drawMarker(view,
-                     cv::Point(result.x1, result.left_bottom_y),
+      cv::drawMarker(view, cv::Point(result.x1, result.left_bottom_y),
                      cv::Scalar(255, 0, 255), cv::MARKER_CROSS, 18, 2);
-      cv::drawMarker(view,
-                     cv::Point(result.x2, result.right_bottom_y),
-                     cv::Scalar(255, 255, 0), cv::MARKER_CROSS, 18, 2);
+      cv::drawMarker(view, cv::Point(result.x2, result.right_bottom_y),
+                     cv::Scalar(0, 255, 255), cv::MARKER_CROSS, 18, 2);
     };
     draw_geometry(source_view);
-    draw_geometry(axis_view);
+    draw_geometry(columns_view);
   }
 
-  std::string source_label = "1 Source | ROI not found";
-  std::string roi_label = "5 Horizontal ROI | invalid";
+  std::string source_metrics = "ROI not found";
+  std::string columns_metrics = "ROI not found";
   if (result.valid) {
     std::ostringstream source_stream;
-    source_stream << "1 Source | offset_x=" << std::showpos
-                  << result.center_offset_x << std::noshowpos
-                  << " bottom_y=(" << result.left_bottom_y << ','
-                  << result.right_bottom_y << ')';
-    source_label = source_stream.str();
-    roi_label = cv::format("5 Horizontal ROI | %dx%d",
-                           result.x2 - result.x1 + 1, image.rows);
+    source_stream << "detected=" << std::showpos << result.center_offset_x
+                  << " px  shift=" << center_offset_px << " px  output="
+                  << (result.center_offset_x + center_offset_px)
+                  << std::noshowpos << " px";
+    source_metrics = source_stream.str();
+    columns_metrics =
+        cv::format("area=%d  threshold=%.1f/%d", result.mask_area,
+                   result.column_threshold, result.max_column_length);
   }
 
   const std::vector<std::pair<cv::Mat, std::string>> stages{
-      {source_view, source_label},
-      {mask_to_bgr(result.raw_mask), "2 HSV union"},
-      {mask_to_bgr(result.opened_mask), "3 Morphological open"},
-      {axis_view,
-       cv::format("4 Columns | area=%d threshold=%.1f/%d", result.mask_area,
-                  result.column_threshold, result.max_column_length)},
-      {make_roi_panel(image, result), roi_label},
+      {source_view, source_metrics},
+      {columns_view, columns_metrics},
   };
 
   const int tile_width = std::max(1, image.cols / 2);
-  const int tile_height = std::max(1, image.rows / 2);
-  cv::Mat canvas(tile_height * 2, tile_width * 3, CV_8UC3,
-                 cv::Scalar(0, 0, 0));
+  cv::Mat canvas(image.rows, tile_width * 2, CV_8UC3, cv::Scalar(0, 0, 0));
   for (std::size_t index = 0; index < stages.size(); ++index) {
     cv::Mat tile;
-    const int interpolation =
-        index == 0 || index == 4 ? cv::INTER_AREA : cv::INTER_NEAREST;
-    cv::resize(stages[index].first, tile, cv::Size(tile_width, tile_height),
-               0.0, 0.0, interpolation);
-    draw_stage_label(tile, stages[index].second);
-    const int x = static_cast<int>(index % 3) * tile_width;
-    const int y = static_cast<int>(index / 3) * tile_height;
-    tile.copyTo(canvas(cv::Rect(x, y, tile_width, tile_height)));
+    cv::resize(stages[index].first, tile,
+               cv::Size(tile_width, image.rows), 0.0, 0.0,
+               index == 0 ? cv::INTER_AREA : cv::INTER_NEAREST);
+    draw_stage_legend(tile, index == 0 ? "1 Source" : "4 Columns",
+                      stages[index].second);
+    tile.copyTo(canvas(cv::Rect(static_cast<int>(index) * tile_width, 0,
+                                tile_width, image.rows)));
   }
   return canvas;
 }
@@ -306,6 +319,7 @@ class KfsRoiNode final : public rclcpp::Node {
     declare_parameter<double>("column_threshold_ratio", 0.7);
     declare_parameter<std::int64_t>("morphology_kernel_size", 5);
     declare_parameter<std::int64_t>("min_mask_area_px", 100);
+    declare_parameter<std::int64_t>("center_offset_px", 0);
 
     config_ = read_config();
     validate_node_config(config_);
@@ -351,6 +365,8 @@ class KfsRoiNode final : public rclcpp::Node {
         "morphology_kernel_size");
     config.roi.min_mask_area_px = positive_int(
         get_parameter("min_mask_area_px").as_int(), "min_mask_area_px");
+    config.center_offset_px =
+        static_cast<int>(get_parameter("center_offset_px").as_int());
     return config;
   }
 
@@ -402,6 +418,8 @@ class KfsRoiNode final : public rclcpp::Node {
     } else if (name == "min_mask_area_px") {
       config.roi.min_mask_area_px =
           positive_int(parameter.as_int(), name);
+    } else if (name == "center_offset_px") {
+      config.center_offset_px = static_cast<int>(parameter.as_int());
     }
   }
 
@@ -416,11 +434,13 @@ class KfsRoiNode final : public rclcpp::Node {
     try {
       const cv::Mat image = to_bgr(*message);
       const KfsRoiResult roi = extract_kfs_roi(image, config.roi);
-      roi_publisher_->publish(make_roi_message(*message, image, roi));
+      roi_publisher_->publish(make_roi_message(
+          *message, image, roi, config.center_offset_px));
       if (config.visualization_enabled) {
         const auto header = make_header(*message);
-        debug_publisher_->publish(
-            make_image(make_visualization(image, roi), header));
+        debug_publisher_->publish(make_image(
+            make_visualization(image, roi, config.center_offset_px),
+            header));
       }
     } catch (const cv::Exception &error) {
       RCLCPP_ERROR(get_logger(), "Failed to extract KFS ROI: %s",
@@ -448,7 +468,8 @@ class KfsRoiNode final : public rclcpp::Node {
 
   static AlignmentDetection make_roi_message(const CameraFrame &source,
                                                const cv::Mat &image,
-                                               const KfsRoiResult &result) {
+                                               const KfsRoiResult &result,
+                                               int center_offset_px) {
     AlignmentDetection message;
     message.header = make_header(source);
     message.sequence = source.sequence;
@@ -463,8 +484,10 @@ class KfsRoiNode final : public rclcpp::Node {
     message.x2 = result.x2;
     message.left_bottom_y = result.left_bottom_y;
     message.right_bottom_y = result.right_bottom_y;
-    message.center_u = result.center_u;
-    message.center_offset_x = result.center_offset_x;
+    // The dynamic center_offset_px shifts the final KFS center before it
+    // reaches the alignment consumers.
+    message.center_u = result.center_u + center_offset_px;
+    message.center_offset_x = result.center_offset_x + center_offset_px;
     return message;
   }
 

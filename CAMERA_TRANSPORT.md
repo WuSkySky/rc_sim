@@ -162,6 +162,9 @@ ROS 2 参数 `visualization_enabled`：
 - 参数只控制 `/debug` 图像，不影响主 `CameraFrame`、检测结果或相机信息。
 - 一个节点发布多个调试图像 Topic 时，由该节点的同一个
   `visualization_enabled` 参数统一控制。
+- 例外：`kfs_detect_fused` 的前/左/右三路调试图像
+  （`/r2/detection/{front,left,right}/debug`）由
+  `visualization_enabled_front/left/right` 三个参数独立控制，行为相同。
 
 例如：
 

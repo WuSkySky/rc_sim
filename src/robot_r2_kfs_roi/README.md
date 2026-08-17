@@ -5,10 +5,19 @@ simulation and real-camera ROI extraction.
 
 The node subscribes to `/r2/front_camera/image_raw`, publishes the qualified
 left/right columns, their lowest mask pixels, and the horizontal center offset
-on `/r2/kfs/roi`, and optionally publishes a five-stage visualization on
-`/r2/kfs/roi/debug`. The output type is
+on `/r2/kfs/roi`, and optionally publishes a two-stage visualization (stage 1
+source image and stage 4 column-selection mask) on `/r2/kfs/roi/debug`. The
+output type is
 `robot_r2_interfaces/msg/AlignmentDetection`; the message never contains image
 pixels. Camera selection remains a launch remapping.
+
+`center_offset_px` (default `0`) shifts the published KFS center by the given
+number of pixels: it is added to both `center_u` and `center_offset_x`, so the
+alignment consumers aim at the adjusted center. The debug image draws the
+image center line (cyan), the offset-adjusted center line (red), the qualified
+ROI bounds (green), and the left/right lowest mask pixels (magenta/yellow
+crosses). Its text shows the detected offset, configured shift, and final
+published offset separately.
 
 All thresholds support validated runtime parameter updates. Their defaults
 are installed from `config/kfs_roi.yaml`.

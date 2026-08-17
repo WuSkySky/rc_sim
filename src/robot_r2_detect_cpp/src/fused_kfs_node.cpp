@@ -13,7 +13,6 @@
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <robot_r2_interfaces/msg/camera_frame.hpp>
-#include <robot_r2_interfaces/msg/kfs_fused_debug_images.hpp>
 #include <robot_r2_interfaces/msg/kfs_fused_processed_detections.hpp>
 #include <robot_r2_interfaces/msg/kfs_fused_raw_detections.hpp>
 #include <robot_r2_interfaces/msg/kfs_processed_detection.hpp>
@@ -55,7 +54,9 @@ using GetKfsType = robot_r2_interfaces::srv::GetKfsType;
 
 constexpr char kRawTopic[] = "/r2/detection/raw";
 constexpr char kProcessedTopic[] = "/r2/detection/processed";
-constexpr char kDebugTopic[] = "/r2/detection/debug";
+constexpr char kFrontDebugTopic[] = "/r2/detection/front/debug";
+constexpr char kLeftDebugTopic[] = "/r2/detection/left/debug";
+constexpr char kRightDebugTopic[] = "/r2/detection/right/debug";
 constexpr char kServiceName[] = "/r2/detection/get_type";
 
 void check_cuda(cudaError_t status, const char *operation) {
@@ -429,7 +430,9 @@ struct KfsConfiguration {
   std::array<float, 3> std{};
   double horizontal_crop_ratio{};
   double confidence_threshold{};
-  bool visualization_enabled{};
+  bool visualization_enabled_front{false};
+  bool visualization_enabled_left{false};
+  bool visualization_enabled_right{false};
   double inference_rate{};
   double stale_timeout_sec{};
   double default_vote_timeout_sec{};
@@ -464,8 +467,17 @@ public:
         floating_descriptor("Minimum confidence for processed detections", 0.0,
                             1.0));
     declare_parameter<bool>(
-        "visualization_enabled", false,
-        descriptor("Publish annotated debug images when subscribers exist"));
+        "visualization_enabled_front", false,
+        descriptor("Publish the front camera annotated debug image when "
+                   "subscribers exist"));
+    declare_parameter<bool>(
+        "visualization_enabled_left", false,
+        descriptor("Publish the left camera annotated debug image when "
+                   "subscribers exist"));
+    declare_parameter<bool>(
+        "visualization_enabled_right", false,
+        descriptor("Publish the right camera annotated debug image when "
+                   "subscribers exist"));
     declare_parameter<double>(
         "inference_rate", 30.0,
         floating_descriptor("Maximum fused inference batch rate in Hz", 0.001,
@@ -496,8 +508,12 @@ public:
     configuration->horizontal_crop_ratio =
         get_parameter("horizontal_crop_ratio").as_double();
     configuration->confidence_threshold = get_parameter("conf").as_double();
-    configuration->visualization_enabled =
-        get_parameter("visualization_enabled").as_bool();
+    configuration->visualization_enabled_front =
+        get_parameter("visualization_enabled_front").as_bool();
+    configuration->visualization_enabled_left =
+        get_parameter("visualization_enabled_left").as_bool();
+    configuration->visualization_enabled_right =
+        get_parameter("visualization_enabled_right").as_bool();
     configuration->inference_rate =
         get_parameter("inference_rate").as_double();
     configuration->stale_timeout_sec =
@@ -531,9 +547,11 @@ public:
         create_publisher<
             robot_r2_interfaces::msg::KfsFusedProcessedDetections>(
             kProcessedTopic, 10);
-    debug_publisher_ =
-        create_publisher<robot_r2_interfaces::msg::KfsFusedDebugImages>(
-            kDebugTopic, sensor_qos);
+    debug_publishers_ = {
+      create_publisher<sensor_msgs::msg::Image>(kFrontDebugTopic, sensor_qos),
+      create_publisher<sensor_msgs::msg::Image>(kLeftDebugTopic, sensor_qos),
+      create_publisher<sensor_msgs::msg::Image>(kRightDebugTopic, sensor_qos),
+    };
 
     for (std::size_t index = 0; index < names.size(); ++index) {
       auto state = std::make_unique<CameraState>();
@@ -649,9 +667,15 @@ private:
         } else if (name == "conf") {
           relevant_parameter = true;
           next->confidence_threshold = parameter.as_double();
-        } else if (name == "visualization_enabled") {
+        } else if (name == "visualization_enabled_front") {
           relevant_parameter = true;
-          next->visualization_enabled = parameter.as_bool();
+          next->visualization_enabled_front = parameter.as_bool();
+        } else if (name == "visualization_enabled_left") {
+          relevant_parameter = true;
+          next->visualization_enabled_left = parameter.as_bool();
+        } else if (name == "visualization_enabled_right") {
+          relevant_parameter = true;
+          next->visualization_enabled_right = parameter.as_bool();
         } else if (name == "inference_rate") {
           relevant_parameter = true;
           next->inference_rate = parameter.as_double();
@@ -727,10 +751,12 @@ private:
     }
     RCLCPP_INFO(get_logger(),
                 "Updated KFS parameters: conf=%.3f, rate=%.3f Hz, crop=%.1f%% "
-                "per side, visualization=%s",
+                "per side, debug front/left/right=%d/%d/%d",
                 next->confidence_threshold, next->inference_rate,
                 next->horizontal_crop_ratio * 100.0,
-                next->visualization_enabled ? "enabled" : "disabled");
+                next->visualization_enabled_front ? 1 : 0,
+                next->visualization_enabled_left ? 1 : 0,
+                next->visualization_enabled_right ? 1 : 0);
     return result;
   }
 
@@ -900,10 +926,8 @@ private:
 
     robot_r2_interfaces::msg::KfsFusedRawDetections raw_batch;
     robot_r2_interfaces::msg::KfsFusedProcessedDetections processed_batch;
-    const bool publish_debug =
-        configuration->visualization_enabled &&
-        debug_publisher_->get_subscription_count() > 0;
-    robot_r2_interfaces::msg::KfsFusedDebugImages debug_batch;
+    std::array<bool, 3> debug_filled{false, false, false};
+    std::array<sensor_msgs::msg::Image, 3> debug_images;
 
     try {
       const int chunk_size = std::max(1, engine_->preferred_chunk_size());
@@ -918,9 +942,13 @@ private:
           fill_result(item.camera_index, *item.message, views[begin + offset],
                       results[offset], *configuration, raw_batch,
                       processed_batch);
-          if (publish_debug) {
-            fill_debug(item.camera_index, *item.message, views[begin + offset],
-                       results[offset], *configuration, debug_batch);
+          const std::size_t camera = item.camera_index;
+          if (debug_enabled(camera, *configuration) &&
+              debug_publishers_[camera]->get_subscription_count() > 0) {
+            fill_debug(*item.message, views[begin + offset],
+                       results[offset], *configuration,
+                       debug_images[camera]);
+            debug_filled[camera] = true;
           }
         }
       }
@@ -932,8 +960,10 @@ private:
 
     raw_publisher_->publish(raw_batch);
     processed_publisher_->publish(processed_batch);
-    if (publish_debug) {
-      debug_publisher_->publish(debug_batch);
+    for (std::size_t index = 0; index < debug_publishers_.size(); ++index) {
+      if (debug_filled[index]) {
+        debug_publishers_[index]->publish(debug_images[index]);
+      }
     }
 
     const double elapsed = std::chrono::duration<double>(
@@ -983,19 +1013,6 @@ private:
     }
   }
 
-  static sensor_msgs::msg::Image &
-  debug_slot(robot_r2_interfaces::msg::KfsFusedDebugImages &batch,
-             std::size_t camera_index) {
-    switch (camera_index) {
-    case 0:
-      return batch.front;
-    case 1:
-      return batch.left;
-    default:
-      return batch.right;
-    }
-  }
-
   void fill_result(std::size_t camera_index, const CameraFrame &frame,
                    const FrameView &view,
                    const Classification &classification,
@@ -1027,14 +1044,24 @@ private:
     record_vote(state, processed.class_name);
   }
 
-  void fill_debug(std::size_t camera_index, const CameraFrame &frame,
-                  const FrameView &view,
+  static bool debug_enabled(std::size_t camera_index,
+                            const KfsConfiguration &configuration) {
+    switch (camera_index) {
+    case 0:
+      return configuration.visualization_enabled_front;
+    case 1:
+      return configuration.visualization_enabled_left;
+    default:
+      return configuration.visualization_enabled_right;
+    }
+  }
+
+  void fill_debug(const CameraFrame &frame, const FrameView &view,
                   const Classification &classification,
                   const KfsConfiguration &configuration,
-                  robot_r2_interfaces::msg::KfsFusedDebugImages &debug_batch) {
+                  sensor_msgs::msg::Image &output) {
     const std::string &class_name =
         configuration.class_names.at(classification.class_id);
-    auto &output = debug_slot(debug_batch, camera_index);
     output = make_debug_image(frame, view, class_name,
                               classification.confidence,
                               configuration.confidence_threshold);
@@ -1202,8 +1229,8 @@ private:
   rclcpp::Publisher<
       robot_r2_interfaces::msg::KfsFusedProcessedDetections>::SharedPtr
       processed_publisher_;
-  rclcpp::Publisher<robot_r2_interfaces::msg::KfsFusedDebugImages>::SharedPtr
-      debug_publisher_;
+  std::vector<rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr>
+      debug_publishers_;
   rclcpp::Service<GetKfsType>::SharedPtr service_;
   std::mutex service_mutex_;
   rclcpp::CallbackGroup::SharedPtr image_callback_group_;

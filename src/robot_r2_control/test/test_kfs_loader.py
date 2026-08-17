@@ -90,7 +90,8 @@ def make_controller():
             'mode_5_sequence',
         ),
         (KfsAction.Request.RELEASE, 0, 'release_sequence'),
-        (KfsAction.Request.POP, 0, 'pop_sequence'),
+        (KfsAction.Request.POP, 1, 'pop_1_sequence'),
+        (KfsAction.Request.POP, 2, 'pop_2_sequence'),
     ],
 )
 def test_action_request_selects_complete_trajectory(
@@ -112,6 +113,21 @@ def test_unknown_action_is_rejected_without_executing_a_trajectory():
 
     assert not result.success
     assert 'unsupported KFS action' in result.message
+    assert executed == []
+
+
+@pytest.mark.parametrize('mode', [0, 3])
+def test_unknown_pop_mode_is_rejected_without_executing_a_trajectory(mode):
+    controller = make_controller()
+    request = SimpleNamespace(action=KfsAction.Request.POP, mode=mode)
+    response = SimpleNamespace(success=None, message='')
+    executed = []
+    controller.execute_sequence = lambda *args: executed.append(args)
+
+    result = controller.handle_kfs_action(request, response)
+
+    assert not result.success
+    assert 'unsupported KFS pop mode' in result.message
     assert executed == []
 
 
@@ -277,9 +293,10 @@ def test_multi_parameter_update_is_atomic_when_one_value_is_invalid():
     assert controller.service_timeout_sec == 10.0
 
 
-def test_all_seven_trajectory_parameters_accept_valid_sequences():
-    assert 'pop_sequence' in TRAJECTORY_PARAMETER_NAMES
-    assert len(TRAJECTORY_PARAMETER_NAMES) == 7
+def test_all_eight_trajectory_parameters_accept_valid_sequences():
+    assert 'pop_1_sequence' in TRAJECTORY_PARAMETER_NAMES
+    assert 'pop_2_sequence' in TRAJECTORY_PARAMETER_NAMES
+    assert len(TRAJECTORY_PARAMETER_NAMES) == 8
     for parameter_name in TRAJECTORY_PARAMETER_NAMES:
         assert parse_sequence(
             parameter_name,

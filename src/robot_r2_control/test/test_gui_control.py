@@ -511,7 +511,16 @@ def test_parse_relocalization_values_requires_six_values():
             '模式 5：上方装载（当前数量 1）',
         ),
         (KfsAction.Request.RELEASE, 0, '释放'),
-        (KfsAction.Request.POP, 0, '弹出'),
+        (
+            KfsAction.Request.POP,
+            KfsAction.Request.MODE_1,
+            '弹出模式 1：从夹爪直接放置',
+        ),
+        (
+            KfsAction.Request.POP,
+            KfsAction.Request.MODE_2,
+            '弹出模式 2：从车上拿取并放置',
+        ),
     ],
 )
 def test_kfs_action_sends_expected_request(
@@ -548,6 +557,16 @@ def test_kfs_action_rejects_concurrent_request():
 
     assert not success
     assert message == 'KFS 动作正在执行'
+    assert not node.kfs_action_client.requests
+
+
+@pytest.mark.parametrize('mode', [0, 3])
+def test_kfs_action_rejects_unknown_pop_mode(mode):
+    node = make_node_stub()
+
+    with pytest.raises(ValueError, match='Unknown KFS pop mode'):
+        node.request_kfs_action(KfsAction.Request.POP, mode)
+
     assert not node.kfs_action_client.requests
 
 
@@ -601,13 +620,14 @@ def test_parameter_load_result_reports_all_parameters_written():
         'Set parameter mode_4_sequence successful',
         'Set parameter mode_5_sequence successful',
         'Set parameter release_sequence successful',
-        'Set parameter pop_sequence successful',
+        'Set parameter pop_1_sequence successful',
+        'Set parameter pop_2_sequence successful',
     ])
 
     success, message = summarize_parameter_load_result(0, output, '')
 
     assert success
-    assert message == 'KFS Load 参数写入成功：共 8 项'
+    assert message == 'KFS Load 参数写入成功：共 9 项'
 
 
 def test_parameter_load_result_reports_partial_failure():

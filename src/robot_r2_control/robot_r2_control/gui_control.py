@@ -36,7 +36,8 @@ KFS_LOADER_PARAMETER_NAMES = {
     'mode_4_sequence',
     'mode_5_sequence',
     'release_sequence',
-    'pop_sequence',
+    'pop_1_sequence',
+    'pop_2_sequence',
 }
 KFS_LOADER_SOURCE_RELATIVE_PATH = Path(
     'src/robot_r2_control/config/kfs_loader.yaml')
@@ -1125,7 +1126,13 @@ class GuiControlNode(Node):
         elif action == KfsAction.Request.RELEASE:
             action_label = '释放'
         elif action == KfsAction.Request.POP:
-            action_label = '弹出'
+            mode_labels = {
+                KfsAction.Request.MODE_1: '弹出模式 1：从夹爪直接放置',
+                KfsAction.Request.MODE_2: '弹出模式 2：从车上拿取并放置',
+            }
+            if mode not in mode_labels:
+                raise ValueError(f'Unknown KFS pop mode: {mode}')
+            action_label = mode_labels[mode]
         else:
             raise ValueError(f'Unknown KFS action: {action}')
 
@@ -1138,7 +1145,7 @@ class GuiControlNode(Node):
 
         request = KfsAction.Request()
         request.action = action
-        if action == KfsAction.Request.LOAD:
+        if action in (KfsAction.Request.LOAD, KfsAction.Request.POP):
             request.mode = mode
         try:
             future = self.kfs_action_client.call_async(request)
@@ -1553,7 +1560,14 @@ class GuiControlApp:
                 KfsAction.Request.LOAD, KfsAction.Request.MODE_5,
             ),
             ('释放', KfsAction.Request.RELEASE, 0),
-            ('弹出', KfsAction.Request.POP, 0),
+            (
+                '弹出模式 1：从夹爪直接放置',
+                KfsAction.Request.POP, KfsAction.Request.MODE_1,
+            ),
+            (
+                '弹出模式 2：从车上拿取并放置',
+                KfsAction.Request.POP, KfsAction.Request.MODE_2,
+            ),
         )
         for index, (label, action, mode) in enumerate(
                 kfs_actions):
@@ -1580,7 +1594,7 @@ class GuiControlApp:
             command=self._write_kfs_load_parameters,
         )
         self.kfs_parameter_load_button.grid(
-            row=5,
+            row=6,
             column=0,
             columnspan=2,
             sticky='ew',

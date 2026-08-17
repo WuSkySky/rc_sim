@@ -10,7 +10,12 @@
     model_std: [0.229, 0.224, 0.225]
     # Crop this fraction from both the left and right before inference.
     horizontal_crop_ratio: 0.2
-    visualization_enabled: false
+    # Per-camera annotated debug images, each published on
+    # /r2/detection/{front,left,right}/debug when its switch is enabled AND
+    # the topic has subscribers. Independent and dynamic.
+    visualization_enabled_front: false
+    visualization_enabled_left: false
+    visualization_enabled_right: false
     conf: 0.5
     # Warn when one frame takes longer than the 30 Hz camera period.
     target_processing_rate: 30.0

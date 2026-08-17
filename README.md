@@ -260,12 +260,16 @@ ros2 service call /r2/align_to_tip \
 后续参数修改影响。
 
 可视化默认关闭。所有可能发布调试图像的节点统一使用动态参数
-`visualization_enabled`，可在运行时开启或关闭：
+`visualization_enabled`（实机融合检测节点 kfs_detect_fused 例外：三路调试
+图像由 `visualization_enabled_front/left/right` 三个参数独立控制），
+可在运行时开启或关闭：
 
 ```bash
 ros2 param set /kfs_roi visualization_enabled true
-# 实机检测节点：
-ros2 param set /kfs_detect_fused visualization_enabled true
+# 实机检测节点（三路独立开关）：
+ros2 param set /kfs_detect_fused visualization_enabled_front true
+ros2 param set /kfs_detect_fused visualization_enabled_left true
+ros2 param set /kfs_detect_fused visualization_enabled_right true
 ros2 param set /r2/front_camera_controller visualization_enabled true
 ros2 param set /front_yahboom_camera visualization_enabled true
 ros2 param set /left_mipi_camera visualization_enabled true
@@ -299,7 +303,7 @@ ros2 service call /r2/led_detection/detect \
 ```
 
 KFS 动作通过 `action` 区分：`load=装载`、`release=释放`、`pop=弹出`。
-装载请求只需通过 `mode=1..5` 选择完整轨迹：
+`mode` 的含义由动作决定。装载请求通过 `mode=1..5` 选择完整轨迹：
 
 | mode | 装载方向 | 当前装载数量 | 动作结果 |
 |---:|---|---:|---|
@@ -314,9 +318,9 @@ ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
   "{action: load, mode: 1}"
 ```
 
-装载、释放和弹出动作由 `robot_r2_control/config/kfs_loader.yaml` 中的七条轨迹配置：
-`mode_1_sequence` 到 `mode_5_sequence`、`release_sequence` 和
-`pop_sequence`。
+装载、释放和弹出动作由 `robot_r2_control/config/kfs_loader.yaml` 中的八条轨迹配置：
+`mode_1_sequence` 到 `mode_5_sequence`、`release_sequence`、
+`pop_1_sequence` 和 `pop_2_sequence`。
 每连续六个数表示一个同步步骤，字段顺序为根部位置、末端位置、夹爪位置以及
 三者各自的容差。每一步会同时向三个电机发送目标，全部到达后才执行下一步；
 无需运动的电机重复填写上一目标值。
@@ -338,11 +342,14 @@ ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
   "{action: release}"
 ```
 
-弹出 KFS：
+弹出 KFS 时，`mode=1` 表示从夹爪直接放置，`mode=2` 表示先从车上拿取再放置：
 
 ```bash
 ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
-  "{action: pop}"
+  "{action: pop, mode: 1}"
+
+ros2 service call /r2/kfs/action robot_r2_interfaces/srv/KfsAction \
+  "{action: pop, mode: 2}"
 ```
 
 以下服务用于直接调试 KFS 夹爪机构。`position` 分别表示升降位置、根部角度、

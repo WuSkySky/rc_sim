@@ -53,7 +53,10 @@ Useful parameters in `robot_r2_detect/config/kfs_detect.yaml`:
 - `inference_rate`: maximum fused batch frequency.
 - `frame_stale_timeout_sec`: ignore old cached frames.
 - `horizontal_crop_ratio`: fraction removed from each horizontal side.
-- `visualization_enabled`: debug images are disabled by default.
+- `visualization_enabled_front`, `visualization_enabled_left`,
+  `visualization_enabled_right`: per-camera annotated debug images, disabled
+  by default. Each publishes on `/r2/detection/{front,left,right}/debug` only
+  while enabled and subscribed.
 - `default_vote_timeout_sec`: fallback timeout used by `GetKfsType` requests.
 
 All parameters declared by `kfs_detect_fused` support atomic runtime updates.
@@ -69,7 +72,9 @@ runtime with:
 ros2 param set /kfs_detect_fused horizontal_crop_ratio 0.0
 ros2 param set /kfs_detect_fused horizontal_crop_ratio 0.2
 ros2 param set /kfs_detect_fused conf 0.65
-ros2 param set /kfs_detect_fused visualization_enabled true
+ros2 param set /kfs_detect_fused visualization_enabled_front true
+ros2 param set /kfs_detect_fused visualization_enabled_left true
+ros2 param set /kfs_detect_fused visualization_enabled_right true
 ros2 param set /kfs_detect_fused inference_rate 20.0
 ```
 
