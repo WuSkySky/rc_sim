@@ -164,6 +164,13 @@ class ArucoPoseDetector:
             ],
             dtype=np.float32,
         )
+        # Time-consistency state: reject a frame whose position jumps wildly
+        # relative to the previous one (a marker-orientation flip). A moving
+        # camera shifts tvec by at most ~0.01 m/frame at 0.3 m/s, so a 0.5 m
+        # threshold only catches flips. The consecutive-reject reset keeps
+        # genuine motion or marker re-detection from being locked out forever.
+        self._last_tvec = None
+        self._consecutive_rejects = 0
 
     def detect(self, image: np.ndarray) -> tuple[list, np.ndarray | None, int]:
         """Return (corners, ids, rejected_count) for all markers in a BGR image."""
@@ -224,6 +231,20 @@ class ArucoPoseDetector:
         # Prefer the solution where the marker is in front of the camera.
         if float(tvec[2]) < 0.0:
             return False, None, None
+
+        # Reject an orientation flip: a frame whose position jumped wildly
+        # versus the previous frame. 500 mm is far above normal frame-to-frame
+        # motion (~0.01 m) and far below a flip (~2 m here).
+        if self._last_tvec is not None:
+            jump = float(np.linalg.norm(tvec - self._last_tvec))
+            if jump > 500.0:  # millimetres
+                self._consecutive_rejects += 1
+                if self._consecutive_rejects <= 5:
+                    return False, None, None
+                self._consecutive_rejects = 0
+            else:
+                self._consecutive_rejects = 0
+        self._last_tvec = tvec.copy()
         return True, rvec, tvec
 
     def draw_detections(
