@@ -107,6 +107,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 
 | 功能         | 服务名                          | 服务类型                                          | 可用环境  |
 | ---------- | ---------------------------- | --------------------------------------------- | ----- |
+| 阶段 1       | `/r2/stage_one`              | `robot_r2_interfaces/srv/StageOne`            | 仅实机   |
 | 完整阶段二      | `/r2/stage_two`              | `robot_r2_interfaces/srv/StageTwo`            | 仿真、实机 |
 | 阶段 2.1     | `/r2/stage_two_point_one`    | `robot_r2_interfaces/srv/StageTwoPointOne`    | 仿真、实机 |
 | 阶段 2.2     | `/r2/stage_two_point_two`    | `robot_r2_interfaces/srv/StageTwoPointTwo`    | 仿真、实机 |
@@ -123,7 +124,42 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | KFS 夹爪根部旋转 | `/r2/gripper/set_rotate`     | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
 | KFS 夹爪末端旋转 | `/r2/gripper/set_tip_rotate` | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
 | KFS 夹爪开合   | `/r2/gripper/set_grip`       | `robot_r2_interfaces/srv/SetJointPosition`    | 仿真、实机 |
+| 武器旋转       | `/r2/weapon/set_rotate`      | `robot_r2_interfaces/srv/SetJointPosition`    | 仅实机   |
+| 武器夹爪开合    | `/r2/weapon/set_grip`        | `robot_r2_interfaces/srv/SetJointPosition`    | 仅实机   |
 | 重新随机摆放 KFS | `/simulation/reset_kfs`      | `std_srvs/srv/Trigger`                        | 仅仿真   |
+
+
+### 阶段一任务
+
+阶段一仅由 `real1.launch.py` 启动。请求中的 `team` 只接受 `red` 或 `blue`；当前
+动作参数按红方定义，蓝方执行时仅反转左右平移方向。服务会依次执行底盘升降、
+斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向；武器旋转到 `142°`
+后，底盘会先降回
+`0.01 m`，再前移 `0.20 m`。动作 2 的左右/前后位移在同一个位置伺服请求中
+完成，动作 5 的武器旋转和夹爪张开并行执行。
+
+```bash
+ros2 service call /r2/stage_one robot_r2_interfaces/srv/StageOne \
+  "{team: red}"
+
+ros2 service call /r2/stage_one robot_r2_interfaces/srv/StageOne \
+  "{team: blue}"
+```
+
+GUI 的 `Step1` 区域提供“红方”和“蓝方”两个执行按钮，以及“从 YAML 写入
+Step1 参数”按钮。执行按钮会先调用
+`/r2/set_base_pose`，成功后再使用对应的 `team` 调用 `/r2/stage_one`。默认重定位
+位姿为全零，可通过 `gui_control.yaml` 中的 `stage_one_relocalization_pose`
+动态调整。参数写入按钮会加载工作区源码中的
+`src/robot_r2_control/config/stage_one.yaml` 到 `/stage_one` 节点。
+
+动作目标、容差和超时集中在 `robot_r2_control/config/stage_one.yaml`，均支持运行时
+动态修改。参数修改在下一次阶段一服务调用时整体生效，例如：
+
+```bash
+ros2 param set /stage_one action_2_left_m 0.790
+ros2 param set /stage_one weapon_grip_tolerance_m 0.0015
+```
 
 
 ### 阶段二任务
@@ -373,6 +409,20 @@ ros2 service call /r2/gripper/set_tip_rotate \
 ros2 service call /r2/gripper/set_grip \
   robot_r2_interfaces/srv/SetJointPosition \
   "{position: 0.209, tolerance: 0.0, timeout_sec: 0.0}"
+```
+
+武器机构同样使用 `SetJointPosition`。旋转单位为弧度，允许范围默认为
+`0–3.49066 rad`（`0–200°`）；夹爪开合单位为米，`0.0` 表示闭合，默认最大开度
+为 `0.03 m`：
+
+```bash
+ros2 service call /r2/weapon/set_rotate \
+  robot_r2_interfaces/srv/SetJointPosition \
+  "{position: 1.5707963268, tolerance: 0.01, timeout_sec: 10.0}"
+
+ros2 service call /r2/weapon/set_grip \
+  robot_r2_interfaces/srv/SetJointPosition \
+  "{position: 0.028, tolerance: 0.001, timeout_sec: 10.0}"
 ```
 
 ### 仿真场地

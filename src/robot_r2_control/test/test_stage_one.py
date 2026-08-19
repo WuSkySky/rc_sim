@@ -1,0 +1,230 @@
+import math
+import threading
+from types import SimpleNamespace
+
+import pytest
+from rclpy.parameter import Parameter
+
+from robot_r2_control.stage_one import (
+    PARAMETER_DEFAULTS,
+    StageOneController,
+    relative_pose_goal,
+)
+from robot_r2_interfaces.srv import StageOne
+
+
+class FakeLogger:
+    def info(self, _message):
+        pass
+
+
+class ImmediateFuture:
+    def __init__(self, response):
+        self.response = response
+
+    def add_done_callback(self, callback):
+        callback(self)
+
+    def result(self):
+        return self.response
+
+
+class FakeClient:
+    def __init__(self, name, call_order):
+        self.name = name
+        self.call_order = call_order
+        self.requests = []
+
+    def call_async(self, request):
+        self.call_order.append(self.name)
+        self.requests.append(request)
+        return ImmediateFuture(SimpleNamespace(success=True, message='ok'))
+
+
+class DependencyClient:
+    def __init__(self, available):
+        self.available = available
+
+    def wait_for_service(self, timeout_sec):
+        del timeout_sec
+        return self.available
+
+
+def default_config():
+    return StageOneController.config_from_values(
+        dict(PARAMETER_DEFAULTS))
+
+
+def make_sequence_controller():
+    controller = StageOneController.__new__(StageOneController)
+    controller.get_logger = lambda: FakeLogger()
+    controller.weapon_rotate_client = 'rotate_client'
+    controller.weapon_grip_client = 'grip_client'
+    controller.calls = []
+    controller.set_lift = lambda height, _config: controller.calls.append(
+        ('lift', height))
+    controller.move_relative = (
+        lambda forward, left, yaw, _config: controller.calls.append(
+            ('move', forward, left, yaw)))
+    controller.align_tip = lambda _config: controller.calls.append(('align',))
+    controller.set_weapon_pair = (
+        lambda rotate, grip, _config: controller.calls.append(
+            ('weapon_pair', rotate, grip)))
+    controller.set_weapon_joint = (
+        lambda client, _description, position, tolerance, _config:
+        controller.calls.append(
+            ('weapon_joint', client, position, tolerance)))
+    return controller
+
+
+def test_relative_pose_goal_uses_current_body_heading():
+    target = relative_pose_goal(
+        (1.0, 2.0, math.pi / 2.0),
+        -0.887,
+        0.781,
+        0.0,
+    )
+
+    assert target == pytest.approx(
+        (1.0 - 0.781, 2.0 - 0.887, math.pi / 2.0))
+
+
+def test_red_team_runs_all_numbered_actions_in_order():
+    controller = make_sequence_controller()
+    config = default_config()
+
+    controller.execute_task(config, StageOne.Request.RED)
+
+    assert controller.calls == [
+        ('lift', 0.01),
+        ('move', -0.887, 0.781, 0.0),
+        ('lift', 0.14),
+        ('align',),
+        ('weapon_pair', math.pi / 2.0, 0.028),
+        ('move', -0.10, 0.0, 0.0),
+        ('weapon_joint', 'grip_client', 0.0, 0.001),
+        (
+            'weapon_joint',
+            'rotate_client',
+            math.radians(142.0),
+            0.01,
+        ),
+        ('lift', 0.01),
+        ('move', 0.20, 0.0, 0.0),
+        ('move', 0.0, 0.0, math.pi),
+    ]
+
+
+def test_action_failure_stops_later_actions_and_reports_number():
+    controller = make_sequence_controller()
+    config = default_config()
+    lift_call_count = 0
+
+    def fail_second_lift(height, _config):
+        nonlocal lift_call_count
+        lift_call_count += 1
+        controller.calls.append(('lift', height))
+        if lift_call_count == 2:
+            raise RuntimeError('lift rejected')
+
+    controller.set_lift = fail_second_lift
+
+    with pytest.raises(RuntimeError, match=r'Action 3 .*lift rejected'):
+        controller.execute_task(config, StageOne.Request.RED)
+
+    assert controller.calls == [
+        ('lift', 0.01),
+        ('move', -0.887, 0.781, 0.0),
+        ('lift', 0.14),
+    ]
+
+
+def test_weapon_pair_dispatches_both_requests_before_waiting():
+    controller = StageOneController.__new__(StageOneController)
+    call_order = []
+    controller.weapon_rotate_client = FakeClient('rotate', call_order)
+    controller.weapon_grip_client = FakeClient('grip', call_order)
+
+    controller.set_weapon_pair(math.pi / 2.0, 0.028, default_config())
+
+    assert call_order == ['rotate', 'grip']
+    rotate_request = controller.weapon_rotate_client.requests[0]
+    grip_request = controller.weapon_grip_client.requests[0]
+    assert rotate_request.position == pytest.approx(math.pi / 2.0)
+    assert rotate_request.tolerance == pytest.approx(0.01)
+    assert grip_request.position == pytest.approx(0.028)
+    assert grip_request.tolerance == pytest.approx(0.001)
+
+
+@pytest.mark.parametrize(
+    'name,value',
+    [
+        ('action_2_left_m', -0.1),
+        ('action_4_pixel_tolerance_px', 0.0),
+        ('weapon_timeout_sec', math.inf),
+    ],
+)
+def test_invalid_config_is_rejected(name, value):
+    values = dict(PARAMETER_DEFAULTS)
+    values[name] = value
+
+    with pytest.raises(ValueError, match=name):
+        StageOneController.config_from_values(values)
+
+
+def test_parameter_update_atomically_replaces_config_snapshot():
+    controller = StageOneController.__new__(StageOneController)
+    controller.config_lock = threading.RLock()
+    controller._config = default_config()
+    original = controller.config_snapshot()
+
+    result = controller.on_parameters_changed([
+        Parameter('action_6_backward_m', value=0.15),
+        Parameter('position_tolerance_m', value=0.006),
+    ])
+
+    assert result.successful
+    assert original.action_6_backward_m == pytest.approx(0.10)
+    assert original.position_tolerance_m == pytest.approx(0.005)
+    updated = controller.config_snapshot()
+    assert updated.action_6_backward_m == pytest.approx(0.15)
+    assert updated.position_tolerance_m == pytest.approx(0.006)
+
+
+def test_pose_wait_times_out_without_a_new_sample():
+    controller = StageOneController.__new__(StageOneController)
+    controller.pose_condition = threading.Condition()
+    controller.pose_sequence = 3
+    controller.current_pose = (1.0, 2.0, 0.0)
+
+    with pytest.raises(RuntimeError, match='Pose feedback unavailable'):
+        controller.wait_for_fresh_pose(0.001)
+
+
+def test_unavailable_dependency_aborts_before_actions():
+    controller = StageOneController.__new__(StageOneController)
+    controller.move_client = DependencyClient(True)
+    controller.lift_client = DependencyClient(True)
+    controller.align_client = DependencyClient(False)
+    controller.weapon_rotate_client = DependencyClient(True)
+    controller.weapon_grip_client = DependencyClient(True)
+
+    with pytest.raises(RuntimeError, match='AlignToTip service unavailable'):
+        controller.wait_for_dependencies(0.1)
+
+
+def test_blue_team_reverses_only_lateral_translation():
+    controller = make_sequence_controller()
+
+    controller.execute_task(default_config(), StageOne.Request.BLUE)
+
+    assert controller.calls[1] == ('move', -0.887, -0.781, 0.0)
+    assert controller.calls[5] == ('move', -0.10, 0.0, 0.0)
+    assert controller.calls[9] == ('move', 0.20, 0.0, 0.0)
+    assert controller.calls[10] == ('move', 0.0, 0.0, math.pi)
+
+
+@pytest.mark.parametrize('team', ['', 'RED', 'green'])
+def test_invalid_team_is_rejected(team):
+    with pytest.raises(ValueError, match='team must be red or blue'):
+        StageOneController.validate_team(team)

@@ -6,7 +6,9 @@ import pytest
 
 from robot_r2_control.gui_control import (
     GuiControlNode,
+    STAGE_ONE_PARAMETER_NAMES,
     make_parameter_load_command,
+    make_stage_one_parameter_load_command,
     manual_twist_components,
     motion_control_text,
     normalize_angle,
@@ -14,10 +16,17 @@ from robot_r2_control.gui_control import (
     parse_relocalization_values,
     relative_pose_goal,
     resolve_kfs_loader_source_config,
+    resolve_stage_one_source_config,
     summarize_parameter_load_result,
+    summarize_stage_one_parameter_load_result,
     velocity_test_twist_components,
 )
-from robot_r2_interfaces.srv import KfsAction, StageTwoPointTwo, TraverseStep
+from robot_r2_interfaces.srv import (
+    KfsAction,
+    StageOne,
+    StageTwoPointTwo,
+    TraverseStep,
+)
 
 
 class FakePublisher:
@@ -74,11 +83,26 @@ def make_node_stub():
     node.relocalization_request_in_flight = False
     node.step_test_request_in_flight = False
     node.step_test_direction = None
+    node.stage_one_request_in_flight = False
+    node.stage_one_team = None
     node.stage_two_point_one_request_in_flight = False
     node.stage_two_point_one_skip = None
     node.stage_two_point_two_request_in_flight = False
     node.stage_two_point_two_skip = None
     node.kfs_action_request_in_flight = False
+    node.kfs_parameter_load_in_flight = False
+    node.stage_one_parameter_load_in_flight = False
+    node.config_generation = 0
+    node.lift_min = 0.0
+    node.lift_max = 0.376
+    node.float_control_ranges = {
+        control_name: (
+            float(definition['minimum'][1]),
+            float(definition['maximum'][1]),
+        )
+        for control_name, definition in (
+            GuiControlNode.FLOAT_CONTROL_PARAMETERS.items())
+    }
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()
     node.kfs_alignment_client = FakeClient()
@@ -86,8 +110,10 @@ def make_node_stub():
     node.kfs_action_client = FakeClient()
     node.set_base_pose_client = FakeClient()
     node.step_traverse_client = FakeClient()
+    node.stage_one_client = FakeClient()
     node.stage_two_point_one_client = FakeClient()
     node.stage_two_point_two_client = FakeClient()
+    node.stage_one_relocalization_pose = (0.0,) * 6
     node.status_events = []
     return node
 
@@ -139,6 +165,33 @@ def test_parameter_load_command_does_not_use_ros_daemon():
         'ros2', 'param', 'load',
         '--no-daemon', '--spin-time', '2.0',
         '/kfs_loader_control', '/workspace/config.yaml',
+    ]
+
+
+def test_stage_one_config_is_resolved_from_workspace_source(tmp_path):
+    package_share = (
+        tmp_path / 'install/robot_r2_control/share/robot_r2_control')
+    installed_config = package_share / 'config/stage_one.yaml'
+    installed_config.parent.mkdir(parents=True)
+    installed_config.write_text('installed', encoding='utf-8')
+    source_config = (
+        tmp_path / 'src/robot_r2_control/config/stage_one.yaml')
+    source_config.parent.mkdir(parents=True)
+    source_config.write_text('source', encoding='utf-8')
+
+    result = resolve_stage_one_source_config(package_share)
+
+    assert result == str(source_config)
+
+
+def test_stage_one_parameter_load_command_targets_stage_one_node():
+    command = make_stage_one_parameter_load_command(
+        '/workspace/stage_one.yaml')
+
+    assert command == [
+        'ros2', 'param', 'load',
+        '--no-daemon', '--spin-time', '2.0',
+        '/stage_one', '/workspace/stage_one.yaml',
     ]
 
 
@@ -395,6 +448,121 @@ def test_up_step_test_reports_step_failure_and_releases_busy_state():
         '上台阶失败：Pose feedback unavailable')
 
 
+@pytest.mark.parametrize(
+    'team,label',
+    [
+        (StageOne.Request.RED, '红方'),
+        (StageOne.Request.BLUE, '蓝方'),
+    ],
+)
+def test_stage_one_relocalizes_then_calls_team_service(team, label):
+    node = make_node_stub()
+    node.stage_one_relocalization_pose = (
+        1.0, -2.0, 0.1, 0.0, 0.0, math.pi)
+
+    success, message = node.request_stage_one(team)
+
+    assert success
+    assert message == f'Step1 {label}：正在重定位'
+    relocalization = node.set_base_pose_client.requests[0]
+    assert (
+        relocalization.x,
+        relocalization.y,
+        relocalization.z,
+        relocalization.roll,
+        relocalization.pitch,
+        relocalization.yaw,
+    ) == pytest.approx(node.stage_one_relocalization_pose)
+    assert node.stage_one_request_in_flight
+    assert node.stage_one_team == team
+    assert not node.stage_one_client.requests
+
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    stage_request = node.stage_one_client.requests[0]
+    assert stage_request.team == team
+    assert node.stage_one_request_in_flight
+
+    node.stage_one_client.future.complete(SimpleNamespace(
+        success=True,
+        message=f'Stage 1 completed for {team} team',
+    ))
+    assert not node.stage_one_request_in_flight
+    assert node.stage_one_team is None
+    assert node.pop_status_events() == [
+        f'Step1 {label}：重定位完成，正在调用 Step1',
+        f'Step1 {label}完成：Stage 1 completed for {team} team',
+    ]
+
+
+def test_stage_one_relocalization_failure_does_not_call_stage_service():
+    node = make_node_stub()
+
+    success, _ = node.request_stage_one(StageOne.Request.RED)
+    assert success
+    node.set_base_pose_client.future.complete(SimpleNamespace(
+        success=False,
+        message='relocalization rejected',
+    ))
+
+    assert not node.stage_one_request_in_flight
+    assert not node.stage_one_client.requests
+    assert node.pop_status_events() == [
+        'Step1 红方重定位失败：relocalization rejected',
+    ]
+
+
+def test_stage_one_reports_unavailable_service_before_relocalizing():
+    node = make_node_stub()
+    node.stage_one_client = FakeClient(ready=False)
+
+    success, message = node.request_stage_one(StageOne.Request.BLUE)
+
+    assert not success
+    assert message == '/r2/stage_one 服务不可用'
+    assert not node.set_base_pose_client.requests
+
+
+def test_stage_one_relocalization_pose_supports_dynamic_update():
+    node = make_node_stub()
+    parameter = SimpleNamespace(
+        name='stage_one_relocalization_pose',
+        value=[1.0, 2.0, 0.0, 0.0, 0.0, math.pi],
+    )
+
+    result = node._on_parameters_changed([parameter])
+
+    assert result.successful
+    assert node.stage_one_relocalization_pose == pytest.approx(
+        (1.0, 2.0, 0.0, 0.0, 0.0, math.pi))
+
+
+def test_invalid_stage_one_relocalization_pose_is_rejected():
+    node = make_node_stub()
+    original = node.stage_one_relocalization_pose
+    parameter = SimpleNamespace(
+        name='stage_one_relocalization_pose',
+        value=[0.0] * 5,
+    )
+
+    result = node._on_parameters_changed([parameter])
+
+    assert not result.successful
+    assert node.stage_one_relocalization_pose == original
+
+
+def test_stage_one_rejects_unknown_team_without_relocalizing():
+    node = make_node_stub()
+
+    success, message = node.request_stage_one('green')
+
+    assert not success
+    assert message == 'Unknown Stage 1 team: green'
+    assert not node.set_base_pose_client.requests
+
+
 def test_stage_two_point_one_relocalizes_to_middle_edge_then_calls_service():
     node = make_node_stub()
 
@@ -642,6 +810,33 @@ def test_parameter_load_result_reports_partial_failure():
     assert not success
     assert 'mode_1_sequence failed' in message
     assert 'multiple of 6' in message
+
+
+def test_stage_one_parameter_load_result_checks_every_yaml_parameter():
+    output = '\n'.join(
+        f'Set parameter {name} successful'
+        for name in sorted(STAGE_ONE_PARAMETER_NAMES)
+    )
+
+    success, message = summarize_stage_one_parameter_load_result(
+        0, output, '')
+
+    assert success
+    assert message == 'Step1 参数写入成功：共 24 项'
+
+
+def test_stage_one_parameter_load_result_reports_missing_parameter():
+    successful_names = STAGE_ONE_PARAMETER_NAMES - {'move_timeout_sec'}
+    output = '\n'.join(
+        f'Set parameter {name} successful'
+        for name in sorted(successful_names)
+    )
+
+    success, message = summarize_stage_one_parameter_load_result(
+        0, output, '')
+
+    assert not success
+    assert '未确认写入：move_timeout_sec' in message
 
 
 def test_repeated_key_press_is_ignored_and_release_publishes_zero():

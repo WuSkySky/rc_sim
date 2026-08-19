@@ -1,0 +1,6 @@
+string RED=red
+string BLUE=blue
+string team
+---
+bool success
+string message

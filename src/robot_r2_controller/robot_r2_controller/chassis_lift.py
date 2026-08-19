@@ -1,3 +1,4 @@
+import math
 import threading
 
 import rclpy
@@ -63,10 +64,32 @@ class LiftServiceController(Node):
 
     def handle_set_lift(self, request, response):
         with self.service_lock:
-            tolerance = self.default_tolerance
+            requested_tolerance = float(request.tolerance)
+            requested_timeout = float(request.timeout_sec)
+            if (
+                not math.isfinite(requested_tolerance) or
+                requested_tolerance < 0.0
+            ):
+                response.success = False
+                response.message = (
+                    'SetLift tolerance must be finite and non-negative')
+                return response
+            if (
+                not math.isfinite(requested_timeout) or
+                requested_timeout < 0.0
+            ):
+                response.success = False
+                response.message = (
+                    'SetLift timeout_sec must be finite and non-negative')
+                return response
+            tolerance = (
+                requested_tolerance
+                if requested_tolerance > 0.0
+                else self.default_tolerance
+            )
             timeout_sec = (
-                request.timeout_sec
-                if request.timeout_sec > 0.0
+                requested_timeout
+                if requested_timeout > 0.0
                 else self.default_timeout_sec
             )
 

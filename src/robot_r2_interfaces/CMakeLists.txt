@@ -29,6 +29,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/KfsAction.srv"
   "srv/GetKfsType.srv"
   "srv/DetectLed.srv"
+  "srv/StageOne.srv"
   "srv/StageTwo.srv"
   "srv/StageTwoPointOne.srv"
   "srv/StageTwoPointTwo.srv"

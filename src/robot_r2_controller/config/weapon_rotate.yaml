@@ -1,0 +1,6 @@
+weapon_rotate:
+  ros__parameters:
+    min_position: 0.0
+    max_position: 3.490658503988659
+    default_tolerance: 0.01
+    default_timeout_sec: 10.0

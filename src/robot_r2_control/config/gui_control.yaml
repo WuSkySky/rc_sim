@@ -27,3 +27,7 @@ gui_control:
     pose_test_linear_distance: 0.3
     pose_test_yaw: 1.57
     move_timeout_sec: 20.0
+
+    # Step1 按钮调用服务前，将实车里程计重定位到此位姿：
+    # [x, y, z, roll, pitch, yaw]。
+    stage_one_relocalization_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

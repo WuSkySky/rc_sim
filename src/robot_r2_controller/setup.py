@@ -21,6 +21,8 @@ setup(
                 'config/kfs_gripper_rotate.yaml',
                 'config/kfs_gripper_tip_rotate.yaml',
                 'config/kfs_gripper_grip.yaml',
+                'config/weapon_rotate.yaml',
+                'config/weapon_grip.yaml',
             ]),
     ],
     install_requires=['setuptools'],
@@ -37,6 +39,10 @@ setup(
             'kfs_gripper_rotate = robot_r2_controller.kfs_gripper_rotate:main',
             'kfs_gripper_tip_rotate = robot_r2_controller.kfs_gripper_tip_rotate:main',
             'kfs_gripper_grip = robot_r2_controller.kfs_gripper_grip:main',
+            'weapon_rotate = '
+            'robot_r2_controller.weapon_joint_controller:main_rotate',
+            'weapon_grip = '
+            'robot_r2_controller.weapon_joint_controller:main_grip',
         ],
     },
 )

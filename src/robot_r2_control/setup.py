@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'config'),
             [
+                'config/stage_one.yaml',
                 'config/stage_two.yaml',
                 'config/stage_two_point_one.yaml',
                 'config/stage_two_point_two.yaml',
@@ -34,6 +35,7 @@ setup(
         'console_scripts': [
             'teleop_control = robot_r2_control.teleop_control:main',
             'gui_control = robot_r2_control.gui_control:main',
+            'stage_one = robot_r2_control.stage_one:main',
             'stage_two_control = robot_r2_control.stage_two_control:main',
             'stage_two_point_one = robot_r2_control.stage_two_point_one:main',
             'stage_two_point_two = robot_r2_control.stage_two_point_two:main',

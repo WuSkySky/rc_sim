@@ -40,6 +40,7 @@ def generate_launch_description():
         launch_arguments={
             'kfs_get_type_service': LaunchConfiguration(
                 'kfs_get_type_service'),
+            'enable_stage_one': 'true',
         }.items(),
     )
 

@@ -3,6 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -21,6 +22,11 @@ def generate_launch_description():
         control_pkg,
         'config',
         'stage_two.yaml',
+    )
+    stage_one_config = os.path.join(
+        control_pkg,
+        'config',
+        'stage_one.yaml',
     )
     stage_two_point_one_config = os.path.join(
         control_pkg,
@@ -72,6 +78,24 @@ def generate_launch_description():
         controller_pkg,
         'config',
         'kfs_gripper_grip.yaml',
+    )
+    weapon_rotate_config = os.path.join(
+        controller_pkg,
+        'config',
+        'weapon_rotate.yaml',
+    )
+    weapon_grip_config = os.path.join(
+        controller_pkg,
+        'config',
+        'weapon_grip.yaml',
+    )
+
+    stage_one = Node(
+        package='robot_r2_control',
+        executable='stage_one',
+        parameters=[stage_one_config],
+        condition=IfCondition(LaunchConfiguration('enable_stage_one')),
+        output='screen',
     )
     stage_two_control = Node(
         package='robot_r2_control',
@@ -162,6 +186,22 @@ def generate_launch_description():
         output='screen',
     )
 
+    weapon_rotate = Node(
+        package='robot_r2_controller',
+        executable='weapon_rotate',
+        parameters=[weapon_rotate_config],
+        condition=IfCondition(LaunchConfiguration('enable_stage_one')),
+        output='screen',
+    )
+
+    weapon_grip = Node(
+        package='robot_r2_controller',
+        executable='weapon_grip',
+        parameters=[weapon_grip_config],
+        condition=IfCondition(LaunchConfiguration('enable_stage_one')),
+        output='screen',
+    )
+
     return LaunchDescription([
         SetEnvironmentVariable(
             'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
@@ -176,6 +216,12 @@ def generate_launch_description():
             default_value='/r2/detection/get_type',
             description='KFS detection service used by stage controllers',
         ),
+        DeclareLaunchArgument(
+            'enable_stage_one',
+            default_value='false',
+            description='Start real-only Stage 1 and weapon controllers',
+        ),
+        stage_one,
         stage_two_control,
         stage_two_point_one,
         stage_two_point_two,
@@ -187,4 +233,6 @@ def generate_launch_description():
         kfs_gripper_rotate,
         kfs_gripper_tip_rotate,
         kfs_gripper_grip,
+        weapon_rotate,
+        weapon_grip,
     ])

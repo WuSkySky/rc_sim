@@ -20,6 +20,7 @@ from robot_r2_interfaces.srv import (
     KfsAction,
     MoveToPose,
     SetBasePose,
+    StageOne,
     StageTwoPointOne,
     StageTwoPointTwo,
     TraverseStep,
@@ -41,6 +42,34 @@ KFS_LOADER_PARAMETER_NAMES = {
 }
 KFS_LOADER_SOURCE_RELATIVE_PATH = Path(
     'src/robot_r2_control/config/kfs_loader.yaml')
+STAGE_ONE_PARAMETER_NAMES = {
+    'action_1_lift_height_m',
+    'action_2_left_m',
+    'action_2_backward_m',
+    'action_3_lift_height_m',
+    'action_4_pixel_tolerance_px',
+    'action_5_weapon_rotate_rad',
+    'action_5_weapon_grip_m',
+    'action_6_backward_m',
+    'action_7_weapon_grip_m',
+    'action_8_weapon_rotate_rad',
+    'action_9_lift_height_m',
+    'action_10_forward_m',
+    'action_11_yaw_delta_rad',
+    'lift_tolerance_m',
+    'position_tolerance_m',
+    'yaw_tolerance_rad',
+    'weapon_rotate_tolerance_rad',
+    'weapon_grip_tolerance_m',
+    'dependency_timeout_sec',
+    'pose_timeout_sec',
+    'move_timeout_sec',
+    'lift_timeout_sec',
+    'alignment_timeout_sec',
+    'weapon_timeout_sec',
+}
+STAGE_ONE_SOURCE_RELATIVE_PATH = Path(
+    'src/robot_r2_control/config/stage_one.yaml')
 RELOCALIZATION_FIELDS = ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
 
 
@@ -49,21 +78,34 @@ def normalize_motion_key(keysym):
     return key if key in MOTION_KEYS else None
 
 
-def resolve_kfs_loader_source_config(package_share_directory):
+def resolve_source_config(package_share_directory, source_relative_path):
     package_share_path = Path(package_share_directory).resolve()
     search_roots = (package_share_path, *package_share_path.parents)
 
     for root in search_roots:
-        candidate = root / KFS_LOADER_SOURCE_RELATIVE_PATH
+        candidate = root / source_relative_path
         if candidate.is_file():
             return os.fspath(candidate)
 
     for root in search_roots:
         if root.name == 'install':
-            return os.fspath(
-                root.parent / KFS_LOADER_SOURCE_RELATIVE_PATH)
+            return os.fspath(root.parent / source_relative_path)
 
-    return os.fspath(Path.cwd() / KFS_LOADER_SOURCE_RELATIVE_PATH)
+    return os.fspath(Path.cwd() / source_relative_path)
+
+
+def resolve_kfs_loader_source_config(package_share_directory):
+    return resolve_source_config(
+        package_share_directory,
+        KFS_LOADER_SOURCE_RELATIVE_PATH,
+    )
+
+
+def resolve_stage_one_source_config(package_share_directory):
+    return resolve_source_config(
+        package_share_directory,
+        STAGE_ONE_SOURCE_RELATIVE_PATH,
+    )
 
 
 def normalize_angle(angle):
@@ -152,7 +194,11 @@ def relative_pose_goal(current_pose, forward, left, yaw_delta):
 
 
 def parse_relocalization_values(raw_values):
-    if len(raw_values) != len(RELOCALIZATION_FIELDS):
+    try:
+        value_count = len(raw_values)
+    except TypeError as exc:
+        raise ValueError('重定位参数必须是数组') from exc
+    if value_count != len(RELOCALIZATION_FIELDS):
         raise ValueError('重定位需要 6 个参数')
 
     values = []
@@ -167,7 +213,8 @@ def parse_relocalization_values(raw_values):
     return tuple(values)
 
 
-def summarize_parameter_load_result(returncode, stdout, stderr):
+def summarize_named_parameter_load_result(
+        display_name, expected_names, returncode, stdout, stderr):
     output_lines = [
         line.strip()
         for line in f'{stdout}\n{stderr}'.splitlines()
@@ -179,11 +226,11 @@ def summarize_parameter_load_result(returncode, stdout, stderr):
         for line in output_lines
         if line.startswith('Set parameter ') and line.endswith(' successful')
     }
-    missing = KFS_LOADER_PARAMETER_NAMES - successful_names
+    missing = expected_names - successful_names
     if returncode == 0 and not failures and not missing:
         return (
             True,
-            f'KFS Load 参数写入成功：共 {len(successful_names)} 项',
+            f'{display_name}参数写入成功：共 {len(successful_names)} 项',
         )
 
     details = list(failures)
@@ -193,10 +240,30 @@ def summarize_parameter_load_result(returncode, stdout, stderr):
         details.append('未确认写入：' + ', '.join(sorted(missing)))
     if not details:
         details.append('没有收到参数写入结果')
-    return False, 'KFS Load 参数写入失败：' + '；'.join(details)
+    return False, f'{display_name}参数写入失败：' + '；'.join(details)
 
 
-def make_parameter_load_command(config_path):
+def summarize_parameter_load_result(returncode, stdout, stderr):
+    return summarize_named_parameter_load_result(
+        'KFS Load ',
+        KFS_LOADER_PARAMETER_NAMES,
+        returncode,
+        stdout,
+        stderr,
+    )
+
+
+def summarize_stage_one_parameter_load_result(returncode, stdout, stderr):
+    return summarize_named_parameter_load_result(
+        'Step1 ',
+        STAGE_ONE_PARAMETER_NAMES,
+        returncode,
+        stdout,
+        stderr,
+    )
+
+
+def make_parameter_load_command(config_path, node_name='/kfs_loader_control'):
     return [
         'ros2',
         'param',
@@ -204,9 +271,13 @@ def make_parameter_load_command(config_path):
         '--no-daemon',
         '--spin-time',
         '2.0',
-        '/kfs_loader_control',
+        node_name,
         config_path,
     ]
+
+
+def make_stage_one_parameter_load_command(config_path):
+    return make_parameter_load_command(config_path, '/stage_one')
 
 
 class GuiControlNode(Node):
@@ -218,6 +289,7 @@ class GuiControlNode(Node):
     KFS_ACTION_SERVICE = '/r2/kfs/action'
     SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
     STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
+    STAGE_ONE_SERVICE = '/r2/stage_one'
     STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
     STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
@@ -279,6 +351,8 @@ class GuiControlNode(Node):
         'pose_test_yaw': 1.57,
         'move_timeout_sec': 20.0,
     }
+    STAGE_ONE_RELOCALIZATION_DEFAULT = (
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     def __init__(self):
         super().__init__('gui_control')
@@ -300,13 +374,19 @@ class GuiControlNode(Node):
         self.relocalization_request_in_flight = False
         self.step_test_request_in_flight = False
         self.step_test_direction = None
+        self.stage_one_request_in_flight = False
+        self.stage_one_team = None
         self.stage_two_point_one_request_in_flight = False
         self.stage_two_point_one_skip = None
         self.stage_two_point_two_request_in_flight = False
         self.stage_two_point_two_skip = None
         self.kfs_action_request_in_flight = False
         self.kfs_parameter_load_in_flight = False
+        self.stage_one_parameter_load_in_flight = False
         self.kfs_loader_config_path = resolve_kfs_loader_source_config(
+            get_package_share_directory('robot_r2_control'),
+        )
+        self.stage_one_config_path = resolve_stage_one_source_config(
             get_package_share_directory('robot_r2_control'),
         )
 
@@ -319,6 +399,10 @@ class GuiControlNode(Node):
             self.declare_parameter(maximum_parameter, maximum_default)
         for name, default in self.MOTION_PARAMETER_DEFAULTS.items():
             self.declare_parameter(name, default)
+        self.declare_parameter(
+            'stage_one_relocalization_pose',
+            list(self.STAGE_ONE_RELOCALIZATION_DEFAULT),
+        )
 
         self.lift_min = float(self.get_parameter('lift_min').value)
         self.lift_max = float(self.get_parameter('lift_max').value)
@@ -340,6 +424,8 @@ class GuiControlNode(Node):
         error = self._validate_motion_config(self.motion_config)
         if error:
             raise ValueError(error)
+        self.stage_one_relocalization_pose = parse_relocalization_values(
+            self.get_parameter('stage_one_relocalization_pose').value)
 
         self.lift_command_publisher = self.create_publisher(
             LiftCommand, self.LIFT_COMMAND_TOPIC, 10)
@@ -377,6 +463,8 @@ class GuiControlNode(Node):
             SetBasePose, self.SET_BASE_POSE_SERVICE)
         self.step_traverse_client = self.create_client(
             TraverseStep, self.STEP_TRAVERSE_SERVICE)
+        self.stage_one_client = self.create_client(
+            StageOne, self.STAGE_ONE_SERVICE)
         self.stage_two_point_one_client = self.create_client(
             StageTwoPointOne, self.STAGE_TWO_POINT_ONE_SERVICE)
         self.stage_two_point_two_client = self.create_client(
@@ -434,6 +522,21 @@ class GuiControlNode(Node):
                 )
 
         with self.state_lock:
+            stage_one_relocalization_pose = (
+                self.stage_one_relocalization_pose)
+            if 'stage_one_relocalization_pose' in updates:
+                try:
+                    stage_one_relocalization_pose = (
+                        parse_relocalization_values(
+                            updates['stage_one_relocalization_pose']))
+                except ValueError as exc:
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            'stage_one_relocalization_pose invalid: '
+                            f'{exc}'),
+                    )
+
             lift_min = float(updates.get('lift_min', self.lift_min))
             lift_max = float(updates.get('lift_max', self.lift_max))
             try:
@@ -470,6 +573,8 @@ class GuiControlNode(Node):
             self.lift_max = lift_max
             self.float_control_ranges = new_ranges
             self.motion_config = new_motion_config
+            self.stage_one_relocalization_pose = (
+                stage_one_relocalization_pose)
             self.config_generation += 1
 
         new_publish_rate = new_motion_config['motion_publish_rate']
@@ -933,6 +1038,103 @@ class GuiControlNode(Node):
             edge_yaw,
         )
 
+    @staticmethod
+    def _stage_one_team_label(team):
+        if team == StageOne.Request.RED:
+            return '红方'
+        if team == StageOne.Request.BLUE:
+            return '蓝方'
+        raise ValueError(f'Unknown Stage 1 team: {team}')
+
+    def request_stage_one(self, team):
+        try:
+            team_label = self._stage_one_team_label(team)
+        except ValueError as exc:
+            return False, str(exc)
+
+        with self.state_lock:
+            if self._chassis_service_in_flight_locked():
+                return False, '底盘操作正在执行'
+            if not self.set_base_pose_client.service_is_ready():
+                return False, '/r2/set_base_pose 服务不可用'
+            if not self.stage_one_client.service_is_ready():
+                return False, '/r2/stage_one 服务不可用'
+            relocalization_pose = self.stage_one_relocalization_pose
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.stage_one_request_in_flight = True
+            self.stage_one_team = team
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = self._make_set_base_pose_request(relocalization_pose)
+        try:
+            future = self.set_base_pose_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.stage_one_request_in_flight = False
+                self.stage_one_team = None
+            return False, f'Step1 {team_label}重定位请求发送失败：{exc}'
+        future.add_done_callback(
+            self._on_stage_one_relocalization_complete)
+        return True, f'Step1 {team_label}：正在重定位'
+
+    def _on_stage_one_relocalization_complete(self, future):
+        with self.state_lock:
+            team = self.stage_one_team
+        team_label = self._stage_one_team_label(team)
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_one(
+                f'Step1 {team_label}重定位调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_one(
+                f'Step1 {team_label}重定位失败：无响应')
+            return
+        if not response.success:
+            self._finish_stage_one(
+                f'Step1 {team_label}重定位失败：{response.message}')
+            return
+
+        self._queue_status(
+            f'Step1 {team_label}：重定位完成，正在调用 Step1')
+        request = StageOne.Request()
+        request.team = team
+        try:
+            stage_future = self.stage_one_client.call_async(request)
+        except Exception as exc:
+            self._finish_stage_one(
+                f'Step1 {team_label}请求发送失败：{exc}')
+            return
+        stage_future.add_done_callback(self._on_stage_one_complete)
+
+    def _on_stage_one_complete(self, future):
+        with self.state_lock:
+            team = self.stage_one_team
+        team_label = self._stage_one_team_label(team)
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_one(
+                f'Step1 {team_label}调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_one(f'Step1 {team_label}失败：无响应')
+        elif response.success:
+            self._finish_stage_one(
+                f'Step1 {team_label}完成：{response.message}')
+        else:
+            self._finish_stage_one(
+                f'Step1 {team_label}失败：{response.message}')
+
+    def _finish_stage_one(self, message):
+        with self.state_lock:
+            self.stage_one_request_in_flight = False
+            self.stage_one_team = None
+        self._queue_status(message)
+
     def request_stage_two_point_one(self, skip):
         with self.state_lock:
             if self._chassis_service_in_flight_locked():
@@ -1183,6 +1385,7 @@ class GuiControlNode(Node):
             self.tip_alignment_request_in_flight or
             self.relocalization_request_in_flight or
             self.step_test_request_in_flight or
+            self.stage_one_request_in_flight or
             self.stage_two_point_one_request_in_flight or
             self.stage_two_point_two_request_in_flight
         )
@@ -1251,6 +1454,57 @@ class GuiControlNode(Node):
     def is_kfs_parameter_load_in_flight(self):
         with self.state_lock:
             return self.kfs_parameter_load_in_flight
+
+    def request_stage_one_parameter_load(self):
+        with self.state_lock:
+            if self.stage_one_parameter_load_in_flight:
+                return False, 'Step1 参数正在写入'
+            if not os.path.isfile(self.stage_one_config_path):
+                return (
+                    False,
+                    f'Step1 参数文件不存在：{self.stage_one_config_path}',
+                )
+            self.stage_one_parameter_load_in_flight = True
+
+        worker = threading.Thread(
+            target=self._load_stage_one_parameters,
+            daemon=True,
+        )
+        worker.start()
+        return (
+            True,
+            f'正在从 YAML 写入 Step1 参数：{self.stage_one_config_path}',
+        )
+
+    def _load_stage_one_parameters(self):
+        try:
+            result = subprocess.run(
+                make_stage_one_parameter_load_command(
+                    self.stage_one_config_path),
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=15.0,
+            )
+            _, message = summarize_stage_one_parameter_load_result(
+                result.returncode,
+                result.stdout,
+                result.stderr,
+            )
+        except FileNotFoundError:
+            message = 'Step1 参数写入失败：找不到 ros2 命令'
+        except subprocess.TimeoutExpired:
+            message = 'Step1 参数写入失败：15 秒内未完成'
+        except Exception as exc:
+            message = f'Step1 参数写入异常：{exc}'
+        finally:
+            with self.state_lock:
+                self.stage_one_parameter_load_in_flight = False
+        self._queue_status(message)
+
+    def is_stage_one_parameter_load_in_flight(self):
+        with self.state_lock:
+            return self.stage_one_parameter_load_in_flight
 
     def stop_chassis(self):
         with self.state_lock:
@@ -1356,6 +1610,7 @@ class GuiControlApp:
         self.last_chassis_busy = None
         self.last_kfs_action_busy = None
         self.last_kfs_parameter_load_busy = None
+        self.last_stage_one_parameter_load_busy = None
         self._closed = False
         self.chassis_buttons = []
         self.velocity_test_buttons = {}
@@ -1363,6 +1618,9 @@ class GuiControlApp:
         self.relocalization_button = None
         self.up_step_test_button = None
         self.down_step_test_button = None
+        self.stage_one_red_button = None
+        self.stage_one_blue_button = None
+        self.stage_one_parameter_load_button = None
         self.stage_two_point_one_skip_button = None
         self.stage_two_point_one_normal_button = None
         self.stage_two_point_two_skip_button = None
@@ -1477,10 +1735,42 @@ class GuiControlApp:
             row=0, column=1, sticky='ew', padx=(8, 0))
         self.chassis_buttons.append(self.down_step_test_button)
 
+        stage_one_frame = ttk.LabelFrame(
+            chassis_column, text='Step1', padding=12)
+        stage_one_frame.grid(
+            row=4, column=0, sticky='ew', pady=(10, 0))
+        self.stage_one_red_button = ttk.Button(
+            stage_one_frame,
+            text='Step1 红方（重定位后执行）',
+            command=self._start_stage_one_red,
+        )
+        self.stage_one_red_button.grid(row=0, column=0, sticky='ew')
+        self.chassis_buttons.append(self.stage_one_red_button)
+        self.stage_one_blue_button = ttk.Button(
+            stage_one_frame,
+            text='Step1 蓝方（重定位后执行）',
+            command=self._start_stage_one_blue,
+        )
+        self.stage_one_blue_button.grid(
+            row=0, column=1, sticky='ew', padx=(8, 0))
+        self.chassis_buttons.append(self.stage_one_blue_button)
+        self.stage_one_parameter_load_button = ttk.Button(
+            stage_one_frame,
+            text='从 YAML 写入 Step1 参数',
+            command=self._write_stage_one_parameters,
+        )
+        self.stage_one_parameter_load_button.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky='ew',
+            pady=(8, 0),
+        )
+
         stage_two_point_one_frame = ttk.LabelFrame(
             chassis_column, text='Step2.1 测试', padding=12)
         stage_two_point_one_frame.grid(
-            row=4, column=0, sticky='ew', pady=(10, 0))
+            row=5, column=0, sticky='ew', pady=(10, 0))
         self.stage_two_point_one_skip_button = ttk.Button(
             stage_two_point_one_frame,
             text='2.1 测试（skip 识别）',
@@ -1501,7 +1791,7 @@ class GuiControlApp:
         stage_two_point_two_frame = ttk.LabelFrame(
             chassis_column, text='Step2.2 测试', padding=12)
         stage_two_point_two_frame.grid(
-            row=5, column=0, sticky='ew', pady=(10, 0))
+            row=6, column=0, sticky='ew', pady=(10, 0))
         self.stage_two_point_two_skip_button = ttk.Button(
             stage_two_point_two_frame,
             text='2.2 测试（skip 识别）',
@@ -1521,7 +1811,7 @@ class GuiControlApp:
 
         kfs_test_frame = ttk.LabelFrame(
             chassis_column, text='KFS 测试', padding=12)
-        kfs_test_frame.grid(row=6, column=0, sticky='ew', pady=(10, 0))
+        kfs_test_frame.grid(row=7, column=0, sticky='ew', pady=(10, 0))
         self.kfs_test_button = ttk.Button(
             kfs_test_frame,
             command=self._start_kfs_alignment_test,
@@ -1531,7 +1821,7 @@ class GuiControlApp:
         tip_alignment_frame = ttk.LabelFrame(
             chassis_column, text='端头对齐', padding=12)
         tip_alignment_frame.grid(
-            row=7, column=0, sticky='ew', pady=(10, 0))
+            row=8, column=0, sticky='ew', pady=(10, 0))
         self.tip_test_button = ttk.Button(
             tip_alignment_frame,
             command=self._start_tip_alignment_test,
@@ -1754,6 +2044,14 @@ class GuiControlApp:
         _, message = self.node.request_down_step_test()
         self.status_text.set(message)
 
+    def _start_stage_one_red(self):
+        _, message = self.node.request_stage_one(StageOne.Request.RED)
+        self.status_text.set(message)
+
+    def _start_stage_one_blue(self):
+        _, message = self.node.request_stage_one(StageOne.Request.BLUE)
+        self.status_text.set(message)
+
     def _start_stage_two_point_one_skip(self):
         _, message = self.node.request_stage_two_point_one(skip=True)
         self.status_text.set(message)
@@ -1776,6 +2074,10 @@ class GuiControlApp:
 
     def _write_kfs_load_parameters(self):
         _, message = self.node.request_kfs_parameter_load()
+        self.status_text.set(message)
+
+    def _write_stage_one_parameters(self):
+        _, message = self.node.request_stage_one_parameter_load()
         self.status_text.set(message)
 
     def _publish_lift_command(self, _event=None):
@@ -1895,6 +2197,20 @@ class GuiControlApp:
                 self.last_kfs_parameter_load_busy = parameter_load_busy
                 state = tk.DISABLED if parameter_load_busy else tk.NORMAL
                 self.kfs_parameter_load_button.configure(state=state)
+            stage_one_parameter_load_busy = (
+                self.node.is_stage_one_parameter_load_in_flight())
+            if (
+                stage_one_parameter_load_busy !=
+                self.last_stage_one_parameter_load_busy
+            ):
+                self.last_stage_one_parameter_load_busy = (
+                    stage_one_parameter_load_busy)
+                state = (
+                    tk.DISABLED
+                    if stage_one_parameter_load_busy
+                    else tk.NORMAL
+                )
+                self.stage_one_parameter_load_button.configure(state=state)
         except Exception as exc:
             self.node.get_logger().error(f'GUI ROS 回调异常：{exc}')
             self.status_text.set(f'ROS 回调异常：{exc}')

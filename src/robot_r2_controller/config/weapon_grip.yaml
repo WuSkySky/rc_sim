@@ -1,0 +1,6 @@
+weapon_grip:
+  ros__parameters:
+    min_position: 0.0
+    max_position: 0.03
+    default_tolerance: 0.001
+    default_timeout_sec: 10.0
