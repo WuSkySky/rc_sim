@@ -25,8 +25,20 @@ TensorRT engine 与 GPU 架构、TensorRT 和 CUDA 版本相关，必须在实�
 python3 src/robot_r2_target_alignment/scripts/export_tensorrt_engine.py \
   --source src/robot_r2_detect/model/duantou.pt \
   --output src/robot_r2_detect/model/duantou_fp16.engine \
-  --input-size 640
+  --input-size 640 \
+  --force
 ```
+
+导出脚本只接受检测 checkpoint，会在导出前拒绝分割模型；导出过程先在 CPU
+生成 ONNX，再释放 PyTorch 模型并由 TensorRT 使用 GPU 构建 engine，同时保留
+类别和任务元数据。替换目标文件前会用同一套 `YOLO(engine, task="detect")`
+接口完成加载和空白帧冒烟测试。若只想
+检查导出而不替换已有文件，不要添加 `--force`；仅在确认验证通过后才会原子
+替换输出文件。`--skip-verify` 只跳过导出后的运行时冒烟测试（导出本身仍需要
+TensorRT），不建议用于部署前的最终 engine。
+
+导出前应停止 `real1.launch.py` 和不必要的远程 IDE 后台进程；脚本在可用内存
+低于 3 GiB 时会给出警告，但不会自动终止机器人或开发工具进程。
 
 Python 依赖：
 
