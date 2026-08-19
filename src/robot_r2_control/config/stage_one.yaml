@@ -2,7 +2,7 @@ stage_one:
   ros__parameters:
     action_1_lift_height_m: 0.01
     action_2_left_m: 0.781
-    action_2_backward_m: 0.255
+    action_2_backward_m: 0.93
     action_3_lift_height_m: 0.14
     action_4_pixel_tolerance_px: 5.0
     action_5_weapon_rotate_rad: 1.5707963267948966
@@ -21,7 +21,6 @@ stage_one:
     weapon_grip_tolerance_m: 0.001
 
     dependency_timeout_sec: 2.0
-    pose_timeout_sec: 2.0
     move_timeout_sec: 35.0
     lift_timeout_sec: 15.0
     alignment_timeout_sec: 15.0

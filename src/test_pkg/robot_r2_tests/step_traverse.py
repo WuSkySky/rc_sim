@@ -46,16 +46,23 @@ def validate_cell(grid_data, index):
 
 
 def is_adjacent_4(current_index, target_index):
-    return abs(target_index[0] - current_index[0]) + abs(target_index[1] - current_index[1]) == 1
+    return (
+        abs(target_index[0] - current_index[0]) +
+        abs(target_index[1] - current_index[1])
+    ) == 1
 
 
 def get_direction(current_index, target_index):
     dr = target_index[0] - current_index[0]
     dc = target_index[1] - current_index[1]
-    if dr == 1 and dc == 0:  return (1.0, 0.0)
-    if dr == -1 and dc == 0: return (-1.0, 0.0)
-    if dr == 0 and dc == 1:  return (0.0, 1.0)
-    if dr == 0 and dc == -1: return (0.0, -1.0)
+    if dr == 1 and dc == 0:
+        return (1.0, 0.0)
+    if dr == -1 and dc == 0:
+        return (-1.0, 0.0)
+    if dr == 0 and dc == 1:
+        return (0.0, 1.0)
+    if dr == 0 and dc == -1:
+        return (0.0, -1.0)
     raise ValueError(f'{current_index} -> {target_index} not 4-neighbors')
 
 
@@ -81,8 +88,16 @@ class StandaloneStepTraverse(Node):
         self.near = near_offset
         self.far = far_offset
 
-        self.move_cli = self.create_client(MoveToPose, MOVE_TO_POSE_SERVICE, callback_group=self.cbg)
-        self.lift_cli = self.create_client(SetLift, SET_LIFT_SERVICE, callback_group=self.cbg)
+        self.move_cli = self.create_client(
+            MoveToPose,
+            MOVE_TO_POSE_SERVICE,
+            callback_group=self.cbg,
+        )
+        self.lift_cli = self.create_client(
+            SetLift,
+            SET_LIFT_SERVICE,
+            callback_group=self.cbg,
+        )
 
     def _wait_svcs(self, timeout=2.0):
         if not self.move_cli.wait_for_service(timeout_sec=timeout):
@@ -102,15 +117,22 @@ class StandaloneStepTraverse(Node):
 
     def move(self, x, y, yaw):
         req = MoveToPose.Request()
-        req.x = float(x); req.y = float(y); req.yaw = float(yaw)
-        req.position_tolerance = 0.0; req.yaw_tolerance = 0.0; req.timeout_sec = 0.0
+        req.pose_source = MoveToPose.Request.SERIAL
+        req.x = float(x)
+        req.y = float(y)
+        req.yaw = float(yaw)
+        req.position_tolerance = 0.0
+        req.yaw_tolerance = 0.0
+        req.timeout_sec = 0.0
         r = self._wait(self.move_cli.call_async(req), MOVE_TIMEOUT, 'Move')
         if not r.success:
             raise RuntimeError(f'Move failed: {r.message}')
 
     def lift(self, front, rear):
         req = SetLift.Request()
-        req.front_lift = float(front); req.rear_lift = float(rear); req.timeout_sec = 0.0
+        req.front_lift = float(front)
+        req.rear_lift = float(rear)
+        req.timeout_sec = 0.0
         r = self._wait(self.lift_cli.call_async(req), LIFT_TIMEOUT, 'Lift')
         if not r.success:
             raise RuntimeError(f'Lift failed: {r.message}')

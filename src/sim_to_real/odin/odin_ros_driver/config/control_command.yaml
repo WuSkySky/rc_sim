@@ -7,7 +7,7 @@ register_keys:
   # 1: use host ros time (upon receive) as data time stamp, only use if you specifically require this setup, not recommended for most users
   # 2: align odin1 time to host time, timestamp is the sensor data reception time on host time axis
   # Use host ROS time so Odin messages share the same time domain as the
-  # map -> odom TF published by odin_data_postprocess.
+  # map -> odom_odin TF published by odin_data_postprocess.
   use_host_ros_time: 1
 
   streamctrl: 1           # 0: off; 1: on
@@ -38,8 +38,9 @@ register_keys:
   # Odometry data
   sendodom: 1             # 0: off; 1: on
 
-  # odin_data_postprocess publishes the corrected odom -> base_link TF.
-  # Keep the driver's native odom -> odin1_base_link TF disabled.
+  # odin_data_postprocess publishes the corrected
+  # odom_odin -> base_link_odin TF and base_link_odin -> odin_link TF.
+  # Keep the driver's native odom_odin -> odin_link TF disabled.
   send_odom_baselink_tf: 0 # 0: off; 1: on.
 
   # raw dtof data

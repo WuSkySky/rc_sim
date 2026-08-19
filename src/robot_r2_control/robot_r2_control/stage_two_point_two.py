@@ -299,6 +299,7 @@ class StageTwoPointTwoController(Node):
 
     def move_to_pose(self, x, y, yaw):
         request = MoveToPose.Request()
+        request.pose_source = MoveToPose.Request.SERIAL
         request.x = float(x)
         request.y = float(y)
         request.yaw = float(yaw)

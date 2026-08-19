@@ -13,6 +13,7 @@ from robot_r2_interfaces.msg import LiftCommand, LiftFeedback
 import serial
 from std_msgs.msg import Float64, String
 
+from serial_pkg.frame_ids import set_odometry_frame_ids
 from serial_pkg.protocol import (
     FLOAT_FIELD_COUNT,
     FrameParser,
@@ -397,8 +398,7 @@ class SerialBridge(Node):
 
         odometry = Odometry()
         odometry.header.stamp = self.get_clock().now().to_msg()
-        odometry.header.frame_id = 'odom'
-        odometry.child_frame_id = 'base_link'
+        set_odometry_frame_ids(odometry)
         odometry.pose.pose.position.x = values[self.ODOM_X]
         odometry.pose.pose.position.y = values[self.ODOM_Y]
         odometry.pose.pose.position.z = 0.0

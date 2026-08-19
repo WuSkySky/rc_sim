@@ -9,6 +9,12 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from robot_r2_interfaces.srv import SetBasePose
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
+from odin_data_postprocess.frame_ids import (
+    BASE_FRAME as ODIN_BASE_FRAME,
+    MAP_FRAME as ODIN_MAP_FRAME,
+    ODIN_FRAME as ODIN_SENSOR_FRAME,
+    ODOM_FRAME as ODIN_ODOM_FRAME,
+)
 from odin_data_postprocess.odometry_config import (
     DEFAULT_PUBLISH_RATE,
     validate_publish_rate,
@@ -28,10 +34,10 @@ class OdometryPostprocess(Node):
     OUTPUT_POSE_TOPIC = '/r2/pose_feedback'
     SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
 
-    MAP_FRAME = 'map'
-    ODOM_FRAME = 'odom'
-    BASE_FRAME = 'base_link'
-    ODIN_FRAME = 'odin_link'
+    MAP_FRAME = ODIN_MAP_FRAME
+    ODOM_FRAME = ODIN_ODOM_FRAME
+    BASE_FRAME = ODIN_BASE_FRAME
+    ODIN_FRAME = ODIN_SENSOR_FRAME
 
     def __init__(self):
         super().__init__('odometry_postprocess')
@@ -233,7 +239,8 @@ class OdometryPostprocess(Node):
         with self._lock:
             if self._latest_odom_to_odin is None:
                 response.success = False
-                response.message = 'failed to read current base_link pose'
+                response.message = (
+                    f'failed to read current {self.BASE_FRAME} pose')
                 return response
             odom_to_base = self._odom_to_base(
                 self._latest_odom_to_odin,
@@ -243,7 +250,7 @@ class OdometryPostprocess(Node):
             if odom_to_base is None:
                 response.success = False
                 response.message = (
-                    'failed to calculate current base_link pose')
+                    f'failed to calculate current {self.BASE_FRAME} pose')
                 return response
             map_to_odom = self._calculate_map_to_odom(
                 target_translation,

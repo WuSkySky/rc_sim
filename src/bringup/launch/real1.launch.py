@@ -16,6 +16,9 @@ from launch_ros.actions import Node
 def generate_launch_description():
     bringup_pkg = get_package_share_directory('bringup')
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
+    odin_driver_pkg = get_package_share_directory('odin_ros_driver')
+    odin_data_postprocess_pkg = get_package_share_directory(
+        'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
     control_pkg = get_package_share_directory('robot_r2_control')
     mipi_camera_pkg = get_package_share_directory('mipi_camera')
@@ -42,6 +45,44 @@ def generate_launch_description():
                 'kfs_get_type_service'),
             'enable_stage_one': 'true',
         }.items(),
+    )
+
+    odin_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                odin_driver_pkg,
+                'launch',
+                'odin1_ros2_no_rviz.launch.py',
+            )
+        )
+    )
+
+    camera_frame_config = os.path.join(
+        odin_data_postprocess_pkg,
+        'config',
+        'camera_frame_postprocess.yaml',
+    )
+    camera_frame_postprocess = Node(
+        package='odin_data_postprocess',
+        executable='camera_frame_postprocess',
+        parameters=[camera_frame_config],
+        output='screen',
+    )
+
+    odin_odometry_config = os.path.join(
+        odin_data_postprocess_pkg,
+        'config',
+        'odometry_postprocess.yaml',
+    )
+    odin_odometry_postprocess = Node(
+        package='odin_data_postprocess',
+        executable='odometry_postprocess',
+        parameters=[odin_odometry_config],
+        remappings=[
+            ('/r2/pose_feedback', '/r2/pose_feedback_odin'),
+            ('/r2/set_base_pose', '/r2/set_base_pose_odin'),
+        ],
+        output='screen',
     )
 
     serial_bridge_config = os.path.join(
@@ -171,6 +212,7 @@ def generate_launch_description():
         remappings=[
             ('/r2/pose_feedback', '/r2/aruco/pose_feedback'),
             ('/r2/move_to_pose', '/r2/aruco/move_to_pose'),
+            ('/r2/move_relative', '/r2/aruco/move_relative'),
         ],
         condition=IfCondition(LaunchConfiguration('enable_aruco')),
         output='screen',
@@ -195,6 +237,9 @@ def generate_launch_description():
             default_value='true',
             description='Start tip-camera ArUco detection and chassis servo',
         ),
+        odin_launch,
+        camera_frame_postprocess,
+        odin_odometry_postprocess,
         control_launch,
         serial_bridge,
         odometry_tf,

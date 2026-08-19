@@ -1,6 +1,7 @@
 odometry_postprocess:
   ros__parameters:
-    # Translations are in metres; RPY angles are in radians.
+    # base_link_odin -> odin_link. Translations are in metres; RPY angles
+    # are in radians.
     base_to_odin_xyz: [-0.385488, -0.127248, 0.0]
     base_to_odin_rpy: [0.0, 0.0, 3.141592653589793]
     default_base_xyz: [0.0, 0.0, 0.0]

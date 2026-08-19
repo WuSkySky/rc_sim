@@ -234,6 +234,7 @@ class StepTraverseController(Node):
         target_y = start_y + cumulative_distance * math.sin(initial_yaw)
 
         request = MoveToPose.Request()
+        request.pose_source = MoveToPose.Request.SERIAL
         request.x = target_x
         request.y = target_y
         request.yaw = initial_yaw

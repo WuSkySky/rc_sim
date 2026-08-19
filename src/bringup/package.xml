@@ -12,6 +12,8 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>mipi_camera</exec_depend>
+  <exec_depend>odin_data_postprocess</exec_depend>
+  <exec_depend>odin_ros_driver</exec_depend>
   <exec_depend>rc2026_field</exec_depend>
   <exec_depend>robot_r2_control</exec_depend>
   <exec_depend>robot_r2_aruco</exec_depend>

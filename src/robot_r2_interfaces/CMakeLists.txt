@@ -22,6 +22,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TargetDetection.msg"
   "msg/ArucoMarkerPose.msg"
   "msg/ArucoPoseDetection.msg"
+  "srv/MoveRelative.srv"
   "srv/MoveToPose.srv"
   "srv/SetBasePose.srv"
   "srv/SetLift.srv"

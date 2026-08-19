@@ -25,7 +25,8 @@ Teach-in / docking flow
 3. Command the dock with the recorded pose (angles in radians)::
 
        ros2 service call /r2/aruco/move_to_pose robot_r2_interfaces/srv/MoveToPose \
-         "{x: <x>, y: <y>, yaw: <yaw>, position_tolerance: 0.01, \
+         "{pose_source: serial, x: <x>, y: <y>, yaw: <yaw>, \
+           position_tolerance: 0.01, \
            yaw_tolerance: 0.02, timeout_sec: 20.0}"
 
 The static ``base_link -> camera`` transform only needs to be approximately
@@ -69,6 +70,7 @@ def _setup(context):
         remappings=[
             ('/r2/pose_feedback', '/r2/aruco/pose_feedback'),
             ('/r2/move_to_pose', '/r2/aruco/move_to_pose'),
+            ('/r2/move_relative', '/r2/aruco/move_relative'),
         ],
     )
 

@@ -70,6 +70,7 @@ class RotateNinetyServoTest(Node):
             self.target_yaw + math.pi / 2.0)
 
         request = MoveToPose.Request()
+        request.pose_source = MoveToPose.Request.SERIAL
         request.x = self.fixed_position[0]
         request.y = self.fixed_position[1]
         request.yaw = self.pending_yaw

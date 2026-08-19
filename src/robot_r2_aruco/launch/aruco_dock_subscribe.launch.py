@@ -88,6 +88,7 @@ def generate_launch_description():
         remappings=[
             ('/r2/pose_feedback', '/r2/aruco/pose_feedback'),
             ('/r2/move_to_pose', '/r2/aruco/move_to_pose'),
+            ('/r2/move_relative', '/r2/aruco/move_relative'),
         ],
         output='screen',
     )

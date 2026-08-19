@@ -56,10 +56,11 @@ GUI 窗口获得焦点时，可按住实体键盘的 `W/A/S/D/Q/E` 控制底盘�
 两个热点属于独立接入点，不用于替代两台 Jetson 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐、端头 MIPI 相机，以及由下位机
-（串口）里程计驱动的定位 TF（`odometry_tf`）。端头 MIPI 相机（IMX219，与左右同
-型号）发布 `/r2/tip_camera/image_raw`，供端头检测上游使用；Odin 驱动保留但不再
-接入，后摄像头/LED 检测路线暂时断开：
+Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐、端头 MIPI 相机，以及下位机
+和 Odin 两套独立里程计。底盘位置伺服可由每个请求选择下位机或 Odin 位姿作为闭环
+来源。端头 MIPI 相机（IMX219，与左右同型号）发布
+`/r2/tip_camera/image_raw`，Odin 后摄像头发布 `/r2/rear_camera/image_raw`。LED
+检测路线仍不由 real1 启动：
 
 ```bash
 source install/setup.bash
@@ -111,8 +112,10 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 完整阶段二      | `/r2/stage_two`              | `robot_r2_interfaces/srv/StageTwo`            | 仿真、实机 |
 | 阶段 2.1     | `/r2/stage_two_point_one`    | `robot_r2_interfaces/srv/StageTwoPointOne`    | 仿真、实机 |
 | 阶段 2.2     | `/r2/stage_two_point_two`    | `robot_r2_interfaces/srv/StageTwoPointTwo`    | 仿真、实机 |
-| 底盘位置伺服     | `/r2/move_to_pose`           | `robot_r2_interfaces/srv/MoveToPose`          | 仿真、实机 |
+| 底盘绝对位置伺服   | `/r2/move_to_pose`           | `robot_r2_interfaces/srv/MoveToPose`          | 仿真、实机 |
+| 底盘相对位置伺服   | `/r2/move_relative`          | `robot_r2_interfaces/srv/MoveRelative`        | 仿真、实机 |
 | 重置或设置里程计位姿 | `/r2/set_base_pose`          | `robot_r2_interfaces/srv/SetBasePose`         | 仅实机   |
+| 重置或设置 Odin 位姿 | `/r2/set_base_pose_odin`     | `robot_r2_interfaces/srv/SetBasePose`         | 仅实机   |
 | 四轮抬升       | `/r2/lift/set`               | `robot_r2_interfaces/srv/SetLift`             | 仿真、实机 |
 | 跨越台阶       | `/r2/step_traverse`          | `robot_r2_interfaces/srv/TraverseStep`        | 仿真、实机 |
 | KFS 视觉对齐   | `/r2/align_to_kfs`           | `robot_r2_interfaces/srv/Align`               | 仿真、实机 |
@@ -196,14 +199,30 @@ ros2 topic pub -r 20 /r2/cmd_vel geometry_msgs/msg/Twist \
   '{linear: {x: 0.5, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
 ```
 
-底盘位置伺服的坐标单位为米，偏航角单位为弧度：
+底盘位置伺服的坐标单位为米，偏航角单位为弧度。`pose_source` 必须显式填写
+`serial` 或 `odin`；前者使用 `/r2/pose_feedback`，后者使用
+`/r2/pose_feedback_odin`。绝对移动目标位于所选来源的 `map` 坐标下：
 
 ```bash
 ros2 service call /r2/move_to_pose robot_r2_interfaces/srv/MoveToPose \
-  "{x: 0.0, y: 0.0, yaw: 1.5708, position_tolerance: 0.0, yaw_tolerance: 0.0, timeout_sec: 20.0}"
+  "{pose_source: odin, x: 0.0, y: 0.0, yaw: 1.5708, position_tolerance: 0.0, yaw_tolerance: 0.0, timeout_sec: 20.0}"
 ```
 
-实机重置里程计位姿，将调用时刻的 `base_link` 对齐到 `map` 原点：
+相对移动的 `forward`、`left` 和 `yaw_delta` 以请求开始时所选来源中的机器人
+位姿为基准。以下命令使用串口里程计闭环前进 `0.1 m`：
+
+```bash
+ros2 service call /r2/move_relative robot_r2_interfaces/srv/MoveRelative \
+  "{pose_source: serial, forward: 0.1, left: 0.0, yaw_delta: 0.0, position_tolerance: 0.0, yaw_tolerance: 0.0, timeout_sec: 20.0}"
+```
+
+相邻请求可以不重定位而直接切换来源。例如先执行上述串口相对移动，再执行 Odin
+绝对移动。位置伺服不会融合两路位姿、检查连续性或自动回退；每条请求从开始到结束
+始终只使用其指定来源。Step1 的底盘动作使用 `serial`，阶段二与台阶跨越当前也仍
+显式使用 `serial`，后续再单独迁移到 Odin。请求开始时默认等待所选来源的新反馈
+最多 `2 s`；运动开始后的反馈中断仍由该请求的总超时负责结束。
+
+实机重置主里程计位姿，将调用时刻的 `base_link_serial` 对齐到 `map` 原点：
 
 ```bash
 ros2 service call /r2/set_base_pose \
@@ -219,8 +238,21 @@ ros2 service call /r2/set_base_pose \
 ```
 
 该服务由 `real1.launch.py` 启动的 `odometry_tf` 提供。它根据下位机（串口）里程计
-更新 `map -> odom`，从而校正 `/r2/pose_feedback` 和底盘位置伺服使用的地图位姿；
-不会清空下位机发布的原始里程计数据。尚未收到下位机里程计时，服务会返回失败。
+更新 `map -> odom_serial -> base_link_serial`，从而校正 `/r2/pose_feedback` 和
+底盘位置伺服使用的地图位姿；不会清空下位机发布的原始里程计数据。尚未收到下位机
+里程计时，服务会返回失败。
+
+Odin 使用独立分支
+`map -> odom_odin -> base_link_odin -> odin_link`，其位姿发布在
+`/r2/pose_feedback_odin`。如需单独重定位 Odin 分支：
+
+```bash
+ros2 service call /r2/set_base_pose_odin \
+  robot_r2_interfaces/srv/SetBasePose \
+  "{x: 0.0, y: 0.0, z: 0.0, roll: 0.0, pitch: 0.0, yaw: 0.0}"
+```
+
+两套重定位彼此独立；位置伺服可由每个请求独立选择串口或 Odin 分支。
 
 四轮抬升：
 

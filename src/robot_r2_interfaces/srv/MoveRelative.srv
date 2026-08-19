@@ -1,9 +1,9 @@
 string SERIAL=serial
 string ODIN=odin
 string pose_source
-float64 x
-float64 y
-float64 yaw
+float64 forward
+float64 left
+float64 yaw_delta
 float64 position_tolerance
 float64 yaw_tolerance
 float64 timeout_sec

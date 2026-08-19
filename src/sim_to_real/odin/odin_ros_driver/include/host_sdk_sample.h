@@ -169,6 +169,9 @@ double get_ptp_smoothed_offset();
 // Common definitions
 #define PAI 3.14159265358979323846
 #define DTOF_NUM_ROW_PER_GROUP 6
+inline constexpr char ODIN_ODOM_FRAME_ID[] = "odom_odin";
+inline constexpr char ODIN_SENSOR_FRAME_ID[] = "odin_link";
+inline constexpr char SHARED_MAP_FRAME_ID[] = "map";
 // Common functions
 inline ros::Time ns_to_ros_time(uint64_t timestamp_ns) {
     ros::Time t;
@@ -576,7 +579,7 @@ void process_pair(const ImageConstPtr &rgb_msg, const PointCloud2ConstPtr &pcd_m
          
         // Create and publish RGB point cloud
         PointCloud2Msg output_msg;
-        output_msg.header.frame_id = "odin1_base_link";
+        output_msg.header.frame_id = ODIN_SENSOR_FRAME_ID;
         output_msg.header.stamp = rgb_msg->header.stamp; // Use original image timestamp
         output_msg.height = 1;
         output_msg.width = valid_point_num;
@@ -645,7 +648,7 @@ void publishIntensityCloud(capture_Image_List_t* stream, int idx)
     #endif
 
     // Set message header
-    msg->header.frame_id = "odin1_base_link";
+    msg->header.frame_id = ODIN_SENSOR_FRAME_ID;
     #ifdef ROS2
         msg->header.stamp = make_aligned_stamp(cloud.timestamp, node_);
     #else
@@ -823,6 +826,7 @@ void publishRgb(capture_Image_List_t *stream) {
         #else
             cv_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
         #endif
+        cv_image.header.frame_id = ODIN_SENSOR_FRAME_ID;
         cv_image.encoding = "bgr8";
         cv_image.image = decoded_image;
 
@@ -864,6 +868,7 @@ void publishRgb(capture_Image_List_t *stream) {
             #else
                 cv_undistorted_image.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
             #endif
+            cv_undistorted_image.header.frame_id = ODIN_SENSOR_FRAME_ID;
             cv_undistorted_image.encoding = "bgr8";
             cv_undistorted_image.image = undistorted_image;
         }
@@ -878,6 +883,7 @@ void publishRgb(capture_Image_List_t *stream) {
             // original jpeg - always publish as it's small
             sensor_msgs::msg::CompressedImage jpeg_msg;
             jpeg_msg.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
+            jpeg_msg.header.frame_id = ODIN_SENSOR_FRAME_ID;
             jpeg_msg.format = "jpeg";
             jpeg_msg.data = jpeg_data;
 
@@ -893,6 +899,7 @@ void publishRgb(capture_Image_List_t *stream) {
             // original jpeg
             sensor_msgs::CompressedImagePtr jpeg_msg(new sensor_msgs::CompressedImage());
             jpeg_msg->header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
+            jpeg_msg->header.frame_id = ODIN_SENSOR_FRAME_ID;
             jpeg_msg->format = "jpeg";
             jpeg_msg->data = jpeg_data;
 
@@ -908,7 +915,7 @@ void publishRgb(capture_Image_List_t *stream) {
     {
         #ifdef ROS2
                 sensor_msgs::msg::PointCloud2 msg;
-                msg.header.frame_id = "odom";
+                msg.header.frame_id = ODIN_ODOM_FRAME_ID;
                 msg.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
 
                 //RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Point cloudrgba %ld",stream->imageList[0].timestamp);
@@ -936,7 +943,7 @@ void publishRgb(capture_Image_List_t *stream) {
                 sensor_msgs::PointCloud2Iterator<float> iter_rgb(msg, "rgb");
         #else
             sensor_msgs::PointCloud2 msg;
-            msg.header.frame_id = "odom";
+            msg.header.frame_id = ODIN_ODOM_FRAME_ID;
             msg.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp);
             
             size_t pt_size = sizeof(int32_t) * 3 + sizeof(int32_t) * 4;
@@ -1184,11 +1191,11 @@ void publishRgb(capture_Image_List_t *stream) {
 #ifdef ROS2
         auto msg = nav_msgs::msg::Odometry();
         msg.header.stamp = make_aligned_stamp(odom_data->timestamp_ns, node_);
-        msg.header.frame_id = "odom";
+        msg.header.frame_id = ODIN_ODOM_FRAME_ID;
 #else
         nav_msgs::Odometry msg;
         msg.header.stamp = make_aligned_stamp(odom_data->timestamp_ns);
-        msg.header.frame_id = "odom";
+        msg.header.frame_id = ODIN_ODOM_FRAME_ID;
 #endif
         
         // Store T_CL in pose.covariance (first 16 elements)
@@ -1234,8 +1241,8 @@ void publishRgb(capture_Image_List_t *stream) {
             ros::Odometry msg;
 #endif
         
-            msg.header.frame_id = "odom";
-            msg.child_frame_id = "odin1_base_link";
+            msg.header.frame_id = ODIN_ODOM_FRAME_ID;
+            msg.child_frame_id = ODIN_SENSOR_FRAME_ID;
 
             //RCLCPP_INFO(rclcpp::get_logger("device_cb"), "odom %ld",odom_data->timestamp_ns);
 
@@ -1326,8 +1333,8 @@ void publishRgb(capture_Image_List_t *stream) {
                     if (getRosNodeControl()->sendOdomBaseLinkTF()) {
                         geometry_msgs::msg::TransformStamped transformStamped;
                         transformStamped.header.stamp = msg.header.stamp;
-                        transformStamped.header.frame_id = "odom";
-                        transformStamped.child_frame_id = "odin1_base_link";
+                        transformStamped.header.frame_id = ODIN_ODOM_FRAME_ID;
+                        transformStamped.child_frame_id = ODIN_SENSOR_FRAME_ID;
                         transformStamped.transform.translation.x = msg.pose.pose.position.x;
                         transformStamped.transform.translation.y = msg.pose.pose.position.y;
                         transformStamped.transform.translation.z = msg.pose.pose.position.z;
@@ -1402,8 +1409,8 @@ void publishRgb(capture_Image_List_t *stream) {
                     {
                     geometry_msgs::msg::TransformStamped transformStamped;
                     transformStamped.header.stamp = msg.header.stamp;
-                    transformStamped.header.frame_id = "odom";
-                    transformStamped.child_frame_id = "map";
+                    transformStamped.header.frame_id = ODIN_ODOM_FRAME_ID;
+                    transformStamped.child_frame_id = SHARED_MAP_FRAME_ID;
                     transformStamped.transform.translation.x = msg.pose.pose.position.x;
                     transformStamped.transform.translation.y = msg.pose.pose.position.y;
                     transformStamped.transform.translation.z = msg.pose.pose.position.z;
@@ -1422,8 +1429,8 @@ void publishRgb(capture_Image_List_t *stream) {
                     if (getRosNodeControl()->sendOdomBaseLinkTF()) {
                         geometry_msgs::TransformStamped transformStamped;
                         transformStamped.header.stamp = msg.header.stamp;
-                        transformStamped.header.frame_id = "odom";
-                        transformStamped.child_frame_id = "odin1_base_link";
+                        transformStamped.header.frame_id = ODIN_ODOM_FRAME_ID;
+                        transformStamped.child_frame_id = ODIN_SENSOR_FRAME_ID;
                         transformStamped.transform.translation.x = msg.pose.pose.position.x;
                         transformStamped.transform.translation.y = msg.pose.pose.position.y;
                         transformStamped.transform.translation.z = msg.pose.pose.position.z;
@@ -1499,8 +1506,8 @@ void publishRgb(capture_Image_List_t *stream) {
                     {
                     geometry_msgs::TransformStamped transformStamped;
                     transformStamped.header.stamp = msg.header.stamp;
-                    transformStamped.header.frame_id = "odom";
-                    transformStamped.child_frame_id = "map";
+                    transformStamped.header.frame_id = ODIN_ODOM_FRAME_ID;
+                    transformStamped.child_frame_id = SHARED_MAP_FRAME_ID;
                     transformStamped.transform.translation.x = msg.pose.pose.position.x;
                     transformStamped.transform.translation.y = msg.pose.pose.position.y;
                     transformStamped.transform.translation.z = msg.pose.pose.position.z;

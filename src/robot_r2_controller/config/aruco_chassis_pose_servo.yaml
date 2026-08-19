@@ -8,6 +8,7 @@ aruco_chassis_pose_servo:
     yaw_tolerance: 0.02
     yaw_stable_cycles: 10
     completion_wait_sec: 0.3
+    initial_pose_timeout_sec: 2.0
     default_timeout_sec: 20.0
 
     x_kp: 1.0

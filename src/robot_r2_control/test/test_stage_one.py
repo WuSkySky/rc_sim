@@ -8,9 +8,8 @@ from rclpy.parameter import Parameter
 from robot_r2_control.stage_one import (
     PARAMETER_DEFAULTS,
     StageOneController,
-    relative_pose_goal,
 )
-from robot_r2_interfaces.srv import StageOne
+from robot_r2_interfaces.srv import MoveRelative, StageOne
 
 
 class FakeLogger:
@@ -75,18 +74,6 @@ def make_sequence_controller():
         controller.calls.append(
             ('weapon_joint', client, position, tolerance)))
     return controller
-
-
-def test_relative_pose_goal_uses_current_body_heading():
-    target = relative_pose_goal(
-        (1.0, 2.0, math.pi / 2.0),
-        -0.887,
-        0.781,
-        0.0,
-    )
-
-    assert target == pytest.approx(
-        (1.0 - 0.781, 2.0 - 0.887, math.pi / 2.0))
 
 
 def test_red_team_runs_all_numbered_actions_in_order():
@@ -191,14 +178,20 @@ def test_parameter_update_atomically_replaces_config_snapshot():
     assert updated.position_tolerance_m == pytest.approx(0.006)
 
 
-def test_pose_wait_times_out_without_a_new_sample():
+def test_move_relative_uses_serial_source_and_forwards_request_values():
     controller = StageOneController.__new__(StageOneController)
-    controller.pose_condition = threading.Condition()
-    controller.pose_sequence = 3
-    controller.current_pose = (1.0, 2.0, 0.0)
+    controller.move_client = FakeClient('move', [])
 
-    with pytest.raises(RuntimeError, match='Pose feedback unavailable'):
-        controller.wait_for_fresh_pose(0.001)
+    controller.move_relative(-0.1, 0.2, math.pi, default_config())
+
+    request = controller.move_client.requests[0]
+    assert request.pose_source == MoveRelative.Request.SERIAL
+    assert request.forward == pytest.approx(-0.1)
+    assert request.left == pytest.approx(0.2)
+    assert request.yaw_delta == pytest.approx(math.pi)
+    assert request.position_tolerance == pytest.approx(0.005)
+    assert request.yaw_tolerance == pytest.approx(0.01)
+    assert request.timeout_sec == pytest.approx(35.0)
 
 
 def test_unavailable_dependency_aborts_before_actions():

@@ -1,14 +1,14 @@
 """TF post-processing for the lower-machine chassis odometry.
 
 ``serial_bridge`` publishes the lower-machine odometry pose as a
-``nav_msgs/Odometry`` message carrying ``odom -> base_link``. This node keeps
-the ``map -> odom`` transform so ``map -> base_link`` equals the default or
-service-reset base pose, broadcasts ``map -> odom`` and ``odom -> base_link``,
-and publishes ``/r2/pose_feedback``.
+``nav_msgs/Odometry`` message carrying ``odom_serial -> base_link_serial``.
+This node keeps the ``map -> odom_serial`` transform so
+``map -> base_link_serial`` equals the default or service-reset base pose,
+broadcasts both transforms, and publishes ``/r2/pose_feedback``.
 
-Its public interface (TF frames, ``/r2/pose_feedback``, and the
-``/r2/set_base_pose`` service) matches the Odin ``odometry_postprocess`` node it
-replaces; only the odometry source differs.
+The pose topic and reset service remain the canonical interfaces used by the
+control stack. Its TF frames are source-specific so the Odin branch can run at
+the same time without creating multiple parents for one frame.
 """
 
 import math
@@ -25,6 +25,11 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from robot_r2_interfaces.srv import SetBasePose
 from tf2_ros import TransformBroadcaster
 
+from serial_pkg.frame_ids import (
+    BASE_FRAME as SERIAL_BASE_FRAME,
+    MAP_FRAME as SERIAL_MAP_FRAME,
+    ODOM_FRAME as SERIAL_ODOM_FRAME,
+)
 from serial_pkg.transform_utils import (
     compose_transforms,
     invert_transform,
@@ -70,9 +75,9 @@ class OdometryTf(Node):
     OUTPUT_POSE_TOPIC = '/r2/pose_feedback'
     SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
 
-    MAP_FRAME = 'map'
-    ODOM_FRAME = 'odom'
-    BASE_FRAME = 'base_link'
+    MAP_FRAME = SERIAL_MAP_FRAME
+    ODOM_FRAME = SERIAL_ODOM_FRAME
+    BASE_FRAME = SERIAL_BASE_FRAME
 
     def __init__(self):
         super().__init__('odometry_tf')

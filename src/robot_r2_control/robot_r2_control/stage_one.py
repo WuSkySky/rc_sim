@@ -3,7 +3,6 @@ import threading
 import time
 from dataclasses import dataclass
 
-from geometry_msgs.msg import PoseStamped
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -12,7 +11,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from robot_r2_interfaces.srv import (
     Align,
-    MoveToPose,
+    MoveRelative,
     SetJointPosition,
     SetLift,
     StageOne,
@@ -20,8 +19,7 @@ from robot_r2_interfaces.srv import (
 
 
 STAGE_ONE_SERVICE = '/r2/stage_one'
-POSE_FEEDBACK_TOPIC = '/r2/pose_feedback'
-MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+MOVE_RELATIVE_SERVICE = '/r2/move_relative'
 SET_LIFT_SERVICE = '/r2/lift/set'
 ALIGN_TO_TIP_SERVICE = '/r2/align_to_tip'
 WEAPON_ROTATE_SERVICE = '/r2/weapon/set_rotate'
@@ -49,7 +47,6 @@ class StageOneConfig:
     weapon_rotate_tolerance_rad: float
     weapon_grip_tolerance_m: float
     dependency_timeout_sec: float
-    pose_timeout_sec: float
     move_timeout_sec: float
     lift_timeout_sec: float
     alignment_timeout_sec: float
@@ -76,27 +73,11 @@ PARAMETER_DEFAULTS = {
     'weapon_rotate_tolerance_rad': 0.01,
     'weapon_grip_tolerance_m': 0.001,
     'dependency_timeout_sec': 2.0,
-    'pose_timeout_sec': 2.0,
     'move_timeout_sec': 35.0,
     'lift_timeout_sec': 15.0,
     'alignment_timeout_sec': 15.0,
     'weapon_timeout_sec': 10.0,
 }
-
-
-def normalize_angle(angle):
-    return math.atan2(math.sin(angle), math.cos(angle))
-
-
-def relative_pose_goal(current_pose, forward, left, yaw_delta):
-    current_x, current_y, current_yaw = current_pose
-    cos_yaw = math.cos(current_yaw)
-    sin_yaw = math.sin(current_yaw)
-    return (
-        current_x + cos_yaw * forward - sin_yaw * left,
-        current_y + sin_yaw * forward + cos_yaw * left,
-        normalize_angle(current_yaw + yaw_delta),
-    )
 
 
 class StageOneController(Node):
@@ -105,24 +86,14 @@ class StageOneController(Node):
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
         self.config_lock = threading.RLock()
-        self.pose_condition = threading.Condition()
-        self.current_pose = None
-        self.pose_sequence = 0
 
         for name, default in PARAMETER_DEFAULTS.items():
             self.declare_parameter(name, default)
         self._config = self._read_config()
 
-        self.pose_subscription = self.create_subscription(
-            PoseStamped,
-            POSE_FEEDBACK_TOPIC,
-            self.on_pose_feedback,
-            10,
-            callback_group=self.callback_group,
-        )
         self.move_client = self.create_client(
-            MoveToPose,
-            MOVE_TO_POSE_SERVICE,
+            MoveRelative,
+            MOVE_RELATIVE_SERVICE,
             callback_group=self.callback_group,
         )
         self.lift_client = self.create_client(
@@ -186,7 +157,6 @@ class StageOneController(Node):
             'weapon_rotate_tolerance_rad',
             'weapon_grip_tolerance_m',
             'dependency_timeout_sec',
-            'pose_timeout_sec',
             'move_timeout_sec',
             'lift_timeout_sec',
             'alignment_timeout_sec',
@@ -236,44 +206,9 @@ class StageOneController(Node):
             self._config = candidate
         return SetParametersResult(successful=True)
 
-    def on_pose_feedback(self, message):
-        pose = message.pose
-        current_pose = (
-            float(pose.position.x),
-            float(pose.position.y),
-            self.yaw_from_quaternion(pose.orientation),
-        )
-        if not all(math.isfinite(value) for value in current_pose):
-            return
-        with self.pose_condition:
-            self.current_pose = current_pose
-            self.pose_sequence += 1
-            self.pose_condition.notify_all()
-
-    @staticmethod
-    def yaw_from_quaternion(quaternion):
-        siny_cosp = 2.0 * (
-            quaternion.w * quaternion.z +
-            quaternion.x * quaternion.y)
-        cosy_cosp = 1.0 - 2.0 * (
-            quaternion.y * quaternion.y +
-            quaternion.z * quaternion.z)
-        return math.atan2(siny_cosp, cosy_cosp)
-
-    def wait_for_fresh_pose(self, timeout_sec):
-        deadline = time.monotonic() + timeout_sec
-        with self.pose_condition:
-            initial_sequence = self.pose_sequence
-            while self.pose_sequence <= initial_sequence:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0.0:
-                    raise RuntimeError('Pose feedback unavailable')
-                self.pose_condition.wait(timeout=remaining)
-            return self.current_pose
-
     def wait_for_dependencies(self, timeout_sec):
         dependencies = (
-            (self.move_client, 'MoveToPose'),
+            (self.move_client, 'MoveRelative'),
             (self.lift_client, 'SetLift'),
             (self.align_client, 'AlignToTip'),
             (self.weapon_rotate_client, 'WeaponRotate'),
@@ -348,23 +283,21 @@ class StageOneController(Node):
             raise RuntimeError(f'SetLift failed: {response.message}')
 
     def move_relative(self, forward, left, yaw_delta, config):
-        current_pose = self.wait_for_fresh_pose(config.pose_timeout_sec)
-        target = relative_pose_goal(
-            current_pose, forward, left, yaw_delta)
-        request = MoveToPose.Request()
-        request.x = target[0]
-        request.y = target[1]
-        request.yaw = target[2]
+        request = MoveRelative.Request()
+        request.pose_source = MoveRelative.Request.SERIAL
+        request.forward = float(forward)
+        request.left = float(left)
+        request.yaw_delta = float(yaw_delta)
         request.position_tolerance = config.position_tolerance_m
         request.yaw_tolerance = config.yaw_tolerance_rad
         request.timeout_sec = config.move_timeout_sec
         response = self.wait_for_future(
             self.move_client.call_async(request),
             config.move_timeout_sec,
-            'MoveToPose',
+            'MoveRelative',
         )
         if not response.success:
-            raise RuntimeError(f'MoveToPose failed: {response.message}')
+            raise RuntimeError(f'MoveRelative failed: {response.message}')
 
     def align_tip(self, config):
         request = Align.Request()

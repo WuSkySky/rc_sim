@@ -211,6 +211,7 @@ class StageTwoPointOneController(Node):
 
     def move_to_pose(self, pose):
         request = MoveToPose.Request()
+        request.pose_source = MoveToPose.Request.SERIAL
         request.x = pose[0]
         request.y = pose[1]
         request.yaw = pose[2]

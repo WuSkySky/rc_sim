@@ -771,6 +771,7 @@ class GuiControlNode(Node):
 
         self.cmd_vel_publisher.publish(Twist())
         request = MoveToPose.Request()
+        request.pose_source = MoveToPose.Request.SERIAL
         request.x = target[0]
         request.y = target[1]
         request.yaw = target[2]

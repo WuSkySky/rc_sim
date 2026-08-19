@@ -57,6 +57,7 @@ class MoveToPoseTestClient(Node):
         x, y = self.platform_centers_xy[self.index]
 
         request = MoveToPose.Request()
+        request.pose_source = MoveToPose.Request.SERIAL
         request.x = x
         request.y = y
         request.yaw = self.yaw
