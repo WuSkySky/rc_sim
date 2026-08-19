@@ -62,7 +62,6 @@ STAGE_ONE_PARAMETER_NAMES = {
     'weapon_rotate_tolerance_rad',
     'weapon_grip_tolerance_m',
     'dependency_timeout_sec',
-    'pose_timeout_sec',
     'move_timeout_sec',
     'lift_timeout_sec',
     'alignment_timeout_sec',
@@ -305,6 +304,8 @@ class GuiControlNode(Node):
         'root_rotate': '/r2/gripper/rotate_feedback',
         'tip_rotate': '/r2/gripper/tip_rotate_feedback',
         'grip': '/r2/gripper/grip_feedback',
+        'weapon_rotate': '/r2/weapon/rotate_feedback',
+        'weapon_grip': '/r2/weapon/grip_feedback',
     }
 
     FLOAT_CONTROL_PARAMETERS = {
@@ -2158,7 +2159,7 @@ class GuiControlApp:
         if generation == self.last_kfs_load_feedback_generation:
             return
         self.last_kfs_load_feedback_generation = generation
-        controls = {item['name']: item for item in self.KFS_CONTROLS}
+        controls = {item['name']: item for item in self.FLOAT_CONTROLS}
         for name, text_variable in self.kfs_load_feedback_text.items():
             value = feedback[name]
             if value is None:

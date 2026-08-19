@@ -1,15 +1,15 @@
-stage_one:
+/stage_one:
   ros__parameters:
     action_1_lift_height_m: 0.01
     action_2_left_m: 0.781
-    action_2_backward_m: 0.93
+    action_2_backward_m: 0.575
     action_3_lift_height_m: 0.14
     action_4_pixel_tolerance_px: 5.0
-    action_5_weapon_rotate_rad: 1.5707963267948966
+    action_5_weapon_rotate_rad: 1.4312
     action_5_weapon_grip_m: 0.028
-    action_6_backward_m: 0.10
+    action_6_backward_m: 0.40
     action_7_weapon_grip_m: 0.0
-    action_8_weapon_rotate_rad: 2.478367537831948
+    action_8_weapon_rotate_rad: 3.054
     action_9_lift_height_m: 0.01
     action_10_forward_m: 0.20
     action_11_yaw_delta_rad: 3.141592653589793
@@ -17,8 +17,8 @@ stage_one:
     lift_tolerance_m: 0.002
     position_tolerance_m: 0.005
     yaw_tolerance_rad: 0.01
-    weapon_rotate_tolerance_rad: 0.01
-    weapon_grip_tolerance_m: 0.001
+    weapon_rotate_tolerance_rad: 0.08
+    weapon_grip_tolerance_m: 0.02
 
     dependency_timeout_sec: 2.0
     move_timeout_sec: 35.0

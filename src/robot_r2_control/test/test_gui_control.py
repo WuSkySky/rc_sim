@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import threading
 from types import SimpleNamespace
 
@@ -193,6 +194,13 @@ def test_stage_one_parameter_load_command_targets_stage_one_node():
         '--no-daemon', '--spin-time', '2.0',
         '/stage_one', '/workspace/stage_one.yaml',
     ]
+
+
+def test_stage_one_source_yaml_targets_absolute_node_name():
+    config_path = (
+        Path(__file__).parents[1] / 'config' / 'stage_one.yaml')
+
+    assert config_path.read_text(encoding='utf-8').startswith('/stage_one:')
 
 
 def test_manual_key_components_combine_and_cancel_opposites():
@@ -755,6 +763,8 @@ def test_kfs_action_reports_unavailable_service():
         ('root_rotate', 1.25),
         ('tip_rotate', -2.5),
         ('grip', 0.145),
+        ('weapon_rotate', 1.431),
+        ('weapon_grip', 0.0),
     ],
 )
 def test_kfs_load_motor_feedback_is_saved(motor_name, value):
@@ -822,7 +832,7 @@ def test_stage_one_parameter_load_result_checks_every_yaml_parameter():
         0, output, '')
 
     assert success
-    assert message == 'Step1 参数写入成功：共 24 项'
+    assert message == 'Step1 参数写入成功：共 23 项'
 
 
 def test_stage_one_parameter_load_result_reports_missing_parameter():
