@@ -113,6 +113,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 阶段 2.1     | `/r2/stage_two_point_one`    | `robot_r2_interfaces/srv/StageTwoPointOne`    | 仿真、实机 |
 | 阶段 2.2     | `/r2/stage_two_point_two`    | `robot_r2_interfaces/srv/StageTwoPointTwo`    | 仿真、实机 |
 | 阶段 2.2 后续离场 | `/r2/stage_two_point_two_exit` | `robot_r2_interfaces/srv/StageTwoPointTwoExit` | 仿真、实机 |
+| 阶段 3       | `/r2/stage_three`            | `robot_r2_interfaces/srv/StageThree`          | 仿真、实机 |
 | 底盘绝对位置伺服   | `/r2/move_to_pose`           | `robot_r2_interfaces/srv/MoveToPose`          | 仿真、实机 |
 | 底盘相对位置伺服   | `/r2/move_relative`          | `robot_r2_interfaces/srv/MoveRelative`        | 仿真、实机 |
 | 重置或设置里程计位姿 | `/r2/set_base_pose`          | `robot_r2_interfaces/srv/SetBasePose`         | 仅实机   |
@@ -151,8 +152,8 @@ ros2 service call /r2/stage_one robot_r2_interfaces/srv/StageOne \
   "{team: blue}"
 ```
 
-GUI 的 `Step1` 区域提供“红方”和“蓝方”两个执行按钮，以及“从 YAML 写入
-Step1 参数”按钮。执行按钮会先调用
+GUI 顶部的比赛队伍选择器由 Step1、Step2、Step3 共用；`Step1` 区域提供一个执行
+按钮和“从 YAML 写入 Step1 参数”按钮。执行按钮会先调用
 `/r2/set_base_pose`，成功后再使用对应的 `team` 调用 `/r2/stage_one`。默认重定位
 位姿为全零，可通过 `gui_control.yaml` 中的 `stage_one_relocalization_pose`
 动态调整。参数写入按钮会加载工作区源码中的
@@ -172,11 +173,34 @@ ros2 param set /stage_one weapon_grip_tolerance_m 0.0015
 完整执行阶段 2.1 → 2.2。`team` 只接受 `red` 或 `blue`；红方沿用配置中的
 负 Y 坐标，蓝方仅将重定位和任务格子的 Y 坐标取反。不会额外镜像配置中的 yaw；
 移动朝向仍根据实际目标坐标计算。格子高度、左右相机映射以及假 KFS 的
-`LEFT/RIGHT` 决策不变。假 KFS 决策：`1=左`，`2=右`。
+`LEFT/RIGHT` 决策不变。假 KFS 决策：`1=左`，`2=右`。总服务模式为
+`0=标准识别`、`1=skip 识别`、`2=路线`。
 
 ```bash
 ros2 service call /r2/stage_two robot_r2_interfaces/srv/StageTwo \
-  "{team: red, fake_kfs_decision: 1}"
+  "{team: red, fake_kfs_decision: 1, mode: 0, move_cells: [], kfs_cells: []}"
+```
+
+标准和 skip 模式会忽略 `move_cells`、`kfs_cells`，并依次以相同模式调用 2.1、
+2.2。路线模式使用统一的四行三列坐标：`forward_index=1..4`、
+`lateral_index=1..3`。`move_cells` 仅作为 2.2 的移动路线；`kfs_cells` 是无序的
+真实 KFS 占用集合。第 4 行入口侧的 KFS 按 `3,1,2` 过滤顺序交给 2.1，其他
+三行交给 2.2。入口侧没有 KFS 时跳过 2.1，直接从 `loaded_count=0` 执行 2.2。
+每次 2.2 服务开始都会先位置伺服到 `(5,2)` 格心，再执行第一段上台阶动作。
+
+```bash
+ros2 service call /r2/stage_two robot_r2_interfaces/srv/StageTwo \
+  "{team: red, fake_kfs_decision: 0, mode: 2, \
+    move_cells: [
+      {forward_index: 4, lateral_index: 2},
+      {forward_index: 3, lateral_index: 2},
+      {forward_index: 2, lateral_index: 2},
+      {forward_index: 1, lateral_index: 2},
+      {forward_index: 1, lateral_index: 1}],
+    kfs_cells: [
+      {forward_index: 4, lateral_index: 3},
+      {forward_index: 3, lateral_index: 1},
+      {forward_index: 1, lateral_index: 2}]}"
 ```
 
 单独执行阶段 2.1：
@@ -184,7 +208,27 @@ ros2 service call /r2/stage_two robot_r2_interfaces/srv/StageTwo \
 ```bash
 ros2 service call /r2/stage_two_point_one \
   robot_r2_interfaces/srv/StageTwoPointOne \
-  "{team: red, loaded_count: 0, skip_kfs_detection: false}"
+  "{team: red, loaded_count: 0, mode: 0, route_cells: []}"
+```
+
+阶段 2.1 的 `mode`：`0=标准识别`、`1=skip 识别`、`2=路线`。标准和 skip
+模式固定访问 `[3, 1, 2]`；路线模式通过 `route_cells` 指定第 5 列中的横向格子
+编号，数组必须非空、不能重复且只能包含 `1`、`2`、`3`。路线模式不调用 KFS
+类型识别和视觉对齐，到达每个格子并调整底盘高度后直接装载。例如依次到达
+`(5,1)`、`(5,3)` 并装载：
+
+```bash
+ros2 service call /r2/stage_two_point_one \
+  robot_r2_interfaces/srv/StageTwoPointOne \
+  "{team: red, loaded_count: 0, mode: 2, route_cells: [1, 3]}"
+```
+
+skip 模式同样不需要视觉服务，但只移动、不装载：
+
+```bash
+ros2 service call /r2/stage_two_point_one \
+  robot_r2_interfaces/srv/StageTwoPointOne \
+  "{team: red, loaded_count: 0, mode: 1, route_cells: []}"
 ```
 
 单独执行阶段 2.2：
@@ -192,8 +236,36 @@ ros2 service call /r2/stage_two_point_one \
 ```bash
 ros2 service call /r2/stage_two_point_two \
   robot_r2_interfaces/srv/StageTwoPointTwo \
-  "{team: red, fake_kfs_decision: 1, loaded_count: 0, skip_kfs_detection: false}"
+  "{team: red, fake_kfs_decision: 1, loaded_count: 0, mode: 0, move_cells: [], load_cells: []}"
 ```
+
+阶段 2.2 的 `mode` 同样为 `0=标准识别`、`1=skip 识别`、`2=路线`。路线模式
+使用结构化格子数组：`move_cells` 表示机器人依次到达的格心，`load_cells` 表示
+需要装载的 KFS 所在格。移动路线必须从 `(4,2)` 开始，以 `(1,1)` 或 `(1,3)`
+结束；服务随后会自动补走到对应的 `(0,1)` 或 `(0,3)`。路线模式不调用 KFS
+类型检测，但装载前仍会执行视觉对齐。例如：
+
+```bash
+ros2 service call /r2/stage_two_point_two \
+  robot_r2_interfaces/srv/StageTwoPointTwo \
+  "{team: red, fake_kfs_decision: 0, loaded_count: 0, mode: 2, \
+    move_cells: [
+      {forward_index: 4, lateral_index: 2},
+      {forward_index: 3, lateral_index: 2},
+      {forward_index: 2, lateral_index: 2},
+      {forward_index: 1, lateral_index: 2},
+      {forward_index: 1, lateral_index: 1}],
+    load_cells: [
+      {forward_index: 4, lateral_index: 1},
+      {forward_index: 0, lateral_index: 1}]}"
+```
+
+每个 load 格必须能在路线某个格心成为机器人到达朝向的前、左或右邻格；同一
+格心有多个目标时，下一移动方向上的 KFS 最后装载。路线和 load 格会在移动前
+完成合法性校验。GUI 不提供 2.2 路线编辑入口，正常和 skip 按钮仍可照常使用。
+`stage_two_point_two.yaml` 中的超时、网格、格子高度、索引、边缘偏移和采样数均
+支持运行时动态修改；为保证任务路线一致，网格相关参数在 2.2 或离场服务执行中
+会拒绝修改，任务结束后可正常更新。
 
 单独执行阶段 2.2 后续离场动作：
 
@@ -215,8 +287,9 @@ ros2 service call /r2/stage_two_point_two_exit \
 `stage_two_point_two.yaml` 中的 `exit_cell_0_0_pose`、`exit_x_offset`
 动态修改。
 
-GUI 的 Step2 区域提供一个由 2.1、2.2 共用的红/蓝方选择器，默认红方；每个阶段
-仍分别提供正常识别和 skip 识别按钮。GUI 会先按所选队伍调用 Odin 重定位，成功后
+GUI 使用 Step1、Step2、Step3 共用的红/蓝方选择器，默认红方；2.1 提供正常识别、
+skip 识别以及路线直接装载，2.2 提供正常识别和 skip 识别。2.1 路线输入使用逗号
+分隔，例如 `3,1,2`。GUI 会先按所选队伍调用 Odin 重定位，成功后
 再把相同的 `team` 传给阶段服务。红方重定位基准位姿配置在
 `gui_control.yaml` 的 `stage_two_point_one_relocalization_pose` 和
 `stage_two_point_two_relocalization_pose`，蓝方自动镜像其中的 Y。2.1 默认 X
@@ -225,6 +298,34 @@ GUI 的 Step2 区域提供一个由 2.1、2.2 共用的红/蓝方选择器，默
 “2.2 后续动作（重定位后执行）”按钮会先按队伍重定位到 `(0,3)` 格心（红方默认
 `(-2.6, -1.8, π)`，蓝方镜像 Y），成功后调用独立离场服务；该重定位基准可通过
 `stage_two_point_two_exit_relocalization_pose` 动态修改。
+
+### 阶段三任务
+
+阶段三服务请求中的 `team` 只接受 `red` 或 `blue`，`loaded_count` 只接受
+`1`、`2` 或 `3`。服务开始后先进行 Odin 重定位：蓝方位姿由阶段 2 后续动作终点
+`(-5.5, 5.4, π)` 沿 X 减小 `0.19 m`、沿 Y 增大 `0.13 m` 得到
+`(-5.69, 5.53, π)`；红方关于 X 轴对称，仅将 Y 取反。
+
+蓝方三段放置位置依次为 `(-5.29, 10.16, π)`、`(-4.75, 10.16, π)`、
+`(-4.21, 10.16, π)`，红方仅镜像 Y。每段先进行 Odin 绝对位置伺服，再 POP，
+最后进行 Odin 相对后退：
+
+- 已有 3 个 KFS：依次使用 POP 模式 1、模式 2、抬升后模式 2；前两段各后退
+  `0.25 m`，最后后退 `3 m`。
+- 已有 2 个 KFS：执行上述 POP 序列的后两项；第一段后退 `0.25 m`，最后后退
+  `3 m`。
+- 已有 1 个 KFS：夹爪升降先绝对抬升到 `0.35 m`，再使用 POP 模式 2，最后后退
+  `2 m`。
+
+```bash
+ros2 service call /r2/stage_three robot_r2_interfaces/srv/StageThree \
+  "{team: blue, loaded_count: 3}"
+```
+
+重定位基准、位置偏移、段间距、后退距离、KFS 抬升目标和各动作超时集中在
+`robot_r2_control/config/stage_three.yaml`，均支持运行时动态修改。GUI 的 Step3
+区域提供“已有 1 个 KFS”“已有 2 个 KFS”“已有 3 个 KFS”三个按钮，并使用顶部
+共用的比赛队伍选择。
 
 ### 底盘、里程计与抬升
 

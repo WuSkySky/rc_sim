@@ -17,6 +17,7 @@ from robot_r2_control.gui_control import (
     motion_control_text,
     normalize_motion_key,
     parse_relocalization_values,
+    parse_stage_two_point_one_route,
     resolve_kfs_loader_source_config,
     resolve_stage_one_source_config,
     summarize_named_parameter_load_result,
@@ -31,6 +32,7 @@ from robot_r2_interfaces.srv import (
     StageTwoPointOne,
     StageTwoPointTwo,
     StageTwoPointTwoExit,
+    StageThree,
     TraverseStep,
 )
 
@@ -92,13 +94,17 @@ def make_node_stub():
     node.stage_one_request_in_flight = False
     node.stage_one_team = None
     node.stage_two_point_one_request_in_flight = False
-    node.stage_two_point_one_skip = None
+    node.stage_two_point_one_mode = None
+    node.stage_two_point_one_route = ()
     node.stage_two_point_one_team = None
     node.stage_two_point_two_request_in_flight = False
-    node.stage_two_point_two_skip = None
+    node.stage_two_point_two_mode = None
     node.stage_two_point_two_team = None
     node.stage_two_point_two_exit_request_in_flight = False
     node.stage_two_point_two_exit_team = None
+    node.stage_three_request_in_flight = False
+    node.stage_three_team = None
+    node.stage_three_loaded_count = None
     node.kfs_action_request_in_flight = False
     node.kfs_parameter_load_in_flight = False
     node.stage_one_parameter_load_in_flight = False
@@ -133,6 +139,7 @@ def make_node_stub():
     node.stage_two_point_one_client = FakeClient()
     node.stage_two_point_two_client = FakeClient()
     node.stage_two_point_two_exit_client = FakeClient()
+    node.stage_three_client = FakeClient()
     node.stage_one_relocalization_pose = (0.0,) * 6
     node.stage_two_point_one_relocalization_pose = (
         GuiControlNode.STEP_TWO_POINT_ONE_RELOCALIZATION_DEFAULT)
@@ -648,7 +655,8 @@ def test_stage_two_point_one_relocalizes_then_calls_team_service(
         team, label, expected_y):
     node = make_node_stub()
 
-    success, message = node.request_stage_two_point_one(team, skip=True)
+    success, message = node.request_stage_two_point_one(
+        team, StageTwoPointOne.Request.SKIP)
 
     assert success
     assert message == f'2.1 {label}skip测试：正在重定位到测试起点'
@@ -668,7 +676,8 @@ def test_stage_two_point_one_relocalizes_then_calls_team_service(
     step_request = node.stage_two_point_one_client.requests[0]
     assert step_request.team == team
     assert step_request.loaded_count == 0
-    assert step_request.skip_kfs_detection is True
+    assert step_request.mode == StageTwoPointOne.Request.SKIP
+    assert list(step_request.route_cells) == []
     assert node.stage_two_point_one_request_in_flight
 
     node.stage_two_point_one_client.future.complete(SimpleNamespace(
@@ -682,11 +691,11 @@ def test_stage_two_point_one_relocalizes_then_calls_team_service(
     ]
 
 
-def test_stage_two_point_one_normal_passes_skip_false():
+def test_stage_two_point_one_normal_passes_standard_mode():
     node = make_node_stub()
 
     success, _ = node.request_stage_two_point_one(
-        StageTwoPointOne.Request.RED, skip=False)
+        StageTwoPointOne.Request.RED, StageTwoPointOne.Request.STANDARD)
     assert success
 
     node.set_base_pose_odin_client.future.complete(SimpleNamespace(
@@ -696,7 +705,57 @@ def test_stage_two_point_one_normal_passes_skip_false():
     step_request = node.stage_two_point_one_client.requests[0]
     assert step_request.team == StageTwoPointOne.Request.RED
     assert step_request.loaded_count == 0
-    assert step_request.skip_kfs_detection is False
+    assert step_request.mode == StageTwoPointOne.Request.STANDARD
+    assert list(step_request.route_cells) == []
+
+
+def test_stage_two_point_one_route_is_validated_before_relocalization():
+    node = make_node_stub()
+
+    success, message = node.request_stage_two_point_one(
+        StageTwoPointOne.Request.RED,
+        StageTwoPointOne.Request.ROUTE,
+        (1, 1),
+    )
+
+    assert not success
+    assert message == '2.1 路线不能包含重复格子'
+    assert not node.set_base_pose_odin_client.requests
+
+
+def test_stage_two_point_one_route_is_forwarded_after_relocalization():
+    node = make_node_stub()
+
+    success, message = node.request_stage_two_point_one(
+        StageTwoPointOne.Request.RED,
+        StageTwoPointOne.Request.ROUTE,
+        (1, 3),
+    )
+
+    assert success
+    assert message == (
+        '2.1 红方路线[1,3]测试：正在重定位到测试起点')
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    step_request = node.stage_two_point_one_client.requests[0]
+    assert step_request.mode == StageTwoPointOne.Request.ROUTE
+    assert list(step_request.route_cells) == [1, 3]
+
+
+@pytest.mark.parametrize(
+    'raw, expected',
+    [('3,1,2', (3, 1, 2)), (' 1, 3 ', (1, 3))],
+)
+def test_parse_stage_two_point_one_route(raw, expected):
+    assert parse_stage_two_point_one_route(raw) == expected
+
+
+@pytest.mark.parametrize('raw', ['', '1,,2', '1,1', '4', '1,a'])
+def test_parse_stage_two_point_one_route_rejects_invalid_input(raw):
+    with pytest.raises(ValueError):
+        parse_stage_two_point_one_route(raw)
 
 
 @pytest.mark.parametrize(
@@ -710,7 +769,8 @@ def test_stage_two_point_two_relocalizes_then_calls_team_service(
         team, label, expected_y):
     node = make_node_stub()
 
-    success, message = node.request_stage_two_point_two(team, skip=True)
+    success, message = node.request_stage_two_point_two(
+        team, StageTwoPointTwo.Request.SKIP)
 
     assert success
     assert message == f'2.2 {label}skip测试：正在重定位到测试起点'
@@ -728,7 +788,9 @@ def test_stage_two_point_two_relocalizes_then_calls_team_service(
     assert step_request.team == team
     assert step_request.fake_kfs_decision == StageTwoPointTwo.Request.LEFT
     assert step_request.loaded_count == 0
-    assert step_request.skip_kfs_detection is True
+    assert step_request.mode == StageTwoPointTwo.Request.SKIP
+    assert list(step_request.move_cells) == []
+    assert list(step_request.load_cells) == []
 
     node.stage_two_point_two_client.future.complete(SimpleNamespace(
         success=True,
@@ -741,11 +803,13 @@ def test_stage_two_point_two_relocalizes_then_calls_team_service(
     ]
 
 
-def test_stage_two_point_two_normal_passes_skip_false():
+def test_stage_two_point_two_normal_passes_standard_mode():
     node = make_node_stub()
 
     success, message = node.request_stage_two_point_two(
-        StageTwoPointOne.Request.RED, skip=False)
+        StageTwoPointOne.Request.RED,
+        StageTwoPointTwo.Request.STANDARD,
+    )
 
     assert success
     assert message == '2.2 红方正常测试：正在重定位到测试起点'
@@ -757,7 +821,9 @@ def test_stage_two_point_two_normal_passes_skip_false():
     assert step_request.team == StageTwoPointOne.Request.RED
     assert step_request.fake_kfs_decision == StageTwoPointTwo.Request.LEFT
     assert step_request.loaded_count == 0
-    assert step_request.skip_kfs_detection is False
+    assert step_request.mode == StageTwoPointTwo.Request.STANDARD
+    assert list(step_request.move_cells) == []
+    assert list(step_request.load_cells) == []
 
 
 @pytest.mark.parametrize(
@@ -829,13 +895,104 @@ def test_stage_two_point_two_exit_rejects_unknown_team():
 
 
 @pytest.mark.parametrize(
-    'method_name',
-    ['request_stage_two_point_one', 'request_stage_two_point_two'],
+    'loaded_count',
+    [1, 2, 3],
 )
-def test_stage_two_rejects_unknown_team_before_relocalizing(method_name):
+def test_stage_three_buttons_pass_team_and_loaded_count(loaded_count):
     node = make_node_stub()
 
-    success, message = getattr(node, method_name)('green', skip=True)
+    success, message = node.request_stage_three(
+        StageThree.Request.BLUE, loaded_count)
+
+    assert success
+    assert message == (
+        f'Step3 蓝方（已有 {loaded_count} 个 KFS）：正在执行')
+    request = node.stage_three_client.requests[0]
+    assert request.team == StageThree.Request.BLUE
+    assert request.loaded_count == loaded_count
+    assert node.stage_three_request_in_flight
+
+    node.stage_three_client.future.complete(SimpleNamespace(
+        success=True,
+        message='stage three completed',
+    ))
+    assert not node.stage_three_request_in_flight
+    assert node.stage_three_team is None
+    assert node.stage_three_loaded_count is None
+    assert node.pop_status_events() == [
+        f'Step3 蓝方（已有 {loaded_count} 个 KFS）完成：'
+        'stage three completed',
+    ]
+
+
+def test_stage_three_rejects_invalid_loaded_count():
+    node = make_node_stub()
+
+    success, message = node.request_stage_three(
+        StageThree.Request.RED, 0)
+
+    assert not success
+    assert message == 'Stage 3 loaded_count must be 1, 2 or 3, got 0'
+    assert not node.stage_three_client.requests
+
+
+def test_stage_three_rejects_unknown_team():
+    node = make_node_stub()
+
+    success, message = node.request_stage_three('green', 3)
+
+    assert not success
+    assert message == 'Unknown Stage 3 team: green'
+    assert not node.stage_three_client.requests
+
+
+def test_stage_three_reports_service_failure_and_releases_busy_state():
+    node = make_node_stub()
+
+    success, _ = node.request_stage_three(StageThree.Request.RED, 2)
+    assert success
+    node.stage_three_client.future.complete(SimpleNamespace(
+        success=False,
+        message='pop failed',
+    ))
+
+    assert not node.stage_three_request_in_flight
+    assert node.pop_status_events() == [
+        'Step3 红方（已有 2 个 KFS）失败：pop failed',
+    ]
+
+
+def test_stage_three_and_manual_kfs_action_are_mutually_exclusive():
+    node = make_node_stub()
+    node.kfs_action_request_in_flight = True
+
+    success, message = node.request_stage_three(StageThree.Request.RED, 3)
+
+    assert not success
+    assert message == 'KFS 动作正在执行'
+    assert not node.stage_three_client.requests
+
+    node.kfs_action_request_in_flight = False
+    node.stage_three_request_in_flight = True
+    success, message = node.request_kfs_action(
+        KfsAction.Request.POP, KfsAction.Request.MODE_1)
+    assert not success
+    assert message == 'Step3 正在执行'
+    assert not node.kfs_action_client.requests
+
+
+@pytest.mark.parametrize(
+    'method_name, mode_or_skip',
+    [
+        ('request_stage_two_point_one', StageTwoPointOne.Request.SKIP),
+        ('request_stage_two_point_two', StageTwoPointTwo.Request.SKIP),
+    ],
+)
+def test_stage_two_rejects_unknown_team_before_relocalizing(
+        method_name, mode_or_skip):
+    node = make_node_stub()
+
+    success, message = getattr(node, method_name)('green', mode_or_skip)
 
     assert not success
     assert message == 'Unknown Stage 2 team: green'

@@ -1,0 +1,2 @@
+uint8 forward_index
+uint8 lateral_index

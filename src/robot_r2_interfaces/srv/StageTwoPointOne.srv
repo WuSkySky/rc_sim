@@ -1,8 +1,12 @@
 string RED=red
 string BLUE=blue
+uint8 STANDARD=0
+uint8 SKIP=1
+uint8 ROUTE=2
 string team
 uint8 loaded_count
-bool skip_kfs_detection
+uint8 mode
+uint8[<=3] route_cells
 ---
 bool success
 string message

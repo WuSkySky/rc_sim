@@ -1,8 +1,5 @@
 stage_two_control:
   ros__parameters:
-    service_name: /r2/stage_two
-    stage_two_point_one_service: /r2/stage_two_point_one
-    stage_two_point_two_service: /r2/stage_two_point_two
     dependency_timeout_sec: 2.0
     stage_two_point_one_timeout_sec: 450.0
     stage_two_point_two_timeout_sec: 1800.0

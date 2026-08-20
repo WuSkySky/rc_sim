@@ -22,6 +22,7 @@ class ImmediateFuture:
 class FakeClient:
     def __init__(self, success=True):
         self.requests = []
+        self.wait_timeouts = []
         self.success = success
 
     def call_async(self, request):
@@ -32,6 +33,7 @@ class FakeClient:
         ))
 
     def wait_for_service(self, timeout_sec):
+        self.wait_timeouts.append(timeout_sec)
         return True
 
 
@@ -66,8 +68,23 @@ def make_controller():
     ]
     controller.move_client = FakeClient()
     controller.lift_client = FakeClient()
+    controller.traverse_client = FakeClient()
+    controller.kfs_action_client = FakeClient()
+    controller.detection_client = FakeClient()
+    controller.align_client = FakeClient()
     controller.move_timeout_sec = 35.0
+    controller.pose_timeout_sec = 2.0
+    controller.traverse_timeout_sec = 150.0
+    controller.detection_timeout_sec = 10.0
+    controller.align_timeout_sec = 15.0
+    controller.load_timeout_sec = 70.0
+    controller.release_timeout_sec = 70.0
     controller.dependency_timeout_sec = 2.0
+    controller.higher_kfs_edge_offset = 0.2
+    controller.lower_kfs_edge_offset = 0.4
+    controller.release_edge_offset = 0.2
+    controller.detection_sample_count = 10
+    controller.mode = StageTwoPointTwo.Request.STANDARD
     controller.service_lock = threading.Lock()
     controller.config_lock = threading.Lock()
     controller.exit_cell_0_0_pose = (-2.6, -5.4, math.pi)
@@ -97,6 +114,305 @@ def test_invalid_team_is_rejected():
         StageTwoPointTwoController.validate_team('green')
 
 
+def cell(forward_index, lateral_index):
+    return SimpleNamespace(
+        forward_index=forward_index,
+        lateral_index=lateral_index,
+    )
+
+
+def default_route_messages(final_lateral=1):
+    lateral_tail = (
+        [cell(1, 2), cell(1, final_lateral)]
+        if final_lateral != 2
+        else [cell(1, 2)]
+    )
+    return [
+        cell(4, 2),
+        cell(3, 2),
+        cell(2, 2),
+        *lateral_tail,
+    ]
+
+
+def test_route_mode_validates_and_assigns_load_cells():
+    controller = make_controller()
+
+    move_cells, load_cells, load_targets = (
+        controller.validate_mode_and_routes(
+            StageTwoPointTwo.Request.ROUTE,
+            default_route_messages(1),
+            [cell(4, 1), cell(0, 1)],
+        )
+    )
+
+    assert move_cells == ((4, 2), (3, 2), (2, 2), (1, 2), (1, 1))
+    assert load_cells == ((4, 1), (0, 1))
+    assert load_targets[0] == ((4, 1),)
+    assert load_targets[-1] == ((0, 1),)
+
+
+@pytest.mark.parametrize(
+    'mode, moves, loads, message',
+    [
+        (99, [], [], 'unknown Stage 2.2 mode'),
+        (
+            StageTwoPointTwo.Request.STANDARD,
+            [cell(4, 2)],
+            [],
+            'must be empty',
+        ),
+        (StageTwoPointTwo.Request.ROUTE, [], [], 'must not be empty'),
+        (
+            StageTwoPointTwo.Request.ROUTE,
+            [cell(3, 2), cell(2, 2), cell(1, 1)],
+            [],
+            'must start',
+        ),
+        (
+            StageTwoPointTwo.Request.ROUTE,
+            [cell(4, 2), cell(3, 2), cell(2, 2), cell(1, 2)],
+            [],
+            'must end',
+        ),
+        (
+            StageTwoPointTwo.Request.ROUTE,
+            [cell(4, 2), cell(3, 2), cell(1, 2), cell(1, 1)],
+            [],
+            'must be adjacent',
+        ),
+        (
+            StageTwoPointTwo.Request.ROUTE,
+            [cell(4, 2), cell(3, 2), cell(4, 2), cell(1, 1)],
+            [],
+            'duplicates',
+        ),
+    ],
+)
+def test_route_mode_rejects_invalid_routes(
+        mode, moves, loads, message):
+    controller = make_controller()
+
+    with pytest.raises(ValueError, match=message):
+        controller.validate_mode_and_routes(mode, moves, loads)
+
+
+def test_route_mode_rejects_unreachable_load_cell():
+    controller = make_controller()
+
+    with pytest.raises(ValueError, match='not front/left/right'):
+        controller.validate_mode_and_routes(
+            StageTwoPointTwo.Request.ROUTE,
+            default_route_messages(1),
+            [cell(0, 3)],
+        )
+
+
+def test_route_mode_rejects_duplicate_load_cells():
+    controller = make_controller()
+
+    with pytest.raises(ValueError, match='load_cells.*duplicates'):
+        controller.validate_mode_and_routes(
+            StageTwoPointTwo.Request.ROUTE,
+            default_route_messages(1),
+            [cell(4, 1), cell(4, 1)],
+        )
+
+
+def test_route_mode_rejects_same_height_load_cell():
+    controller = make_controller()
+    heights = list(controller.cell_heights)
+    heights[4 * 3] = 1.0
+    controller.cell_heights = tuple(heights)
+
+    with pytest.raises(ValueError, match='same height'):
+        controller.validate_mode_and_routes(
+            StageTwoPointTwo.Request.ROUTE,
+            default_route_messages(1),
+            [cell(4, 1)],
+        )
+
+
+def test_route_load_order_puts_next_movement_cell_last():
+    controller = make_controller()
+
+    _, _, load_targets = controller.validate_mode_and_routes(
+        StageTwoPointTwo.Request.ROUTE,
+        default_route_messages(1),
+        [cell(3, 2), cell(4, 3), cell(4, 1)],
+    )
+
+    assert load_targets[0] == ((4, 1), (4, 3), (3, 2))
+
+
+def test_route_mode_rejects_wrong_height_difference():
+    controller = make_controller()
+    heights = list(controller.cell_heights)
+    heights[3 * 3 + 1] = 1.0
+    controller.cell_heights = tuple(heights)
+
+    with pytest.raises(ValueError, match='exactly one height level'):
+        controller.validate_mode_and_routes(
+            StageTwoPointTwo.Request.ROUTE,
+            default_route_messages(1),
+            [],
+        )
+
+
+def test_route_mode_rejects_untraversable_load_cell():
+    controller = make_controller()
+
+    with pytest.raises(ValueError, match='not traversable'):
+        controller.validate_mode_and_routes(
+            StageTwoPointTwo.Request.ROUTE,
+            default_route_messages(1),
+            [cell(5, 1)],
+        )
+
+
+def test_route_mode_rejects_untraversable_move_cell():
+    controller = make_controller()
+
+    with pytest.raises(ValueError, match='not traversable'):
+        controller.validate_mode_and_routes(
+            StageTwoPointTwo.Request.ROUTE,
+            [
+                cell(4, 2),
+                cell(4, 1),
+                cell(5, 1),
+                cell(1, 1),
+            ],
+            [],
+        )
+
+
+@pytest.mark.parametrize('final_lateral', [1, 3])
+def test_execute_route_appends_matching_terminal_cell(final_lateral):
+    controller = make_controller()
+    controller.get_logger = lambda: FakeLogger()
+    move_messages = default_route_messages(final_lateral)
+    (
+        controller.move_cells,
+        controller.load_cells,
+        controller.route_load_targets,
+    ) = controller.validate_mode_and_routes(
+        StageTwoPointTwo.Request.ROUTE,
+        move_messages,
+        [],
+    )
+    moves = []
+    controller.move_one_cell = (
+        lambda source, target: moves.append((source, target)))
+
+    final_index = controller.execute_route_task()
+
+    assert final_index == (0, final_lateral)
+    assert moves[0] == ((5, 2), (4, 2))
+    assert moves[-1] == (
+        (1, final_lateral),
+        (0, final_lateral),
+    )
+
+
+def test_route_load_targets_keep_next_cell_at_edge():
+    controller = make_controller()
+    calls = []
+    controller.pickup_kfs = lambda current, target, return_to_center: (
+        calls.append((current, target, return_to_center)))
+
+    controller.load_route_targets(
+        (4, 2),
+        ((4, 1), (3, 2)),
+        (3, 2),
+    )
+
+    assert calls == [
+        ((4, 2), (4, 1), True),
+        ((4, 2), (3, 2), False),
+    ]
+
+
+@pytest.mark.parametrize(
+    'mode, detection_waits, alignment_waits',
+    [
+        (StageTwoPointTwo.Request.STANDARD, [2.0], [2.0]),
+        (StageTwoPointTwo.Request.SKIP, [], []),
+        (StageTwoPointTwo.Request.ROUTE, [], [2.0]),
+    ],
+)
+def test_mode_dependencies(mode, detection_waits, alignment_waits):
+    controller = make_controller()
+    controller.mode = mode
+
+    controller.wait_for_dependencies()
+
+    assert controller.detection_client.wait_timeouts == detection_waits
+    assert controller.align_client.wait_timeouts == alignment_waits
+
+
+def test_standard_mode_cache_reset_clears_previous_task_results():
+    controller = make_controller()
+    controller.cell_detection_results[2][1] = 'true'
+
+    controller.reset_detection_results()
+
+    assert all(
+        value is None
+        for row in controller.cell_detection_results
+        for value in row
+    )
+
+
+@pytest.mark.parametrize(
+    'current, target, loaded_count, expected_mode',
+    [
+        ((4, 2), (4, 1), 0, 1),
+        ((4, 2), (4, 1), 2, 2),
+        ((3, 2), (3, 1), 0, 3),
+        ((3, 2), (3, 1), 1, 5),
+        ((3, 2), (3, 1), 2, 4),
+    ],
+)
+def test_route_pickup_preserves_alignment_and_load_modes(
+        current, target, loaded_count, expected_mode):
+    controller = make_controller()
+    controller.get_logger = lambda: FakeLogger()
+    controller.loaded_count = loaded_count
+    alignments = []
+    load_modes = []
+    controller.move_to_pose = lambda *pose: None
+    controller.align_kfs = lambda: alignments.append(True)
+    controller.load_kfs = lambda mode: load_modes.append(mode)
+
+    controller.pickup_kfs(current, target)
+
+    assert alignments == [True]
+    assert load_modes == [expected_mode]
+
+
+def test_route_pickup_preserves_full_load_release_behavior():
+    controller = make_controller()
+    controller.get_logger = lambda: FakeLogger()
+    controller.loaded_count = 3
+    controller.arrival_direction = (-1.0, 0.0)
+    controller.move_to_pose = lambda *pose: None
+    controller.align_kfs = lambda: None
+    releases = []
+    load_modes = []
+
+    def release():
+        releases.append(True)
+        controller.loaded_count -= 1
+
+    controller.release_kfs = release
+    controller.load_kfs = lambda mode: load_modes.append(mode)
+
+    controller.pickup_kfs((4, 2), (4, 1))
+
+    assert releases == [True]
+    assert load_modes == [2]
+
+
 def test_move_to_pose_uses_odin_source_and_absolute_values():
     controller = make_controller()
 
@@ -118,6 +434,81 @@ def test_move_to_pose_failure_raises():
 
     with pytest.raises(RuntimeError, match='MoveToPose failed'):
         controller.move_to_pose(0.0, 0.0, 0.0)
+
+
+@pytest.mark.parametrize(
+    'team, expected_y',
+    [
+        (StageTwoPointTwo.Request.RED, -3.0),
+        (StageTwoPointTwo.Request.BLUE, 3.0),
+    ],
+)
+def test_servo_to_initial_cell_uses_team_grid_pose(team, expected_y):
+    controller = make_controller()
+    controller.team = team
+    targets = []
+    controller.move_to_pose = lambda *target: targets.append(target)
+    controller.get_logger = lambda: FakeLogger()
+
+    controller.servo_to_initial_cell()
+
+    assert targets == [pytest.approx((3.4, expected_y, math.pi))]
+
+
+def test_initial_servo_failure_prevents_stage_path_execution():
+    controller = make_controller()
+    controller.loaded_count = 0
+    controller.get_logger = lambda: FakeLogger()
+    controller.move_to_pose = lambda *_target: (_ for _ in ()).throw(
+        RuntimeError('initial servo failed'))
+    executed = []
+    controller.execute_task = lambda decision: executed.append(decision)
+    response = SimpleNamespace(success=None, message='', loaded_count=0)
+    request = SimpleNamespace(
+        team=StageTwoPointTwo.Request.RED,
+        loaded_count=0,
+        mode=StageTwoPointTwo.Request.SKIP,
+        fake_kfs_decision=StageTwoPointTwo.Request.LEFT,
+        move_cells=[],
+        load_cells=[],
+    )
+
+    result = controller.handle_task(request, response)
+
+    assert not result.success
+    assert result.message == 'initial servo failed'
+    assert executed == []
+
+
+@pytest.mark.parametrize(
+    'mode, decision, moves',
+    [
+        (StageTwoPointTwo.Request.STANDARD, StageTwoPointTwo.Request.LEFT, []),
+        (StageTwoPointTwo.Request.SKIP, StageTwoPointTwo.Request.RIGHT, []),
+        (StageTwoPointTwo.Request.ROUTE, 0, default_route_messages(1)),
+    ],
+)
+def test_all_task_modes_servo_before_executing_path(mode, decision, moves):
+    controller = make_controller()
+    actions = []
+    controller.wait_for_dependencies = lambda: actions.append('dependencies')
+    controller.servo_to_initial_cell = lambda: actions.append('servo')
+    controller.execute_task = lambda value: (
+        actions.append(('execute', value)) or (0, 1))
+    response = SimpleNamespace(success=None, message='', loaded_count=0)
+    request = SimpleNamespace(
+        team=StageTwoPointTwo.Request.RED,
+        loaded_count=0,
+        mode=mode,
+        fake_kfs_decision=decision,
+        move_cells=moves,
+        load_cells=[],
+    )
+
+    result = controller.handle_task(request, response)
+
+    assert result.success
+    assert actions == ['dependencies', 'servo', ('execute', decision)]
 
 
 @pytest.mark.parametrize(
@@ -287,6 +678,60 @@ def test_exit_parameter_update_rejects_non_finite_derived_target():
     assert controller.exit_x_offset == 2.9
 
 
+def test_all_runtime_parameters_update_and_geometry_resets_cache():
+    controller = make_controller()
+    controller.cell_detection_results[2][1] = 'true'
+
+    result = controller._on_parameters_changed([
+        SimpleNamespace(name='move_timeout_sec', value=40.0),
+        SimpleNamespace(name='detection_sample_count', value=12),
+        SimpleNamespace(name='higher_kfs_edge_offset', value=0.25),
+        SimpleNamespace(name='forward_x', value=list(controller.forward_x)),
+    ])
+
+    assert result.successful
+    assert controller.move_timeout_sec == pytest.approx(40.0)
+    assert controller.detection_sample_count == 12
+    assert controller.higher_kfs_edge_offset == pytest.approx(0.25)
+    assert all(
+        value is None
+        for row in controller.cell_detection_results
+        for value in row
+    )
+
+
+def test_invalid_geometry_update_rolls_back_all_values():
+    controller = make_controller()
+    original_timeout = controller.move_timeout_sec
+    original_heights = controller.cell_heights
+
+    result = controller._on_parameters_changed([
+        SimpleNamespace(name='move_timeout_sec', value=40.0),
+        SimpleNamespace(name='cell_heights', value=[0.0]),
+    ])
+
+    assert not result.successful
+    assert controller.move_timeout_sec == pytest.approx(original_timeout)
+    assert controller.cell_heights == original_heights
+
+
+def test_grid_parameters_cannot_change_during_active_task():
+    controller = make_controller()
+    controller.service_lock.acquire()
+    try:
+        result = controller._on_parameters_changed([
+            SimpleNamespace(
+                name='forward_x',
+                value=list(controller.forward_x),
+            ),
+        ])
+    finally:
+        controller.service_lock.release()
+
+    assert not result.successful
+    assert 'while a task is active' in result.reason
+
+
 def test_move_one_cell_computes_step_distance_from_odin_pose():
     controller = make_controller()
     controller.get_logger = lambda: FakeLogger()
@@ -315,7 +760,7 @@ def test_move_one_cell_computes_step_distance_from_odin_pose():
 def test_execute_task_skip_mode_follows_forward_path():
     controller = make_controller()
     controller.get_logger = lambda: FakeLogger()
-    controller._skip_kfs_detection = True
+    controller.mode = StageTwoPointTwo.Request.SKIP
     controller.loaded_count = 0
     controller.arrival_direction = None
     moves = []

@@ -1,0 +1,7 @@
+string RED=red
+string BLUE=blue
+string team
+uint8 loaded_count
+---
+bool success
+string message

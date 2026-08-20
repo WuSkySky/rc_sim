@@ -1,11 +1,16 @@
 uint8 LEFT=1
 uint8 RIGHT=2
+uint8 STANDARD=0
+uint8 SKIP=1
+uint8 ROUTE=2
 string RED=red
 string BLUE=blue
 string team
 uint8 fake_kfs_decision
 uint8 loaded_count
-bool skip_kfs_detection
+uint8 mode
+CellIndex[<=18] move_cells
+CellIndex[<=18] load_cells
 ---
 bool success
 string message

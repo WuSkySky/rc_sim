@@ -20,6 +20,7 @@
 
     detection_sample_count: 10
 
+    # 到达目标格后再切换底盘高度；5_1、5_3 使用 lift_up，5_2 使用 lift_down。
     lift_up_front: 0.20
     lift_up_rear: 0.20
     # 任务开始时先把升降抬到这个高度，避免机构贴地。

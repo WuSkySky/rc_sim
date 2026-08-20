@@ -1,0 +1,28 @@
+/stage_three:
+  ros__parameters:
+    dependency_timeout_sec: 2.0
+    relocalization_timeout_sec: 5.0
+    move_timeout_sec: 35.0
+    pop_timeout_sec: 70.0
+    kfs_lift_timeout_sec: 15.0
+
+    # 蓝方阶段 2 后续动作终点为 (-5.5, 5.4, pi)。阶段 3 首先将其
+    # X 减小 0.19 m、Y 增大 0.13 m 后重定位；红方仅镜像 Y。
+    blue_relocalization_pose: [-5.69, 5.53, 0.0, 0.0, 0.0, 3.141592653589793]
+
+    # 三段放置目标由阶段 2 离场终点 X、首段偏移、段间距以及重定位后的
+    # Y 偏移共同生成。蓝方默认目标依次为：
+    # (-5.29, 10.16, pi)、(-4.75, 10.16, pi)、(-4.21, 10.16, pi)。
+    stage_two_exit_endpoint_x: -5.5
+    first_target_x_offset: 0.21
+    target_x_spacing: 0.54
+    target_y_offset: 4.63
+
+    # 每段 POP 后均用 Odin 相对位置伺服后退。最后一段替换中间后退距离。
+    intermediate_backoff_distance: 0.25
+    standard_final_backoff_distance: 3.0
+    single_final_backoff_distance: 2.0
+
+    # 最后一个 KFS 在 POP 模式 2 前，将夹爪升降绝对抬升至 0.35 m。
+    kfs_lift_height: 0.35
+    kfs_lift_tolerance: 0.005

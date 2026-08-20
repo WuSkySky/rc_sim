@@ -24,6 +24,7 @@ from robot_r2_interfaces.srv import (
     StageTwoPointOne,
     StageTwoPointTwo,
     StageTwoPointTwoExit,
+    StageThree,
     TraverseStep,
 )
 from std_msgs.msg import Float64
@@ -290,6 +291,24 @@ def parse_relocalization_values(raw_values):
     return tuple(values)
 
 
+def parse_stage_two_point_one_route(raw_value):
+    parts = [part.strip() for part in str(raw_value).split(',')]
+    if not parts or any(not part for part in parts):
+        raise ValueError('2.1 路线不能为空，格式示例：3,1,2')
+    try:
+        route = tuple(int(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError(
+            '2.1 路线只能填写用逗号分隔的整数') from exc
+    if len(route) > 3:
+        raise ValueError('2.1 路线最多包含 3 个格子')
+    if any(cell not in (1, 2, 3) for cell in route):
+        raise ValueError('2.1 路线格子只能是 1、2、3')
+    if len(set(route)) != len(route):
+        raise ValueError('2.1 路线不能包含重复格子')
+    return route
+
+
 def summarize_named_parameter_load_result(
         display_name, expected_names, returncode, stdout, stderr):
     output_lines = [
@@ -370,6 +389,7 @@ class GuiControlNode(Node):
     STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
     STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
     STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
+    STAGE_THREE_SERVICE = '/r2/stage_three'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
 
     # Step2 测试重定位位姿：base_link 在 map 中的目标位姿
@@ -485,13 +505,17 @@ class GuiControlNode(Node):
         self.stage_one_request_in_flight = False
         self.stage_one_team = None
         self.stage_two_point_one_request_in_flight = False
-        self.stage_two_point_one_skip = None
+        self.stage_two_point_one_mode = None
+        self.stage_two_point_one_route = ()
         self.stage_two_point_one_team = None
         self.stage_two_point_two_request_in_flight = False
-        self.stage_two_point_two_skip = None
+        self.stage_two_point_two_mode = None
         self.stage_two_point_two_team = None
         self.stage_two_point_two_exit_request_in_flight = False
         self.stage_two_point_two_exit_team = None
+        self.stage_three_request_in_flight = False
+        self.stage_three_team = None
+        self.stage_three_loaded_count = None
         self.kfs_action_request_in_flight = False
         self.kfs_parameter_load_in_flight = False
         self.stage_one_parameter_load_in_flight = False
@@ -610,6 +634,8 @@ class GuiControlNode(Node):
             StageTwoPointTwo, self.STAGE_TWO_POINT_TWO_SERVICE)
         self.stage_two_point_two_exit_client = self.create_client(
             StageTwoPointTwoExit, self.STAGE_TWO_POINT_TWO_EXIT_SERVICE)
+        self.stage_three_client = self.create_client(
+            StageThree, self.STAGE_THREE_SERVICE)
         self.motion_timer = self.create_timer(
             1.0 / self.motion_config['motion_publish_rate'],
             self._publish_motion_tick,
@@ -1211,6 +1237,14 @@ class GuiControlNode(Node):
             return '蓝方'
         raise ValueError(f'Unknown Stage 2 team: {team}')
 
+    @staticmethod
+    def _stage_three_team_label(team):
+        if team == StageThree.Request.RED:
+            return '红方'
+        if team == StageThree.Request.BLUE:
+            return '蓝方'
+        raise ValueError(f'Unknown Stage 3 team: {team}')
+
     @classmethod
     def _stage_two_relocalization_pose(cls, base_pose, team):
         cls._stage_two_team_label(team)
@@ -1309,9 +1343,27 @@ class GuiControlNode(Node):
             self.stage_one_team = None
         self._queue_status(message)
 
-    def request_stage_two_point_one(self, team, skip):
+    @staticmethod
+    def _stage_two_point_one_mode_label(mode, route_cells=()):
+        if mode == StageTwoPointOne.Request.STANDARD:
+            return '正常'
+        if mode == StageTwoPointOne.Request.SKIP:
+            return 'skip'
+        if mode == StageTwoPointOne.Request.ROUTE:
+            route_text = ','.join(str(cell) for cell in route_cells)
+            return f'路线[{route_text}]'
+        raise ValueError(f'Unknown Stage 2.1 mode: {mode}')
+
+    def request_stage_two_point_one(self, team, mode, route_cells=()):
         try:
             team_label = self._stage_two_team_label(team)
+            route = tuple(int(cell) for cell in route_cells)
+            mode_label = self._stage_two_point_one_mode_label(mode, route)
+            if mode == StageTwoPointOne.Request.ROUTE:
+                route = parse_stage_two_point_one_route(
+                    ','.join(str(cell) for cell in route))
+            elif route:
+                raise ValueError('非路线模式不能携带 2.1 路线')
         except ValueError as exc:
             return False, str(exc)
         with self.state_lock:
@@ -1325,7 +1377,8 @@ class GuiControlNode(Node):
             self.velocity_test_kind = None
             self.velocity_test_deadline = None
             self.stage_two_point_one_request_in_flight = True
-            self.stage_two_point_one_skip = bool(skip)
+            self.stage_two_point_one_mode = int(mode)
+            self.stage_two_point_one_route = route
             self.stage_two_point_one_team = team
             relocalization_pose = self._stage_two_relocalization_pose(
                 self.stage_two_point_one_relocalization_pose, team)
@@ -1338,14 +1391,16 @@ class GuiControlNode(Node):
         except Exception as exc:
             with self.state_lock:
                 self.stage_two_point_one_request_in_flight = False
-                self.stage_two_point_one_skip = None
+                self.stage_two_point_one_mode = None
+                self.stage_two_point_one_route = ()
                 self.stage_two_point_one_team = None
-            return False, f'2.1 {team_label}测试重定位请求发送失败：{exc}'
+            return False, (
+                f'2.1 {team_label}测试重定位请求发送失败：{exc}')
         future.add_done_callback(
             self._on_stage_two_point_one_relocalization_complete)
-        skip_name = 'skip' if skip else '正常'
         return True, (
-            f'2.1 {team_label}{skip_name}测试：正在重定位到测试起点')
+            f'2.1 {team_label}{mode_label}测试：'
+            '正在重定位到测试起点')
 
     def _on_stage_two_point_one_relocalization_complete(self, future):
         with self.state_lock:
@@ -1367,57 +1422,71 @@ class GuiControlNode(Node):
             return
 
         with self.state_lock:
-            skip = self.stage_two_point_one_skip
+            mode = self.stage_two_point_one_mode
+            route = self.stage_two_point_one_route
             team = self.stage_two_point_one_team
         team_label = self._stage_two_team_label(team)
-        skip_name = 'skip' if skip else '正常'
+        mode_label = self._stage_two_point_one_mode_label(mode, route)
         self._queue_status(
-            f'2.1 {team_label}{skip_name}测试：重定位完成，正在调用 2.1')
+            f'2.1 {team_label}{mode_label}测试：'
+            '重定位完成，正在调用 2.1')
 
         request = StageTwoPointOne.Request()
         request.team = team
         request.loaded_count = 0
-        request.skip_kfs_detection = bool(skip)
+        request.mode = mode
+        request.route_cells = list(route)
         try:
             step_future = self.stage_two_point_one_client.call_async(request)
         except Exception as exc:
             self._finish_stage_two_point_one(
-                f'2.1 {team_label}{skip_name}测试请求发送失败：{exc}')
+                f'2.1 {team_label}{mode_label}测试请求发送失败：'
+                f'{exc}')
             return
         step_future.add_done_callback(self._on_stage_two_point_one_complete)
 
     def _on_stage_two_point_one_complete(self, future):
         with self.state_lock:
-            skip = self.stage_two_point_one_skip
+            mode = self.stage_two_point_one_mode
+            route = self.stage_two_point_one_route
             team = self.stage_two_point_one_team
         team_label = self._stage_two_team_label(team)
-        skip_name = 'skip' if skip else '正常'
+        mode_label = self._stage_two_point_one_mode_label(mode, route)
         try:
             response = future.result()
         except Exception as exc:
             self._finish_stage_two_point_one(
-                f'2.1 {team_label}{skip_name}测试调用异常：{exc}')
+                f'2.1 {team_label}{mode_label}测试调用异常：{exc}')
             return
         if response is None:
             self._finish_stage_two_point_one(
-                f'2.1 {team_label}{skip_name}测试失败：无响应')
+                f'2.1 {team_label}{mode_label}测试失败：无响应')
         elif response.success:
             self._finish_stage_two_point_one(
-                f'2.1 {team_label}{skip_name}测试完成：{response.message}')
+                f'2.1 {team_label}{mode_label}测试完成：'
+                f'{response.message}')
         else:
             self._finish_stage_two_point_one(
-                f'2.1 {team_label}{skip_name}测试失败：{response.message}')
+                f'2.1 {team_label}{mode_label}测试失败：'
+                f'{response.message}')
 
     def _finish_stage_two_point_one(self, message):
         with self.state_lock:
             self.stage_two_point_one_request_in_flight = False
-            self.stage_two_point_one_skip = None
+            self.stage_two_point_one_mode = None
+            self.stage_two_point_one_route = ()
             self.stage_two_point_one_team = None
         self._queue_status(message)
 
-    def request_stage_two_point_two(self, team, skip):
+    def request_stage_two_point_two(self, team, mode):
         try:
             team_label = self._stage_two_team_label(team)
+            if mode == StageTwoPointTwo.Request.STANDARD:
+                mode_label = '正常'
+            elif mode == StageTwoPointTwo.Request.SKIP:
+                mode_label = 'skip'
+            else:
+                raise ValueError(f'Unknown Stage 2.2 GUI mode: {mode}')
         except ValueError as exc:
             return False, str(exc)
         with self.state_lock:
@@ -1431,7 +1500,7 @@ class GuiControlNode(Node):
             self.velocity_test_kind = None
             self.velocity_test_deadline = None
             self.stage_two_point_two_request_in_flight = True
-            self.stage_two_point_two_skip = bool(skip)
+            self.stage_two_point_two_mode = int(mode)
             self.stage_two_point_two_team = team
             relocalization_pose = self._stage_two_relocalization_pose(
                 self.stage_two_point_two_relocalization_pose, team)
@@ -1444,14 +1513,13 @@ class GuiControlNode(Node):
         except Exception as exc:
             with self.state_lock:
                 self.stage_two_point_two_request_in_flight = False
-                self.stage_two_point_two_skip = None
+                self.stage_two_point_two_mode = None
                 self.stage_two_point_two_team = None
             return False, f'2.2 {team_label}测试重定位请求发送失败：{exc}'
         future.add_done_callback(
             self._on_stage_two_point_two_relocalization_complete)
-        skip_name = 'skip' if skip else '正常'
         return True, (
-            f'2.2 {team_label}{skip_name}测试：正在重定位到测试起点')
+            f'2.2 {team_label}{mode_label}测试：正在重定位到测试起点')
 
     def _on_stage_two_point_two_relocalization_complete(self, future):
         with self.state_lock:
@@ -1473,52 +1541,62 @@ class GuiControlNode(Node):
             return
 
         with self.state_lock:
-            skip = self.stage_two_point_two_skip
+            mode = self.stage_two_point_two_mode
             team = self.stage_two_point_two_team
         team_label = self._stage_two_team_label(team)
-        skip_name = 'skip' if skip else '正常'
+        mode_label = (
+            'skip'
+            if mode == StageTwoPointTwo.Request.SKIP
+            else '正常'
+        )
         self._queue_status(
-            f'2.2 {team_label}{skip_name}测试：重定位完成，正在调用 2.2')
+            f'2.2 {team_label}{mode_label}测试：重定位完成，正在调用 2.2')
 
         request = StageTwoPointTwo.Request()
         request.team = team
         request.fake_kfs_decision = StageTwoPointTwo.Request.LEFT
         request.loaded_count = 0
-        request.skip_kfs_detection = bool(skip)
+        request.mode = mode
+        request.move_cells = []
+        request.load_cells = []
         try:
             step_future = self.stage_two_point_two_client.call_async(request)
         except Exception as exc:
             self._finish_stage_two_point_two(
-                f'2.2 {team_label}{skip_name}测试请求发送失败：{exc}')
+                f'2.2 {team_label}{mode_label}测试请求发送失败：{exc}')
             return
         step_future.add_done_callback(self._on_stage_two_point_two_complete)
 
     def _on_stage_two_point_two_complete(self, future):
         with self.state_lock:
-            skip = self.stage_two_point_two_skip
+            mode = self.stage_two_point_two_mode
             team = self.stage_two_point_two_team
         team_label = self._stage_two_team_label(team)
-        skip_name = 'skip' if skip else '正常'
+        mode_label = (
+            'skip'
+            if mode == StageTwoPointTwo.Request.SKIP
+            else '正常'
+        )
         try:
             response = future.result()
         except Exception as exc:
             self._finish_stage_two_point_two(
-                f'2.2 {team_label}{skip_name}测试调用异常：{exc}')
+                f'2.2 {team_label}{mode_label}测试调用异常：{exc}')
             return
         if response is None:
             self._finish_stage_two_point_two(
-                f'2.2 {team_label}{skip_name}测试失败：无响应')
+                f'2.2 {team_label}{mode_label}测试失败：无响应')
         elif response.success:
             self._finish_stage_two_point_two(
-                f'2.2 {team_label}{skip_name}测试完成：{response.message}')
+                f'2.2 {team_label}{mode_label}测试完成：{response.message}')
         else:
             self._finish_stage_two_point_two(
-                f'2.2 {team_label}{skip_name}测试失败：{response.message}')
+                f'2.2 {team_label}{mode_label}测试失败：{response.message}')
 
     def _finish_stage_two_point_two(self, message):
         with self.state_lock:
             self.stage_two_point_two_request_in_flight = False
-            self.stage_two_point_two_skip = None
+            self.stage_two_point_two_mode = None
             self.stage_two_point_two_team = None
         self._queue_status(message)
 
@@ -1615,6 +1693,71 @@ class GuiControlNode(Node):
             self.stage_two_point_two_exit_team = None
         self._queue_status(message)
 
+    def request_stage_three(self, team, loaded_count):
+        try:
+            team_label = self._stage_three_team_label(team)
+        except ValueError as exc:
+            return False, str(exc)
+        if loaded_count not in (1, 2, 3):
+            return False, (
+                f'Stage 3 loaded_count must be 1, 2 or 3, '
+                f'got {loaded_count}')
+
+        with self.state_lock:
+            if self._chassis_service_in_flight_locked():
+                return False, '底盘操作正在执行'
+            if self.kfs_action_request_in_flight:
+                return False, 'KFS 动作正在执行'
+            if not self.stage_three_client.service_is_ready():
+                return False, '/r2/stage_three 服务不可用'
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.stage_three_request_in_flight = True
+            self.stage_three_team = team
+            self.stage_three_loaded_count = loaded_count
+
+        self.cmd_vel_publisher.publish(Twist())
+        request = StageThree.Request()
+        request.team = team
+        request.loaded_count = loaded_count
+        try:
+            future = self.stage_three_client.call_async(request)
+        except Exception as exc:
+            with self.state_lock:
+                self.stage_three_request_in_flight = False
+                self.stage_three_team = None
+                self.stage_three_loaded_count = None
+            return False, f'Step3 {team_label}请求发送失败：{exc}'
+        future.add_done_callback(self._on_stage_three_complete)
+        return True, (
+            f'Step3 {team_label}（已有 {loaded_count} 个 KFS）：正在执行')
+
+    def _on_stage_three_complete(self, future):
+        with self.state_lock:
+            team = self.stage_three_team
+            loaded_count = self.stage_three_loaded_count
+        team_label = self._stage_three_team_label(team)
+        prefix = f'Step3 {team_label}（已有 {loaded_count} 个 KFS）'
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_three(f'{prefix}调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_three(f'{prefix}失败：无响应')
+        elif response.success:
+            self._finish_stage_three(f'{prefix}完成：{response.message}')
+        else:
+            self._finish_stage_three(f'{prefix}失败：{response.message}')
+
+    def _finish_stage_three(self, message):
+        with self.state_lock:
+            self.stage_three_request_in_flight = False
+            self.stage_three_team = None
+            self.stage_three_loaded_count = None
+        self._queue_status(message)
+
     def request_kfs_action(self, action, mode=0):
         if action == KfsAction.Request.LOAD:
             mode_labels = {
@@ -1648,6 +1791,8 @@ class GuiControlNode(Node):
         with self.state_lock:
             if self.kfs_action_request_in_flight:
                 return False, 'KFS 动作正在执行'
+            if self.stage_three_request_in_flight:
+                return False, 'Step3 正在执行'
             if not self.kfs_action_client.service_is_ready():
                 return False, '/r2/kfs/action 服务不可用'
             self.kfs_action_request_in_flight = True
@@ -1695,7 +1840,8 @@ class GuiControlNode(Node):
             self.stage_one_request_in_flight or
             self.stage_two_point_one_request_in_flight or
             self.stage_two_point_two_request_in_flight or
-            self.stage_two_point_two_exit_request_in_flight
+            self.stage_two_point_two_exit_request_in_flight or
+            self.stage_three_request_in_flight
         )
 
     def is_pose_request_in_flight(self):
@@ -1708,7 +1854,10 @@ class GuiControlNode(Node):
 
     def is_kfs_action_request_in_flight(self):
         with self.state_lock:
-            return self.kfs_action_request_in_flight
+            return (
+                self.kfs_action_request_in_flight or
+                self.stage_three_request_in_flight
+            )
 
     def request_kfs_parameter_load(self):
         with self.state_lock:
@@ -1971,8 +2120,8 @@ class GuiControlApp:
             name: tk.StringVar(value='0.0')
             for name in RELOCALIZATION_FIELDS
         }
-        self.stage_two_team_value = tk.StringVar(
-            value=StageTwoPointOne.Request.RED)
+        self.team_value = tk.StringVar(value=StageOne.Request.RED)
+        self.stage_two_point_one_route_value = tk.StringVar(value='3,1,2')
         self.status_text = tk.StringVar(value='已就绪')
 
         self.last_lift_command = None
@@ -1994,17 +2143,18 @@ class GuiControlApp:
         self.relocalization_button = None
         self.up_step_test_button = None
         self.down_step_test_button = None
-        self.stage_one_red_button = None
-        self.stage_one_blue_button = None
+        self.stage_one_button = None
         self.stage_one_parameter_load_button = None
         self.step_traverse_parameter_load_button = None
         self.stage_two_point_one_parameter_load_button = None
         self.stage_two_point_two_parameter_load_button = None
         self.stage_two_point_one_skip_button = None
         self.stage_two_point_one_normal_button = None
+        self.stage_two_point_one_route_button = None
         self.stage_two_point_two_skip_button = None
         self.stage_two_point_two_normal_button = None
         self.stage_two_point_two_exit_button = None
+        self.stage_three_buttons = []
         self.kfs_test_button = None
         self.tip_test_button = None
         self.kfs_action_buttons = []
@@ -2136,25 +2286,34 @@ class GuiControlApp:
         self.step_traverse_parameter_load_button.grid(
             row=1, column=0, columnspan=2, sticky='ew', pady=(8, 0))
 
+        team_frame = ttk.LabelFrame(
+            task_column, text='比赛队伍（Step1 / Step2 / Step3）', padding=12)
+        team_frame.grid(row=0, column=0, sticky='ew')
+        ttk.Radiobutton(
+            team_frame,
+            text='红方（负 Y）',
+            variable=self.team_value,
+            value=StageOne.Request.RED,
+        ).grid(row=0, column=0, sticky='w')
+        ttk.Radiobutton(
+            team_frame,
+            text='蓝方（正 Y）',
+            variable=self.team_value,
+            value=StageOne.Request.BLUE,
+        ).grid(row=0, column=1, sticky='w', padx=(8, 0))
+
         stage_one_frame = ttk.LabelFrame(
             task_column, text='Step1', padding=12)
         stage_one_frame.grid(
-            row=0, column=0, sticky='ew')
-        self.stage_one_red_button = ttk.Button(
+            row=1, column=0, sticky='ew', pady=(8, 0))
+        self.stage_one_button = ttk.Button(
             stage_one_frame,
-            text='Step1 红方（重定位后执行）',
-            command=self._start_stage_one_red,
+            text='执行 Step1（重定位后执行）',
+            command=self._start_stage_one,
         )
-        self.stage_one_red_button.grid(row=0, column=0, sticky='ew')
-        self.chassis_buttons.append(self.stage_one_red_button)
-        self.stage_one_blue_button = ttk.Button(
-            stage_one_frame,
-            text='Step1 蓝方（重定位后执行）',
-            command=self._start_stage_one_blue,
-        )
-        self.stage_one_blue_button.grid(
-            row=0, column=1, sticky='ew', padx=(8, 0))
-        self.chassis_buttons.append(self.stage_one_blue_button)
+        self.stage_one_button.grid(
+            row=0, column=0, columnspan=2, sticky='ew')
+        self.chassis_buttons.append(self.stage_one_button)
         self.stage_one_parameter_load_button = ttk.Button(
             stage_one_frame,
             text='从 YAML 写入 Step1 参数',
@@ -2167,23 +2326,6 @@ class GuiControlApp:
             sticky='ew',
             pady=(8, 0),
         )
-
-        stage_two_team_frame = ttk.LabelFrame(
-            task_column, text='Step2 队伍', padding=12)
-        stage_two_team_frame.grid(
-            row=1, column=0, sticky='ew', pady=(8, 0))
-        ttk.Radiobutton(
-            stage_two_team_frame,
-            text='红方（负 Y）',
-            variable=self.stage_two_team_value,
-            value=StageTwoPointOne.Request.RED,
-        ).grid(row=0, column=0, sticky='w')
-        ttk.Radiobutton(
-            stage_two_team_frame,
-            text='蓝方（正 Y）',
-            variable=self.stage_two_team_value,
-            value=StageTwoPointOne.Request.BLUE,
-        ).grid(row=0, column=1, sticky='w', padx=(8, 0))
 
         stage_two_point_one_frame = ttk.LabelFrame(
             task_column, text='Step2.1 测试', padding=12)
@@ -2205,13 +2347,30 @@ class GuiControlApp:
         self.stage_two_point_one_normal_button.grid(
             row=0, column=1, sticky='ew', padx=(8, 0))
         self.chassis_buttons.append(self.stage_two_point_one_normal_button)
+        ttk.Label(
+            stage_two_point_one_frame,
+            text='路线格子（逗号分隔）',
+        ).grid(row=1, column=0, sticky='w', pady=(8, 0))
+        ttk.Entry(
+            stage_two_point_one_frame,
+            textvariable=self.stage_two_point_one_route_value,
+            width=16,
+        ).grid(row=1, column=1, sticky='ew', padx=(8, 0), pady=(8, 0))
+        self.stage_two_point_one_route_button = ttk.Button(
+            stage_two_point_one_frame,
+            text='2.1 测试（路线直接装载）',
+            command=self._start_stage_two_point_one_route,
+        )
+        self.stage_two_point_one_route_button.grid(
+            row=2, column=0, columnspan=2, sticky='ew', pady=(8, 0))
+        self.chassis_buttons.append(self.stage_two_point_one_route_button)
         self.stage_two_point_one_parameter_load_button = ttk.Button(
             stage_two_point_one_frame,
             text='从 YAML 写入 2.1 参数',
             command=self._write_stage_two_point_one_parameters,
         )
         self.stage_two_point_one_parameter_load_button.grid(
-            row=1, column=0, columnspan=2, sticky='ew', pady=(8, 0))
+            row=3, column=0, columnspan=2, sticky='ew', pady=(8, 0))
 
         stage_two_point_two_frame = ttk.LabelFrame(
             task_column, text='Step2.2 测试', padding=12)
@@ -2249,9 +2408,28 @@ class GuiControlApp:
             row=2, column=0, columnspan=2, sticky='ew', pady=(8, 0))
         self.chassis_buttons.append(self.stage_two_point_two_exit_button)
 
+        stage_three_frame = ttk.LabelFrame(
+            task_column, text='Step3', padding=12)
+        stage_three_frame.grid(
+            row=4, column=0, sticky='ew', pady=(8, 0))
+        for column, loaded_count in enumerate((1, 2, 3)):
+            button = ttk.Button(
+                stage_three_frame,
+                text=f'已有 {loaded_count} 个 KFS',
+                command=partial(self._start_stage_three, loaded_count),
+            )
+            button.grid(
+                row=0,
+                column=column,
+                sticky='ew',
+                padx=(0 if column == 0 else 8, 0),
+            )
+            self.stage_three_buttons.append(button)
+            self.chassis_buttons.append(button)
+
         kfs_test_frame = ttk.LabelFrame(
             task_column, text='KFS 测试', padding=12)
-        kfs_test_frame.grid(row=4, column=0, sticky='ew', pady=(8, 0))
+        kfs_test_frame.grid(row=5, column=0, sticky='ew', pady=(8, 0))
         self.kfs_test_button = ttk.Button(
             kfs_test_frame,
             command=self._start_kfs_alignment_test,
@@ -2484,37 +2662,52 @@ class GuiControlApp:
         _, message = self.node.request_down_step_test()
         self.status_text.set(message)
 
-    def _start_stage_one_red(self):
-        _, message = self.node.request_stage_one(StageOne.Request.RED)
-        self.status_text.set(message)
-
-    def _start_stage_one_blue(self):
-        _, message = self.node.request_stage_one(StageOne.Request.BLUE)
+    def _start_stage_one(self):
+        _, message = self.node.request_stage_one(self.team_value.get())
         self.status_text.set(message)
 
     def _start_stage_two_point_one_skip(self):
         _, message = self.node.request_stage_two_point_one(
-            self.stage_two_team_value.get(), skip=True)
+            self.team_value.get(), StageTwoPointOne.Request.SKIP)
         self.status_text.set(message)
 
     def _start_stage_two_point_one_normal(self):
         _, message = self.node.request_stage_two_point_one(
-            self.stage_two_team_value.get(), skip=False)
+            self.team_value.get(), StageTwoPointOne.Request.STANDARD)
+        self.status_text.set(message)
+
+    def _start_stage_two_point_one_route(self):
+        try:
+            route = parse_stage_two_point_one_route(
+                self.stage_two_point_one_route_value.get())
+        except ValueError as exc:
+            self.status_text.set(str(exc))
+            return
+        _, message = self.node.request_stage_two_point_one(
+            self.team_value.get(),
+            StageTwoPointOne.Request.ROUTE,
+            route,
+        )
         self.status_text.set(message)
 
     def _start_stage_two_point_two_skip(self):
         _, message = self.node.request_stage_two_point_two(
-            self.stage_two_team_value.get(), skip=True)
+            self.team_value.get(), StageTwoPointTwo.Request.SKIP)
         self.status_text.set(message)
 
     def _start_stage_two_point_two_normal(self):
         _, message = self.node.request_stage_two_point_two(
-            self.stage_two_team_value.get(), skip=False)
+            self.team_value.get(), StageTwoPointTwo.Request.STANDARD)
         self.status_text.set(message)
 
     def _start_stage_two_point_two_exit(self):
         _, message = self.node.request_stage_two_point_two_exit(
-            self.stage_two_team_value.get())
+            self.team_value.get())
+        self.status_text.set(message)
+
+    def _start_stage_three(self, loaded_count):
+        _, message = self.node.request_stage_three(
+            self.team_value.get(), loaded_count)
         self.status_text.set(message)
 
     def _start_kfs_action_test(self, action, mode):

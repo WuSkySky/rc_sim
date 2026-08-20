@@ -3,11 +3,11 @@ kfs_roi:
     target_processing_rate: 30.0
     visualization_enabled: false
 
-    blue_hsv_lower: [95, 60, 20]
-    blue_hsv_upper: [135, 255, 255]
-    red_low_hsv_lower: [0, 60, 20]
-    red_low_hsv_upper: [15, 255, 255]
-    red_high_hsv_lower: [165, 60, 20]
+    blue_hsv_lower: [98, 80, 35]
+    blue_hsv_upper: [133, 255, 255]
+    red_low_hsv_lower: [0, 80, 35]
+    red_low_hsv_upper: [13, 255, 255]
+    red_high_hsv_lower: [168, 80, 35]
     red_high_hsv_upper: [179, 255, 255]
     column_threshold_ratio: 0.7
     morphology_kernel_size: 5

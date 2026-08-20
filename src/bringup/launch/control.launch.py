@@ -38,6 +38,11 @@ def generate_launch_description():
         'config',
         'stage_two_point_two.yaml',
     )
+    stage_three_config = os.path.join(
+        control_pkg,
+        'config',
+        'stage_three.yaml',
+    )
     kfs_loader_config = os.path.join(
         control_pkg,
         'config',
@@ -127,6 +132,13 @@ def generate_launch_description():
                 LaunchConfiguration('kfs_get_type_service'),
             ),
         ],
+        output='screen',
+    )
+
+    stage_three = Node(
+        package='robot_r2_control',
+        executable='stage_three',
+        parameters=[stage_three_config],
         output='screen',
     )
 
@@ -225,6 +237,7 @@ def generate_launch_description():
         stage_two_control,
         stage_two_point_one,
         stage_two_point_two,
+        stage_three,
         kfs_loader_control,
         step_traverse,
         chassis_pose_servo,

@@ -48,7 +48,10 @@ class StageTwoPointTwoController(Node):
         self.loaded_count = 0
         self.team = StageTwoPointTwo.Request.RED
         self.arrival_direction = None
-        self._skip_kfs_detection = False
+        self.mode = StageTwoPointTwo.Request.STANDARD
+        self.move_cells = ()
+        self.load_cells = ()
+        self.route_load_targets = ()
 
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('pose_timeout_sec', 2.0)
@@ -225,130 +228,202 @@ class StageTwoPointTwoController(Node):
 
     def _on_parameters_changed(self, parameters):
         updates = {parameter.name: parameter.value for parameter in parameters}
-        new_pose = None
-        new_offset = None
-        new_lift_height = None
-        new_lift_timeout = None
+        positive_names = {
+            'dependency_timeout_sec',
+            'pose_timeout_sec',
+            'move_timeout_sec',
+            'traverse_timeout_sec',
+            'detection_timeout_sec',
+            'align_timeout_sec',
+            'load_timeout_sec',
+            'release_timeout_sec',
+            'higher_kfs_edge_offset',
+            'lower_kfs_edge_offset',
+            'release_edge_offset',
+            'lift_timeout_sec',
+        }
+        non_negative_names = {
+            'chassis_front_offset',
+            'exit_x_offset',
+            'exit_lift_height',
+        }
+        integer_names = {
+            'initial_forward_index',
+            'initial_lateral_index',
+            'terminal_forward_index',
+            'detection_sample_count',
+        }
+        geometry_names = {
+            'forward_x',
+            'lateral_y',
+            'cell_heights',
+            'initial_forward_index',
+            'initial_lateral_index',
+            'terminal_forward_index',
+        }
+        if geometry_names.intersection(updates) and self.service_lock.locked():
+            return SetParametersResult(
+                successful=False,
+                reason='grid parameters cannot change while a task is active',
+            )
 
-        if 'exit_cell_0_0_pose' in updates:
-            value = updates['exit_cell_0_0_pose']
-            if not isinstance(value, (list, tuple)) or len(value) != 3:
-                return SetParametersResult(
-                    successful=False,
-                    reason='exit_cell_0_0_pose must contain exactly 3 values',
-                )
-            if any(
-                isinstance(item, bool) or
-                not isinstance(item, (int, float))
-                for item in value
-            ):
-                return SetParametersResult(
-                    successful=False,
-                    reason='exit_cell_0_0_pose must contain numeric values',
-                )
-            new_pose = tuple(float(item) for item in value)
-            if not all(math.isfinite(item) for item in new_pose):
-                return SetParametersResult(
-                    successful=False,
-                    reason='exit_cell_0_0_pose must contain finite values',
-                )
-
-        if 'exit_x_offset' in updates:
-            value = updates['exit_x_offset']
-            if (
-                isinstance(value, bool) or
-                not isinstance(value, (int, float))
-            ):
-                return SetParametersResult(
-                    successful=False,
-                    reason='exit_x_offset must be numeric',
-                )
-            new_offset = float(value)
-            if not math.isfinite(new_offset) or new_offset < 0.0:
-                return SetParametersResult(
-                    successful=False,
-                    reason='exit_x_offset must be finite and non-negative',
-                )
-
-        if 'exit_lift_height' in updates:
-            value = updates['exit_lift_height']
-            if (
-                isinstance(value, bool) or
-                not isinstance(value, (int, float))
-            ):
-                return SetParametersResult(
-                    successful=False,
-                    reason='exit_lift_height must be numeric',
-                )
-            new_lift_height = float(value)
-            if not math.isfinite(new_lift_height) or new_lift_height < 0.0:
-                return SetParametersResult(
-                    successful=False,
-                    reason=(
-                        'exit_lift_height must be finite and non-negative'),
-                )
-
-        if 'lift_timeout_sec' in updates:
-            value = updates['lift_timeout_sec']
-            if (
-                isinstance(value, bool) or
-                not isinstance(value, (int, float))
-            ):
-                return SetParametersResult(
-                    successful=False,
-                    reason='lift_timeout_sec must be numeric',
-                )
-            new_lift_timeout = float(value)
-            if not math.isfinite(new_lift_timeout) or new_lift_timeout <= 0.0:
-                return SetParametersResult(
-                    successful=False,
-                    reason='lift_timeout_sec must be finite and positive',
-                )
+        def numeric(name, value):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f'{name} must be numeric')
+            converted = float(value)
+            if not math.isfinite(converted):
+                raise ValueError(f'{name} must be finite')
+            return converted
 
         with self.config_lock:
-            candidate_pose = (
-                self.exit_cell_0_0_pose if new_pose is None else new_pose)
-            candidate_offset = (
-                self.exit_x_offset if new_offset is None else new_offset)
-            candidate_lift_height = (
-                self.exit_lift_height
-                if new_lift_height is None else new_lift_height)
-            candidate_lift_timeout = (
-                self.lift_timeout_sec
-                if new_lift_timeout is None else new_lift_timeout)
+            candidate = {
+                name: getattr(self, name)
+                for name in (
+                    *positive_names,
+                    *non_negative_names,
+                    'forward_x',
+                    'lateral_y',
+                    'cell_heights',
+                    'terminal_forward_index',
+                    'detection_sample_count',
+                    'exit_cell_0_0_pose',
+                )
+            }
+            candidate['initial_forward_index'] = self.initial_index[0]
+            candidate['initial_lateral_index'] = self.initial_index[1]
+
             try:
-                self._validate_exit_config(candidate_pose, candidate_offset)
+                for name, value in updates.items():
+                    if name in positive_names:
+                        converted = numeric(name, value)
+                        if converted <= 0.0:
+                            raise ValueError(f'{name} must be positive')
+                        candidate[name] = converted
+                    elif name in non_negative_names:
+                        converted = numeric(name, value)
+                        if converted < 0.0:
+                            raise ValueError(
+                                f'{name} must be non-negative')
+                        candidate[name] = converted
+                    elif name in integer_names:
+                        if (
+                            isinstance(value, bool) or
+                            not isinstance(value, int)
+                        ):
+                            raise ValueError(f'{name} must be an integer')
+                        candidate[name] = int(value)
+                    elif name in ('forward_x', 'lateral_y'):
+                        if not isinstance(value, (list, tuple)) or not value:
+                            raise ValueError(f'{name} must not be empty')
+                        candidate[name] = tuple(
+                            numeric(name, item) for item in value)
+                    elif name == 'cell_heights':
+                        if not isinstance(value, (list, tuple)) or not value:
+                            raise ValueError('cell_heights must not be empty')
+                        heights = []
+                        for item in value:
+                            if (
+                                isinstance(item, bool) or
+                                not isinstance(item, (int, float))
+                            ):
+                                raise ValueError(
+                                    'cell_heights must be numeric')
+                            converted = float(item)
+                            if math.isinf(converted):
+                                raise ValueError(
+                                    'cell_heights must not contain infinity')
+                            heights.append(converted)
+                        candidate[name] = tuple(heights)
+                    elif name == 'exit_cell_0_0_pose':
+                        if (
+                            not isinstance(value, (list, tuple)) or
+                            len(value) != 3
+                        ):
+                            raise ValueError(
+                                'exit_cell_0_0_pose must contain exactly 3 '
+                                'values')
+                        candidate[name] = tuple(
+                            numeric(name, item) for item in value)
+
+                expected_height_count = (
+                    len(candidate['forward_x']) *
+                    len(candidate['lateral_y'])
+                )
+                if len(candidate['cell_heights']) != expected_height_count:
+                    raise ValueError(
+                        'cell_heights must contain '
+                        f'{expected_height_count} values')
+                if candidate['detection_sample_count'] <= 0:
+                    raise ValueError(
+                        'detection_sample_count must be positive')
+
+                initial_index = (
+                    candidate['initial_forward_index'],
+                    candidate['initial_lateral_index'],
+                )
+                self.validate_grid_index(
+                    initial_index,
+                    candidate['forward_x'],
+                    candidate['lateral_y'],
+                    candidate['cell_heights'],
+                )
+                if not (
+                    0 <= candidate['terminal_forward_index'] <
+                    len(candidate['forward_x'])
+                ):
+                    raise ValueError(
+                        'terminal_forward_index is out of range')
+                self._validate_exit_config(
+                    candidate['exit_cell_0_0_pose'],
+                    candidate['exit_x_offset'],
+                )
             except ValueError as exc:
                 return SetParametersResult(
                     successful=False, reason=str(exc))
-            self.exit_cell_0_0_pose = candidate_pose
-            self.exit_x_offset = candidate_offset
-            self.exit_lift_height = candidate_lift_height
-            self.lift_timeout_sec = candidate_lift_timeout
+
+            for name in positive_names | non_negative_names:
+                setattr(self, name, candidate[name])
+            self.forward_x = candidate['forward_x']
+            self.lateral_y = candidate['lateral_y']
+            self.cell_heights = candidate['cell_heights']
+            self.initial_index = initial_index
+            self.terminal_forward_index = candidate[
+                'terminal_forward_index']
+            self.detection_sample_count = candidate[
+                'detection_sample_count']
+            self.exit_cell_0_0_pose = candidate['exit_cell_0_0_pose']
+            if geometry_names.intersection(updates):
+                self._reset_detection_results_locked()
         return SetParametersResult(successful=True)
 
-    def get_cell(self, index):
+    @staticmethod
+    def validate_grid_index(index, forward_x, lateral_y, cell_heights):
         forward_index, lateral_index = index
-        if not 0 <= forward_index < len(self.forward_x):
+        if not 0 <= forward_index < len(forward_x):
             raise ValueError(f'forward index {forward_index} is invalid')
-
         lateral_offset = lateral_index - 1
-        if not 0 <= lateral_offset < len(self.lateral_y):
+        if not 0 <= lateral_offset < len(lateral_y):
             raise ValueError(f'lateral index {lateral_index} is invalid')
-
-        height_index = (
-            forward_index * len(self.lateral_y) + lateral_offset)
-        height = self.cell_heights[height_index]
-        if not math.isfinite(height):
+        height_index = forward_index * len(lateral_y) + lateral_offset
+        if not math.isfinite(cell_heights[height_index]):
             raise ValueError(f'cell {index} is not traversable')
+
+    def get_cell(self, index):
+        with self.config_lock:
+            forward_x = self.forward_x
+            lateral_y = self.lateral_y
+            cell_heights = self.cell_heights
+            team = self.team
+        self.validate_grid_index(
+            index, forward_x, lateral_y, cell_heights)
+        forward_index, lateral_index = index
+        lateral_offset = lateral_index - 1
+        height_index = forward_index * len(lateral_y) + lateral_offset
+        red_y = lateral_y[lateral_offset]
         return (
-            self.forward_x[forward_index],
-            (
-                self.lateral_y[lateral_offset]
-                if self.team == StageTwoPointTwo.Request.RED
-                else -self.lateral_y[lateral_offset]
-            ),
-            height,
+            forward_x[forward_index],
+            red_y if team == StageTwoPointTwo.Request.RED else -red_y,
+            cell_heights[height_index],
         )
 
     def on_pose_feedback(self, msg):
@@ -365,7 +440,9 @@ class StageTwoPointTwoController(Node):
             self.pose_condition.notify_all()
 
     def wait_for_pose(self):
-        deadline = time.monotonic() + self.pose_timeout_sec
+        with self.config_lock:
+            pose_timeout_sec = self.pose_timeout_sec
+        deadline = time.monotonic() + pose_timeout_sec
         with self.pose_condition:
             while self.current_pose is None:
                 remaining = deadline - time.monotonic()
@@ -378,13 +455,26 @@ class StageTwoPointTwoController(Node):
         with self.service_lock:
             self.loaded_count = int(request.loaded_count)
             self.team = request.team
-            self._skip_kfs_detection = bool(request.skip_kfs_detection)
+            self.mode = int(request.mode)
             self.arrival_direction = None
             try:
                 self.validate_team(self.team)
-                self.validate_decision(request.fake_kfs_decision)
                 self.validate_loaded_count(self.loaded_count)
+                (
+                    self.move_cells,
+                    self.load_cells,
+                    self.route_load_targets,
+                ) = self.validate_mode_and_routes(
+                    self.mode,
+                    request.move_cells,
+                    request.load_cells,
+                )
+                if self.mode != StageTwoPointTwo.Request.ROUTE:
+                    self.validate_decision(request.fake_kfs_decision)
+                if self.mode == StageTwoPointTwo.Request.STANDARD:
+                    self.reset_detection_results()
                 self.wait_for_dependencies()
+                self.servo_to_initial_cell()
                 final_index = self.execute_task(
                     request.fake_kfs_decision)
             except Exception as exc:
@@ -423,12 +513,14 @@ class StageTwoPointTwoController(Node):
             try:
                 lift_height, lift_timeout_sec, targets = self.exit_config(
                     request.team)
+                with self.config_lock:
+                    dependency_timeout_sec = self.dependency_timeout_sec
                 if not self.lift_client.wait_for_service(
-                    timeout_sec=self.dependency_timeout_sec
+                    timeout_sec=dependency_timeout_sec
                 ):
                     raise RuntimeError('SetLift service unavailable')
                 if not self.move_client.wait_for_service(
-                    timeout_sec=self.dependency_timeout_sec
+                    timeout_sec=dependency_timeout_sec
                 ):
                     raise RuntimeError('MoveToPose service unavailable')
                 self.set_lift(lift_height, lift_timeout_sec)
@@ -485,18 +577,145 @@ class StageTwoPointTwoController(Node):
                 f'loaded_count must be between 0 and 3, got '
                 f'{loaded_count}')
 
+    @staticmethod
+    def cell_index(message):
+        return int(message.forward_index), int(message.lateral_index)
+
+    @staticmethod
+    def index_delta(source_index, target_index):
+        return (
+            target_index[0] - source_index[0],
+            target_index[1] - source_index[1],
+        )
+
+    def validate_route_step(self, source_index, target_index):
+        delta = self.index_delta(source_index, target_index)
+        if abs(delta[0]) + abs(delta[1]) != 1:
+            raise ValueError(
+                f'route cells {source_index} and {target_index} '
+                'must be adjacent')
+        source = self.get_cell(source_index)
+        target = self.get_cell(target_index)
+        height_difference = target[2] - source[2]
+        if not math.isclose(
+            abs(height_difference), 1.0, rel_tol=0.0, abs_tol=1e-9
+        ):
+            raise ValueError(
+                f'route move {source_index}->{target_index} must cross '
+                f'exactly one height level, got {height_difference}')
+        return delta
+
+    def validate_mode_and_routes(self, mode, move_messages, load_messages):
+        valid_modes = (
+            StageTwoPointTwo.Request.STANDARD,
+            StageTwoPointTwo.Request.SKIP,
+            StageTwoPointTwo.Request.ROUTE,
+        )
+        if mode not in valid_modes:
+            raise ValueError(f'unknown Stage 2.2 mode: {mode}')
+
+        move_cells = tuple(self.cell_index(item) for item in move_messages)
+        load_cells = tuple(self.cell_index(item) for item in load_messages)
+        if mode != StageTwoPointTwo.Request.ROUTE:
+            if move_cells or load_cells:
+                raise ValueError(
+                    'move_cells and load_cells must be empty unless mode '
+                    'is ROUTE')
+            return (), (), ()
+
+        if not move_cells:
+            raise ValueError('move_cells must not be empty in ROUTE mode')
+        if self.initial_index != (5, 2):
+            raise ValueError(
+                'ROUTE mode requires initial_index to be (5, 2)')
+        if move_cells[0] != self.POINT_ONE_COVERED_ENTRY:
+            raise ValueError('ROUTE move_cells must start at (4, 2)')
+        if move_cells[-1] not in ((1, 1), (1, 3)):
+            raise ValueError(
+                'ROUTE move_cells must end at (1, 1) or (1, 3)')
+        if len(set(move_cells)) != len(move_cells):
+            raise ValueError('move_cells must not contain duplicates')
+        if len(set(load_cells)) != len(load_cells):
+            raise ValueError('load_cells must not contain duplicates')
+
+        terminal = (0, move_cells[-1][1])
+        if self.initial_index in move_cells or terminal in move_cells:
+            raise ValueError(
+                'move_cells must not revisit the initial or automatic '
+                'terminal cell')
+        full_path = (self.initial_index, *move_cells, terminal)
+        for source_index, target_index in zip(full_path, full_path[1:]):
+            self.validate_route_step(source_index, target_index)
+
+        for load_index in load_cells:
+            self.get_cell(load_index)
+
+        remaining = set(load_cells)
+        route_load_targets = []
+        for path_offset, current_index in enumerate(move_cells, start=1):
+            previous_index = full_path[path_offset - 1]
+            next_index = full_path[path_offset + 1]
+            arrival_delta = self.index_delta(previous_index, current_index)
+            next_delta = self.index_delta(current_index, next_index)
+            deltas = [
+                self.rotate_left(arrival_delta),
+                arrival_delta,
+                self.rotate_right(arrival_delta),
+            ]
+            if next_delta in deltas:
+                deltas = [delta for delta in deltas if delta != next_delta]
+                deltas.append(next_delta)
+
+            current_targets = []
+            for delta in deltas:
+                target_index = self.add_index(current_index, delta)
+                if target_index not in remaining:
+                    continue
+                current = self.get_cell(current_index)
+                target = self.get_cell(target_index)
+                if math.isclose(
+                    current[2], target[2], rel_tol=0.0, abs_tol=1e-9
+                ):
+                    raise ValueError(
+                        f'load cell {target_index} has the same height as '
+                        f'route cell {current_index}')
+                current_targets.append(target_index)
+                remaining.remove(target_index)
+            route_load_targets.append(tuple(current_targets))
+
+        if remaining:
+            unreachable = ', '.join(str(index) for index in sorted(remaining))
+            raise ValueError(
+                'load_cells are not front/left/right neighbors of the '
+                f'route: {unreachable}')
+        return move_cells, load_cells, tuple(route_load_targets)
+
+    def reset_detection_results(self):
+        with self.config_lock:
+            self._reset_detection_results_locked()
+
+    def _reset_detection_results_locked(self):
+        self.cell_detection_results = [
+            [None for _ in self.lateral_y]
+            for _ in self.forward_x
+        ]
+
     def wait_for_dependencies(self):
+        with self.config_lock:
+            dependency_timeout_sec = self.dependency_timeout_sec
         dependencies = [
             (self.move_client, 'MoveToPose'),
             (self.traverse_client, 'TraverseStep'),
             (self.kfs_action_client, 'KfsAction'),
         ]
-        if not self._skip_kfs_detection:
+        if self.mode == StageTwoPointTwo.Request.STANDARD:
             dependencies.append((self.detection_client, 'GetKfsType'))
+            dependencies.append((self.align_client, 'AlignToKfs'))
+        elif self.mode == StageTwoPointTwo.Request.ROUTE:
             dependencies.append((self.align_client, 'AlignToKfs'))
         for client, name in dependencies:
             if not client.wait_for_service(
-                timeout_sec=self.dependency_timeout_sec
+                timeout_sec=dependency_timeout_sec
             ):
                 raise RuntimeError(f'{name} service unavailable')
 
@@ -513,6 +732,8 @@ class StageTwoPointTwoController(Node):
         return response
 
     def move_to_pose(self, x, y, yaw):
+        with self.config_lock:
+            move_timeout_sec = self.move_timeout_sec
         request = MoveToPose.Request()
         request.pose_source = MoveToPose.Request.ODIN
         request.x = float(x)
@@ -520,26 +741,38 @@ class StageTwoPointTwoController(Node):
         request.yaw = float(yaw)
         request.position_tolerance = 0.0
         request.yaw_tolerance = 0.0
-        request.timeout_sec = self.move_timeout_sec
+        request.timeout_sec = move_timeout_sec
         response = self.wait_for_future(
             self.move_client.call_async(request),
-            self.move_timeout_sec,
+            move_timeout_sec,
             'MoveToPose',
         )
         if not response.success:
             raise RuntimeError(f'MoveToPose failed: {response.message}')
 
-    def detect_kfs_type(self):
-        """Return (front, left, right) class names; skip returns all empty."""
-        if self._skip_kfs_detection:
-            return '', '', ''
+    def servo_to_initial_cell(self):
+        with self.config_lock:
+            initial_index = self.initial_index
+        first_index = self.add_index(initial_index, self.FORWARD)
+        initial = self.get_cell(initial_index)
+        direction_x, direction_y = self.cell_direction(
+            initial_index, first_index)
+        yaw = math.atan2(direction_y, direction_x)
+        self.get_logger().info(
+            f'Servoing to Stage 2.2 initial cell {initial_index}')
+        self.move_to_pose(initial[0], initial[1], yaw)
 
+    def detect_kfs_type(self):
+        """Return (front, left, right) class names."""
+        with self.config_lock:
+            sample_count = self.detection_sample_count
+            detection_timeout_sec = self.detection_timeout_sec
         request = GetKfsType.Request()
-        request.sample_count = self.detection_sample_count
-        request.timeout_sec = self.detection_timeout_sec
+        request.sample_count = sample_count
+        request.timeout_sec = detection_timeout_sec
         response = self.wait_for_future(
             self.detection_client.call_async(request),
-            self.detection_timeout_sec,
+            detection_timeout_sec,
             'GetKfsType',
         )
         # 只看各相机结果；超时/低置信度时 class_name 为空，静默视为非 true。
@@ -550,12 +783,14 @@ class StageTwoPointTwoController(Node):
         )
 
     def load_kfs(self, mode):
+        with self.config_lock:
+            load_timeout_sec = self.load_timeout_sec
         request = KfsAction.Request()
         request.action = KfsAction.Request.LOAD
         request.mode = mode
         response = self.wait_for_future(
             self.kfs_action_client.call_async(request),
-            self.load_timeout_sec,
+            load_timeout_sec,
             'KfsAction load',
         )
         if not response.success:
@@ -563,11 +798,13 @@ class StageTwoPointTwoController(Node):
         self.loaded_count += 1
 
     def release_kfs(self):
+        with self.config_lock:
+            release_timeout_sec = self.release_timeout_sec
         request = KfsAction.Request()
         request.action = KfsAction.Request.RELEASE
         response = self.wait_for_future(
             self.kfs_action_client.call_async(request),
-            self.release_timeout_sec,
+            release_timeout_sec,
             'KfsAction release',
         )
         if not response.success:
@@ -576,6 +813,8 @@ class StageTwoPointTwoController(Node):
         self.loaded_count -= 1
 
     def traverse_step(self, is_up, distance_to_step):
+        with self.config_lock:
+            traverse_timeout_sec = self.traverse_timeout_sec
         request = TraverseStep.Request()
         request.direction = (
             TraverseStep.Request.UP
@@ -585,7 +824,7 @@ class StageTwoPointTwoController(Node):
         request.distance_to_step = float(distance_to_step)
         response = self.wait_for_future(
             self.traverse_client.call_async(request),
-            self.traverse_timeout_sec,
+            traverse_timeout_sec,
             'TraverseStep',
         )
         if not response.success:
@@ -644,10 +883,12 @@ class StageTwoPointTwoController(Node):
 
         boundary_x = (source[0] + target[0]) / 2.0
         boundary_y = (source[1] + target[1]) / 2.0
+        with self.config_lock:
+            chassis_front_offset = self.chassis_front_offset
         front_x = actual_x + (
-            self.chassis_front_offset * math.cos(actual_yaw))
+            chassis_front_offset * math.cos(actual_yaw))
         front_y = actual_y + (
-            self.chassis_front_offset * math.sin(actual_yaw))
+            chassis_front_offset * math.sin(actual_yaw))
         distance_to_step = (
             (boundary_x - front_x) * direction_x +
             (boundary_y - front_y) * direction_y
@@ -699,13 +940,15 @@ class StageTwoPointTwoController(Node):
         return tuple(deltas)
 
     def align_kfs(self):
+        with self.config_lock:
+            align_timeout_sec = self.align_timeout_sec
         request = Align.Request()
         # 0.0 -> the alignment node uses its own pixel_tolerance / timeout.
         request.pixel_tolerance = 0.0
         request.timeout_sec = 0.0
         response = self.wait_for_future(
             self.align_client.call_async(request),
-            self.align_timeout_sec,
+            align_timeout_sec,
             'AlignToKfs',
         )
         if not response.success:
@@ -720,7 +963,8 @@ class StageTwoPointTwoController(Node):
         direction_yaw = math.atan2(direction_y, direction_x)
 
         if target[2] > current[2]:
-            offset = self.higher_kfs_edge_offset
+            with self.config_lock:
+                offset = self.higher_kfs_edge_offset
             load_mode_name = 'front'
             load_modes = {
                 0: KfsAction.Request.MODE_1,
@@ -728,7 +972,8 @@ class StageTwoPointTwoController(Node):
                 2: KfsAction.Request.MODE_2,
             }
         elif target[2] < current[2]:
-            offset = self.lower_kfs_edge_offset
+            with self.config_lock:
+                offset = self.lower_kfs_edge_offset
             load_mode_name = 'top'
             load_modes = {
                 0: KfsAction.Request.MODE_3,
@@ -755,10 +1000,12 @@ class StageTwoPointTwoController(Node):
                     'arrival direction is unavailable for releasing KFS')
             came_from_x = -self.arrival_direction[0]
             came_from_y = -self.arrival_direction[1]
+            with self.config_lock:
+                release_edge_offset = self.release_edge_offset
             release_x = current[0] + (
-                came_from_x * self.release_edge_offset)
+                came_from_x * release_edge_offset)
             release_y = current[1] + (
-                came_from_y * self.release_edge_offset)
+                came_from_y * release_edge_offset)
             release_yaw = math.atan2(came_from_y, came_from_x)
             self.move_to_pose(release_x, release_y, release_yaw)
             self.release_kfs()
@@ -770,7 +1017,7 @@ class StageTwoPointTwoController(Node):
 
     def detect_directions(self, current_index, arrival_delta):
         """One fused detection; return {delta: class_name} for 3 directions."""
-        if self._skip_kfs_detection:
+        if self.mode == StageTwoPointTwo.Request.SKIP:
             return {}
 
         front_class, left_class, right_class = self.detect_kfs_type()
@@ -800,7 +1047,7 @@ class StageTwoPointTwoController(Node):
         self, current_index, direction_results, load_deltas, next_delta
     ):
         """Load KFS on load_deltas; next_delta last and stays at the edge."""
-        if self._skip_kfs_detection:
+        if self.mode == StageTwoPointTwo.Request.SKIP:
             return
         ordered = [delta for delta in load_deltas if delta != next_delta]
         if next_delta in load_deltas:
@@ -837,7 +1084,36 @@ class StageTwoPointTwoController(Node):
             return self.LEFT
         return self.RIGHT
 
-    def execute_task(self, decision):
+    def load_route_targets(self, current_index, targets, next_index):
+        for target_index in targets:
+            self.pickup_kfs(
+                current_index,
+                target_index,
+                return_to_center=(target_index != next_index),
+            )
+
+    def execute_route_task(self):
+        current_index = self.initial_index
+        terminal_index = (0, self.move_cells[-1][1])
+        for offset, target_index in enumerate(self.move_cells):
+            self.move_one_cell(current_index, target_index)
+            current_index = target_index
+            next_index = (
+                self.move_cells[offset + 1]
+                if offset + 1 < len(self.move_cells)
+                else terminal_index
+            )
+            self.load_route_targets(
+                current_index,
+                self.route_load_targets[offset],
+                next_index,
+            )
+
+        self.move_one_cell(current_index, terminal_index)
+        self.get_logger().info(f'Reached terminal cell {terminal_index}')
+        return terminal_index
+
+    def execute_dynamic_task(self, decision):
         current_index = self.initial_index
         next_delta = self.FORWARD
 
@@ -878,6 +1154,11 @@ class StageTwoPointTwoController(Node):
                 load_deltas.append(next_delta)
             self.load_directions(
                 current_index, direction_results, load_deltas, next_delta)
+
+    def execute_task(self, decision):
+        if self.mode == StageTwoPointTwo.Request.ROUTE:
+            return self.execute_route_task()
+        return self.execute_dynamic_task(decision)
 
     @staticmethod
     def yaw_from_quaternion(quaternion):
