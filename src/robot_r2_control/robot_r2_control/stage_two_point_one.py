@@ -439,11 +439,17 @@ class StageTwoPointOneController(Node):
         )
 
     @staticmethod
-    def team_edge_pose(edge_pose, team):
+    def team_edge_pose(cell, edge_poses, team):
         StageTwoPointOneController.validate_team(team)
-        if team == StageTwoPointOne.Request.RED:
-            return edge_pose
-        return edge_pose[0], -edge_pose[1], edge_pose[2]
+        if team == StageTwoPointOne.Request.BLUE:
+            return edge_poses[cell]
+        # 红方为蓝方（负 Y 基准）的完整镜像：lane 编号取反且 Y 取反。
+        mirrored_pose = edge_poses[4 - cell]
+        return (
+            mirrored_pose[0],
+            -mirrored_pose[1],
+            mirrored_pose[2],
+        )
 
     def move_to_loading_edge(self, edge_pose):
         target_center = self.cell_center_from_edge_pose(edge_pose)
@@ -526,8 +532,8 @@ class StageTwoPointOneController(Node):
             }
             initial_lift = self.lift_initial
         team_edge_poses = {
-            cell: self.team_edge_pose(pose, team)
-            for cell, pose in edge_poses.items()
+            cell: self.team_edge_pose(cell, edge_poses, team)
+            for cell in edge_poses
         }
 
         self.set_lift(initial_lift)

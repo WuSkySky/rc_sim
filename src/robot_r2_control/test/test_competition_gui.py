@@ -146,9 +146,9 @@ def test_exit_rows_are_above_entry_rows_in_matrix():
         (StageTwo.Request.BLUE, (2, 1), (2, 1)),
         (StageTwo.Request.BLUE, (2, 2), (2, 2)),
         (StageTwo.Request.BLUE, (2, 3), (2, 3)),
-        (StageTwo.Request.RED, (2, 1), (2, 3)),
+        (StageTwo.Request.RED, (2, 1), (2, 1)),
         (StageTwo.Request.RED, (2, 2), (2, 2)),
-        (StageTwo.Request.RED, (2, 3), (2, 1)),
+        (StageTwo.Request.RED, (2, 3), (2, 3)),
     ],
 )
 def test_gui_cells_are_converted_to_team_service_coordinates(
@@ -156,11 +156,11 @@ def test_gui_cells_are_converted_to_team_service_coordinates(
     assert gui_cell_to_service_cell(team, gui_cell) == service_cell
 
 
-def test_highest_service_cell_appears_on_expected_team_side():
+def test_gui_column_matches_service_lane_for_both_teams():
     assert gui_cell_to_service_cell(
         StageTwo.Request.BLUE, (3, 3)) == (3, 3)
     assert gui_cell_to_service_cell(
-        StageTwo.Request.RED, (3, 1)) == (3, 3)
+        StageTwo.Request.RED, (3, 1)) == (3, 1)
 
 
 def test_route_toggle_preserves_click_order_and_reindexes_after_removal():
@@ -284,7 +284,7 @@ def test_stage_one_relocalizes_before_sending_selected_team():
     assert request.team == StageOne.Request.BLUE
 
 
-def test_red_stage_two_request_mirrors_route_and_sorts_service_kfs_cells():
+def test_red_stage_two_request_mirrors_relocalization_y_only():
     node = make_node()
 
     accepted, _ = node.request_stage_two(
@@ -297,15 +297,14 @@ def test_red_stage_two_request_mirrors_route_and_sorts_service_kfs_cells():
     assert not node.stage_two_client.requests
     pose_request = node.set_base_pose_odin_client.requests[0]
     assert (pose_request.x, pose_request.y, pose_request.yaw) == pytest.approx(
-        (5.568, -2.2, math.pi))
+        (5.568, 2.2, math.pi))
     complete_relocalization(node.set_base_pose_odin_client)
     request = node.stage_two_client.requests[0]
     assert request.team == StageTwo.Request.RED
     assert request.mode == StageTwo.Request.ROUTE
     assert request.fake_kfs_decision == 0
-    assert message_indices(request.move_cells) == [
-        (4, 2), (3, 2), (2, 2), (1, 2), (1, 3)]
-    assert message_indices(request.kfs_cells) == [(1, 1), (4, 2)]
+    assert message_indices(request.move_cells) == list(valid_route())
+    assert message_indices(request.kfs_cells) == [(1, 3), (4, 2)]
 
 
 def test_blue_stage_two_request_keeps_gui_coordinates():
@@ -320,14 +319,14 @@ def test_blue_stage_two_request_keeps_gui_coordinates():
     assert accepted
     pose_request = node.set_base_pose_odin_client.requests[0]
     assert (pose_request.x, pose_request.y, pose_request.yaw) == pytest.approx(
-        (5.568, 2.2, math.pi))
+        (5.568, -2.2, math.pi))
     complete_relocalization(node.set_base_pose_odin_client)
     request = node.stage_two_client.requests[0]
     assert message_indices(request.move_cells) == list(valid_route())
     assert message_indices(request.kfs_cells) == [(1, 3), (4, 2)]
 
 
-def test_blue_gui_left_entry_kfs_is_routed_to_left_point_one_lane():
+def test_blue_gui_left_entry_kfs_keeps_lane_one_in_point_one_route():
     node = make_node()
     node.request_stage_two(
         StageTwo.Request.BLUE,
@@ -346,7 +345,7 @@ def test_blue_gui_left_entry_kfs_is_routed_to_left_point_one_lane():
 
     point_one_route = StageTwoController.point_one_route_for_team(
         point_one_route, StageTwo.Request.BLUE)
-    assert point_one_route == (3,)
+    assert point_one_route == (1,)
     assert point_two_loads == ()
 
 
@@ -375,7 +374,7 @@ def test_team_switch_keeps_gui_selection_but_changes_serialization():
     assert model.route_cells == original_route
     assert model.kfs_cells == original_kfs
     assert message_indices(red_node.stage_two_client.requests[0].kfs_cells) == [
-        (3, 3)]
+        (3, 1)]
     assert message_indices(blue_node.stage_two_client.requests[0].kfs_cells) == [
         (3, 1)]
 

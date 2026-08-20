@@ -146,10 +146,11 @@ class CompetitionGuiNode(JointControlNodeMixin, Node):
         return request
 
     def stage_two_relocalization_for_team(self, team):
+        # 基准为蓝方（负 Y）；红方仅将 Y 取反。
         self.validate_team(team)
         with self.state_lock:
             pose = list(self.stage_two_relocalization_pose)
-        if team == StageTwo.Request.BLUE:
+        if team == StageTwo.Request.RED:
             pose[1] = -pose[1]
         return tuple(pose)
 
@@ -403,8 +404,8 @@ class CompetitionGuiApp(JointControlGuiMixin):
         frame = ttk.LabelFrame(parent, text='比赛队伍', padding=10)
         frame.grid(row=0, column=0, sticky='ew')
         for column, (label, value) in enumerate((
-            ('红方（负 Y）', StageOne.Request.RED),
-            ('蓝方（正 Y）', StageOne.Request.BLUE),
+            ('红方（正 Y）', StageOne.Request.RED),
+            ('蓝方（负 Y）', StageOne.Request.BLUE),
         )):
             button = ttk.Radiobutton(
                 frame,

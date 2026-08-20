@@ -199,14 +199,10 @@ class StageTwoController(Node):
 
     @classmethod
     def point_one_route_for_team(cls, route_cells, team):
+        # 服务内的 lane 编号与本队物理 lane 一致（蓝方负 Y 基准，
+        # 红方为完整镜像），两队无需再交换 lane。
         cls.validate_team(team)
-        if team == StageTwo.Request.RED:
-            return tuple(route_cells)
-        mirrored_lanes = {4 - lane for lane in route_cells}
-        return tuple(
-            lane for lane in cls.POINT_ONE_ORDER
-            if lane in mirrored_lanes
-        )
+        return tuple(route_cells)
 
     def wait_for_dependencies(self, timeout_sec, include_point_one=True):
         dependencies = [(self.point_two_client, 'StageTwoPointTwo')]

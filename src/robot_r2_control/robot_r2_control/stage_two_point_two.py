@@ -425,11 +425,20 @@ class StageTwoPointTwoController(Node):
             index, forward_x, lateral_y, cell_heights)
         forward_index, lateral_index = index
         lateral_offset = lateral_index - 1
-        height_index = forward_index * len(lateral_y) + lateral_offset
-        red_y = lateral_y[lateral_offset]
+        if team == StageTwoPointTwo.Request.BLUE:
+            # 蓝方（负 Y 基准）直接使用基准坐标。
+            height_index = forward_index * len(lateral_y) + lateral_offset
+            return (
+                forward_x[forward_index],
+                lateral_y[lateral_offset],
+                cell_heights[height_index],
+            )
+        # 红方为蓝方的完整镜像：lane 编号取反且 Y 取反，高度布局随之镜像。
+        mirrored_offset = len(lateral_y) - 1 - lateral_offset
+        height_index = forward_index * len(lateral_y) + mirrored_offset
         return (
             forward_x[forward_index],
-            red_y if team == StageTwoPointTwo.Request.RED else -red_y,
+            -lateral_y[mirrored_offset],
             cell_heights[height_index],
         )
 
@@ -499,19 +508,21 @@ class StageTwoPointTwoController(Node):
     def exit_targets(self, team):
         self.validate_team(team)
         with self.config_lock:
-            x, red_y, yaw = self.exit_cell_0_0_pose
+            x, blue_y, yaw = self.exit_cell_0_0_pose
             x_offset = self.exit_x_offset
-        y = red_y if team == StageTwoPointTwo.Request.RED else -red_y
+        # 基准为蓝方（负 Y）；红方仅将 Y 取反。
+        y = blue_y if team == StageTwoPointTwo.Request.BLUE else -blue_y
         return (x, y, yaw), (x - x_offset, y, yaw)
 
     def exit_config(self, team):
         self.validate_team(team)
         with self.config_lock:
-            x, red_y, yaw = self.exit_cell_0_0_pose
+            x, blue_y, yaw = self.exit_cell_0_0_pose
             x_offset = self.exit_x_offset
             lift_height = self.exit_lift_height
             lift_timeout_sec = self.lift_timeout_sec
-        y = red_y if team == StageTwoPointTwo.Request.RED else -red_y
+        # 基准为蓝方（负 Y）；红方仅将 Y 取反。
+        y = blue_y if team == StageTwoPointTwo.Request.BLUE else -blue_y
         targets = ((x, y, yaw), (x - x_offset, y, yaw))
         return lift_height, lift_timeout_sec, targets
 

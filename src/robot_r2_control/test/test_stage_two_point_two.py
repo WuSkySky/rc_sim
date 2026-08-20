@@ -64,7 +64,8 @@ def make_controller():
         float('nan'), 0.0, float('nan'),
     )
     controller.chassis_front_offset = 0.35
-    controller.team = StageTwoPointTwo.Request.RED
+    # 基准坐标为蓝方（负 Y）；单队伍用例默认使用基准（蓝方）。
+    controller.team = StageTwoPointTwo.Request.BLUE
     controller.initial_index = (5, 2)
     controller.terminal_forward_index = 0
     controller.cell_detection_results = [
@@ -103,11 +104,11 @@ def make_controller():
 @pytest.mark.parametrize(
     'team, expected_y',
     [
-        (StageTwoPointTwo.Request.RED, -3.0),
-        (StageTwoPointTwo.Request.BLUE, 3.0),
+        (StageTwoPointTwo.Request.BLUE, -3.0),
+        (StageTwoPointTwo.Request.RED, 3.0),
     ],
 )
-def test_get_cell_only_mirrors_y_for_blue_team(team, expected_y):
+def test_get_cell_keeps_blue_and_mirrors_red(team, expected_y):
     controller = make_controller()
     controller.team = team
 
@@ -508,8 +509,8 @@ def test_move_to_pose_failure_raises():
 @pytest.mark.parametrize(
     'team, expected_y',
     [
-        (StageTwoPointTwo.Request.RED, -3.0),
-        (StageTwoPointTwo.Request.BLUE, 3.0),
+        (StageTwoPointTwo.Request.BLUE, -3.0),
+        (StageTwoPointTwo.Request.RED, 3.0),
     ],
 )
 def test_servo_to_initial_cell_uses_team_grid_pose(team, expected_y):
@@ -583,11 +584,11 @@ def test_all_task_modes_servo_before_executing_path(mode, decision, moves):
 @pytest.mark.parametrize(
     'team, expected_y',
     [
-        (StageTwoPointTwo.Request.RED, -5.4),
-        (StageTwoPointTwo.Request.BLUE, 5.4),
+        (StageTwoPointTwo.Request.BLUE, -5.4),
+        (StageTwoPointTwo.Request.RED, 5.4),
     ],
 )
-def test_exit_targets_mirror_only_y(team, expected_y):
+def test_exit_targets_keep_blue_and_mirror_red(team, expected_y):
     controller = make_controller()
 
     first, second = controller.exit_targets(team)
@@ -606,7 +607,7 @@ def test_exit_service_runs_both_absolute_targets_in_order():
     response = SimpleNamespace(success=None, message='')
 
     result = controller.handle_exit(
-        SimpleNamespace(team=StageTwoPointTwo.Request.RED), response)
+        SimpleNamespace(team=StageTwoPointTwo.Request.BLUE), response)
 
     assert result.success
     assert actions[0] == ('lift', pytest.approx(0.03), pytest.approx(15.0))
@@ -655,7 +656,7 @@ def test_exit_service_stops_after_first_move_failure():
     response = SimpleNamespace(success=None, message='')
 
     result = controller.handle_exit(
-        SimpleNamespace(team=StageTwoPointTwo.Request.RED), response)
+        SimpleNamespace(team=StageTwoPointTwo.Request.BLUE), response)
 
     assert not result.success
     assert result.message == 'first move failed'
@@ -680,8 +681,8 @@ def test_exit_service_reports_second_move_failure():
     assert not result.success
     assert result.message == 'second move failed'
     assert moves == [
-        (-2.6, 5.4, math.pi),
-        (-5.5, 5.4, math.pi),
+        (-2.6, -5.4, math.pi),
+        (-5.5, -5.4, math.pi),
     ]
 
 
@@ -698,8 +699,8 @@ def test_exit_parameters_update_atomically():
 
     assert result.successful
     assert controller.exit_targets(StageTwoPointTwo.Request.RED) == (
-        pytest.approx((-3.0, -6.0, math.pi)),
-        pytest.approx((-4.5, -6.0, math.pi)),
+        pytest.approx((-3.0, 6.0, math.pi)),
+        pytest.approx((-4.5, 6.0, math.pi)),
     )
     assert controller.exit_lift_height == pytest.approx(0.04)
     assert controller.lift_timeout_sec == pytest.approx(20.0)

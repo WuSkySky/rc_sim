@@ -76,7 +76,7 @@ def make_controller():
     controller.config_lock = threading.Lock()
     controller.config = default_config()
     controller.blue_relocalization_pose = (
-        -5.69, 5.53, 0.0, 0.0, 0.0, math.pi / 2.0)
+        -5.69, -5.27, 0.0, 0.0, 0.0, math.pi / 2.0)
     controller.actions = []
     controller.set_base_pose_client = FakeClient(
         'relocalize', controller.actions)
@@ -96,8 +96,8 @@ def make_controller():
 @pytest.mark.parametrize(
     'team, expected_relocalization_y, expected_target_y, expected_yaw',
     [
-        (StageThree.Request.BLUE, 5.53, 10.16, math.pi / 2.0),
-        (StageThree.Request.RED, -5.53, -10.16, -math.pi / 2.0),
+        (StageThree.Request.BLUE, -5.27, -0.64, math.pi / 2.0),
+        (StageThree.Request.RED, 5.27, 0.64, -math.pi / 2.0),
     ],
 )
 def test_task_config_mirrors_y_and_yaw(
@@ -282,8 +282,8 @@ def test_service_uses_only_first_two_absolute_targets_for_two_kfs():
         for request in controller.move_to_pose_client.requests
     )
     expected_targets = (
-        (-5.29, -10.16, -math.pi / 2.0),
-        (-4.75, -10.16, -math.pi / 2.0),
+        (-5.29, 0.64, -math.pi / 2.0),
+        (-4.75, 0.64, -math.pi / 2.0),
     )
     for actual, expected in zip(targets, expected_targets):
         assert actual == pytest.approx(expected)
@@ -318,7 +318,7 @@ def test_pop_failure_stops_remaining_actions():
     assert not result.success
     assert result.message == 'KfsAction pop failed: failed'
     assert tuple(action[0] for action in controller.actions) == (
-        'relocalize', 'move_to', 'pop')
+        'relocalize', 'move_to', 'chassis_lift', 'pop')
 
 
 def test_forward_failure_stops_before_backoff_and_remaining_actions():
@@ -334,7 +334,7 @@ def test_forward_failure_stops_before_backoff_and_remaining_actions():
     assert not result.success
     assert result.message == 'MoveRelative failed: failed'
     assert tuple(action[0] for action in controller.actions) == (
-        'relocalize', 'move_to', 'pop', 'move_relative')
+        'relocalize', 'move_to', 'chassis_lift', 'pop', 'move_relative')
     assert len(controller.move_relative_client.requests) == 1
     assert controller.move_relative_client.requests[0].forward == (
         pytest.approx(0.25))

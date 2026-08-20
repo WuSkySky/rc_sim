@@ -65,7 +65,7 @@ class StageThreeController(Node):
         self.declare_parameter('chassis_lift_timeout_sec', 15.0)
         self.declare_parameter(
             'blue_relocalization_pose',
-            [-5.69, 5.53, 0.0, 0.0, 0.0, math.pi / 2.0],
+            [-5.69, -5.27, 0.0, 0.0, 0.0, math.pi / 2.0],
         )
         self.declare_parameter('stage_two_exit_endpoint_x', -5.5)
         self.declare_parameter('first_target_x_offset', 0.21)

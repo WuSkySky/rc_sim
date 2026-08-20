@@ -665,14 +665,14 @@ def test_stage_one_rejects_unknown_team_without_relocalizing():
         (
             StageTwo.Request.RED,
             '红方',
-            -3.0,
-            [(4, 2), (3, 2), (2, 2), (1, 2), (1, 1)],
-            [(2, 1), (4, 3)],
+            3.0,
+            [(4, 2), (3, 2), (2, 2), (1, 2), (1, 3)],
+            [(2, 3), (4, 1)],
         ),
         (
             StageTwo.Request.BLUE,
             '蓝方',
-            3.0,
+            -3.0,
             [(4, 2), (3, 2), (2, 2), (1, 2), (1, 3)],
             [(2, 3), (4, 1)],
         ),
@@ -821,8 +821,8 @@ def test_complete_stage_two_pose_supports_dynamic_update():
 @pytest.mark.parametrize(
     'team,label,expected_y',
     [
-        (StageTwoPointOne.Request.RED, '红方', -2.2),
-        (StageTwoPointOne.Request.BLUE, '蓝方', 2.2),
+        (StageTwoPointOne.Request.RED, '红方', 2.2),
+        (StageTwoPointOne.Request.BLUE, '蓝方', -2.2),
     ],
 )
 def test_stage_two_point_one_relocalizes_then_calls_team_service(
@@ -935,8 +935,8 @@ def test_parse_stage_two_point_one_route_rejects_invalid_input(raw):
 @pytest.mark.parametrize(
     'team,label,expected_y',
     [
-        (StageTwoPointOne.Request.RED, '红方', -3.0),
-        (StageTwoPointOne.Request.BLUE, '蓝方', 3.0),
+        (StageTwoPointOne.Request.RED, '红方', 3.0),
+        (StageTwoPointOne.Request.BLUE, '蓝方', -3.0),
     ],
 )
 def test_stage_two_point_two_relocalizes_then_calls_team_service(
@@ -1003,8 +1003,8 @@ def test_stage_two_point_two_normal_passes_standard_mode():
 @pytest.mark.parametrize(
     'team,label,expected_y',
     [
-        (StageTwoPointTwoExit.Request.RED, '红方', -1.8),
-        (StageTwoPointTwoExit.Request.BLUE, '蓝方', 1.8),
+        (StageTwoPointTwoExit.Request.RED, '红方', 1.8),
+        (StageTwoPointTwoExit.Request.BLUE, '蓝方', -1.8),
     ],
 )
 def test_stage_two_point_two_exit_relocalizes_then_calls_team_service(
@@ -1382,7 +1382,7 @@ def test_stage_one_parameter_load_result_checks_every_yaml_parameter():
         0, output, '')
 
     assert success
-    assert message == 'Step1 参数写入成功：共 27 项'
+    assert message == 'Step1 参数写入成功：共 28 项'
 
 
 def test_stage_one_parameter_load_result_reports_missing_parameter():

@@ -408,7 +408,7 @@ class GuiControlNode(JointControlNodeMixin, Node):
 
     # Step2 测试重定位位姿：base_link 在 map 中的目标位姿
     # （x, y, z, roll, pitch, yaw）；yaw=pi 使车头朝 -x，面向梅林区。
-    # 2.1：红方 Y 为 -2.2，蓝方镜像为 +2.2；即蓝方在
+    # 2.1：蓝方（负 Y）基准 Y 为 -2.2，红方镜像为 +2.2；即红方在
     # (4,3) 格心 Y=+1.8 的基础上再增加 0.4 m。原有 X 保持不变。
     STEP_TWO_POINT_ONE_RELOCALIZATION_DEFAULT = (
         5.568, -2.2, 0.0, 0.0, 0.0, math.pi)
@@ -1235,8 +1235,9 @@ class GuiControlNode(JointControlNodeMixin, Node):
 
     @classmethod
     def _stage_two_relocalization_pose(cls, base_pose, team):
+        # 基准为蓝方（负 Y）；红方仅将 Y 取反。
         cls._stage_two_team_label(team)
-        if team == StageTwoPointOne.Request.RED:
+        if team == StageTwoPointOne.Request.BLUE:
             return base_pose
         mirrored = list(base_pose)
         mirrored[1] = -mirrored[1]
@@ -2319,14 +2320,14 @@ class GuiControlApp(JointControlGuiMixin):
         team_frame.grid(row=0, column=0, sticky='ew')
         red_team_button = ttk.Radiobutton(
             team_frame,
-            text='红方（负 Y）',
+            text='红方（正 Y）',
             variable=self.team_value,
             value=StageOne.Request.RED,
         )
         red_team_button.grid(row=0, column=0, sticky='w')
         blue_team_button = ttk.Radiobutton(
             team_frame,
-            text='蓝方（正 Y）',
+            text='蓝方（负 Y）',
             variable=self.team_value,
             value=StageOne.Request.BLUE,
         )

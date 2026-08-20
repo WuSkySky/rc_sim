@@ -1,3 +1,4 @@
+import math
 import threading
 from types import SimpleNamespace
 
@@ -69,18 +70,27 @@ def test_move_to_pose_failure_raises():
 
 
 @pytest.mark.parametrize(
-    'team, expected_y',
+    'team, cell, expected_y',
     [
-        (StageTwoPointOne.Request.RED, -1.8),
-        (StageTwoPointOne.Request.BLUE, 1.8),
+        (StageTwoPointOne.Request.BLUE, 1, -4.2),
+        (StageTwoPointOne.Request.BLUE, 2, -3.0),
+        (StageTwoPointOne.Request.BLUE, 3, -1.8),
+        (StageTwoPointOne.Request.RED, 1, 1.8),
+        (StageTwoPointOne.Request.RED, 2, 3.0),
+        (StageTwoPointOne.Request.RED, 3, 4.2),
     ],
 )
-def test_team_edge_pose_only_mirrors_y(team, expected_y):
-    pose = (3.2, -1.8, 3.141592653589793)
+def test_team_edge_pose_keeps_blue_and_mirrors_red(team, cell, expected_y):
+    edge_poses = {
+        1: (3.2, -4.2, math.pi),
+        2: (3.2, -3.0, math.pi),
+        3: (3.2, -1.8, math.pi),
+    }
 
-    mirrored = StageTwoPointOneController.team_edge_pose(pose, team)
+    mirrored = StageTwoPointOneController.team_edge_pose(
+        cell, edge_poses, team)
 
-    assert mirrored == pytest.approx((3.2, expected_y, pose[2]))
+    assert mirrored == pytest.approx((3.2, expected_y, math.pi))
 
 
 def test_invalid_team_is_rejected():
@@ -188,7 +198,7 @@ def make_execute_controller(route):
 def test_high_to_high_route_does_not_lower_or_repeat_lift():
     controller, actions = make_execute_controller((1, 3))
 
-    controller.execute_task(StageTwoPointOne.Request.RED)
+    controller.execute_task(StageTwoPointOne.Request.BLUE)
 
     assert actions == [
         ('lift', (0.01, 0.01)),
@@ -203,7 +213,7 @@ def test_high_to_high_route_does_not_lower_or_repeat_lift():
 def test_height_changes_after_arriving_at_low_cell():
     controller, actions = make_execute_controller((1, 2))
 
-    controller.execute_task(StageTwoPointOne.Request.RED)
+    controller.execute_task(StageTwoPointOne.Request.BLUE)
 
     assert actions == [
         ('lift', (0.01, 0.01)),

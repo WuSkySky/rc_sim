@@ -138,14 +138,14 @@ def test_route_without_entry_kfs_has_empty_point_one_route():
     assert point_two_loads == ((2, 3),)
 
 
-def test_only_blue_point_one_route_is_mirrored():
+def test_point_one_route_is_identical_for_both_teams():
     assert StageTwoController.point_one_route_for_team(
         (1,), StageTwo.Request.RED) == (1,)
     assert StageTwoController.point_one_route_for_team(
-        (1,), StageTwo.Request.BLUE) == (3,)
+        (1,), StageTwo.Request.BLUE) == (1,)
 
 
-def test_blue_point_one_fix_keeps_point_two_route_and_load_cells_unchanged():
+def test_blue_point_one_route_uses_gui_lane_numbers_directly():
     controller = make_controller()
     request = SimpleNamespace(
         team=StageTwo.Request.BLUE,
@@ -159,7 +159,7 @@ def test_blue_point_one_fix_keeps_point_two_route_and_load_cells_unchanged():
     result = controller.handle_stage_two(request, response)
 
     assert result.success
-    assert list(controller.point_one_client.requests[0].route_cells) == [3]
+    assert list(controller.point_one_client.requests[0].route_cells) == [1]
     point_two_request = controller.point_two_client.requests[0]
     assert indices(point_two_request.move_cells) == indices(
         default_move_cells())

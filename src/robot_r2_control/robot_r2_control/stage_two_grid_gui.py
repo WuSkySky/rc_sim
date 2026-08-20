@@ -17,12 +17,12 @@ def grid_display_row(forward_index):
 
 
 def gui_cell_to_service_cell(team, cell):
+    # GUI 最左列（lateral 1）对应机器人朝向 -x 时的左边，
+    # 服务 lane 编号与本队物理 lane 一致，红蓝映射相同。
     if team not in (StageTwo.Request.RED, StageTwo.Request.BLUE):
         raise ValueError(f'team must be red or blue, got {team!r}')
     if cell not in GRID_CELLS:
         raise ValueError('格子必须位于 Step2 的 4×3 矩阵内')
-    if team == StageTwo.Request.RED:
-        return cell[0], 4 - cell[1]
     return cell
 
 
