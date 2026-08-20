@@ -59,6 +59,10 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=video4linux
 ```
 
+The rule matches only nodes whose `ID_V4L_CAPABILITIES` contains `capture`.
+This matters for UVC devices that expose both a video node and a metadata-only
+node: the metadata node must never replace `/dev/yahboom_front`.
+
 Then set `device: /dev/yahboom_front` in `config/yahboom_camera.yaml` (or pass
 `-p device:=/dev/yahboom_front`). Until the rule is installed, use the current
 node path, for example `/dev/video2` on the development machine.

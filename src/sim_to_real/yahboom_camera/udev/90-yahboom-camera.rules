@@ -1,6 +1,8 @@
 # Yahboom USB cameras get a stable /dev/yahboom_front alias for the front
-# camera. If both models are plugged in at once, the last match wins.
+# camera. Match only V4L2 capture nodes: UVC cameras can also expose a metadata
+# node, which must not replace the video-capture alias. If both camera models
+# are plugged in at once, the last capture-node match still wins.
 # - Old model: Sunplus SDYH-8P0P (VID 1bcf PID 0b09).
 # - New model: HD USB Camera (VID 05a3 PID 9230).
-ACTION=="add", SUBSYSTEM=="video4linux", ATTRS{idVendor}=="1bcf", ATTRS{idProduct}=="0b09", SYMLINK+="yahboom_front"
-ACTION=="add", SUBSYSTEM=="video4linux", ATTRS{idVendor}=="05a3", ATTRS{idProduct}=="9230", SYMLINK+="yahboom_front"
+ACTION=="add", SUBSYSTEM=="video4linux", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", ATTRS{idVendor}=="1bcf", ATTRS{idProduct}=="0b09", SYMLINK+="yahboom_front"
+ACTION=="add", SUBSYSTEM=="video4linux", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", ATTRS{idVendor}=="05a3", ATTRS{idProduct}=="9230", SYMLINK+="yahboom_front"

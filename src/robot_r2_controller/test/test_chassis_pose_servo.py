@@ -206,8 +206,8 @@ def add_control_state(controller):
     controller.yaw_stable_cycles_required = 10
     controller.yaw_stable_cycle_count = 0
     controller.yaw_small_error_gain_multiplier = 11.0
-    controller.x_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.45)
-    controller.y_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.45)
+    controller.x_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.675)
+    controller.y_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.675)
     controller.yaw_pid = PidAxis(0.3, 0.0, 0.02, 10.0, 0.6)
     controller.cmd_vel_publisher = FakePublisher()
 
@@ -231,7 +231,7 @@ def test_control_loop_ignores_unselected_pose_source():
     controller.control_loop()
 
     assert controller.cmd_vel_publisher.messages[-1].linear.x == (
-        pytest.approx(0.45))
+        pytest.approx(0.675))
 
 
 def test_control_loop_uses_request_linear_speed_limit():

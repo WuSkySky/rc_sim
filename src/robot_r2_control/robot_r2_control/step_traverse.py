@@ -16,7 +16,7 @@ SET_LIFT_SERVICE = '/r2/lift/set'
 
 class StepTraverseController(Node):
     # 支持运行时动态修改（ros2 param set）的参数：
-    # 移动距离（非负）与抬升位置（有限）。
+    # 移动距离（非负）、分段速度（正数）与抬升位置（有限）。
     DISTANCE_PARAMETER_NAMES = (
         'a1', 'a1_backoff',
         'a2', 'a2_backoff',
@@ -24,6 +24,7 @@ class StepTraverseController(Node):
         'b1', 'b2', 'b3',
         'up_pre_lift_clearance',
     )
+    SPEED_PARAMETER_NAMES = ('b1_linear_speed_limit',)
     LIFT_PAIR_NAMES = (
         'lift_all',
         'lift_front_only',
@@ -53,6 +54,7 @@ class StepTraverseController(Node):
         self.declare_parameter('a3', 0.2)
         self.declare_parameter('up_pre_lift_clearance', 0.05)
         self.declare_parameter('b1', 0.2)
+        self.declare_parameter('b1_linear_speed_limit', 0.27)
         self.declare_parameter('b2', 0.2)
         self.declare_parameter('b3', 0.2)
 
@@ -81,6 +83,8 @@ class StepTraverseController(Node):
         self.up_pre_lift_clearance = self._distance_parameter(
             'up_pre_lift_clearance')
         self.b1 = self._distance_parameter('b1')
+        self.b1_linear_speed_limit = self._positive_parameter(
+            'b1_linear_speed_limit')
         self.b2 = self._distance_parameter('b2')
         self.b3 = self._distance_parameter('b3')
 
@@ -130,6 +134,7 @@ class StepTraverseController(Node):
         # 距离参数：有限且非负（移动距离，允许 0；向上预靠近可为负后退
         # 由 distance_to_step - clearance 在调用时产生，参数本身非负）。
         distance_updates = {}
+        speed_updates = {}
         lift_updates = {}
         for parameter in parameters:
             if parameter.name in self.DISTANCE_PARAMETER_NAMES:
@@ -152,6 +157,25 @@ class StepTraverseController(Node):
                         ),
                     )
                 distance_updates[parameter.name] = distance
+            elif parameter.name in self.SPEED_PARAMETER_NAMES:
+                value = parameter.value
+                if (
+                    isinstance(value, bool) or
+                    not isinstance(value, (int, float))
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason=f'{parameter.name} must be numeric',
+                    )
+                speed = float(value)
+                if not math.isfinite(speed) or speed <= 0.0:
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            f'{parameter.name} must be finite and positive'
+                        ),
+                    )
+                speed_updates[parameter.name] = speed
             elif parameter.name in self.LIFT_PARAMETER_NAMES:
                 value = parameter.value
                 if (
@@ -170,13 +194,15 @@ class StepTraverseController(Node):
                     )
                 lift_updates[parameter.name] = lift_value
 
-        if not distance_updates and not lift_updates:
+        if not distance_updates and not speed_updates and not lift_updates:
             return SetParametersResult(successful=True)
 
         # 全部校验通过后一次性原子更新；运行中的台阶跨越使用锁内快照，
         # 不会观察到部分更新。
         with self.config_lock:
             for name, value in distance_updates.items():
+                setattr(self, name, value)
+            for name, value in speed_updates.items():
                 setattr(self, name, value)
             for prefix in self.LIFT_PAIR_NAMES:
                 current = getattr(self, prefix)
@@ -242,12 +268,13 @@ class StepTraverseController(Node):
             raise RuntimeError(f'{description} call failed')
         return response
 
-    def move_relative(self, forward):
+    def move_relative(self, forward, linear_speed_limit=0.0):
         request = MoveRelative.Request()
         request.pose_source = MoveRelative.Request.SERIAL
         request.forward = float(forward)
         request.left = 0.0
         request.yaw_delta = 0.0
+        request.linear_speed_limit = float(linear_speed_limit)
         request.position_tolerance = 0.0
         request.yaw_tolerance = 0.0
         request.timeout_sec = self.move_timeout_sec
@@ -302,13 +329,17 @@ class StepTraverseController(Node):
     def run_down_step(self, distance_to_step):
         with self.config_lock:
             b1 = self.b1
+            b1_linear_speed_limit = self.b1_linear_speed_limit
             b2 = self.b2
             b3 = self.b3
             lift_front_only = self.lift_front_only
             lift_all = self.lift_all
             lift_down = self.lift_down
 
-        self.move_relative(distance_to_step + b1)
+        self.move_relative(
+            distance_to_step + b1,
+            linear_speed_limit=b1_linear_speed_limit,
+        )
 
         self.set_lift(lift_front_only)
         self.move_relative(b2)

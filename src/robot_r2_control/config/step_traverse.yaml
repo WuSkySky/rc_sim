@@ -11,6 +11,8 @@
     a3: 0.38
     up_pre_lift_clearance: 0.05
     b1: 0.22
+    # 新位置伺服默认线速度 0.675 m/s 的 1/2 再乘 0.8。
+    b1_linear_speed_limit: 0.27
     b2: 0.44
     b3: 0.16
 

@@ -21,7 +21,7 @@
     target_x_spacing: 0.54
     target_y_offset: 4.63
 
-    # 重定位后前往第一个放置点的线速度上限。当前默认 0.45 m/s 的 2.5 倍。
+    # 重定位后前往第一个放置点的线速度上限。当前默认 0.675 m/s 的 5/3 倍。
     # 后续绝对移动不覆盖速度，继续使用 chassis_pose_servo 的默认上限。
     first_move_linear_speed_limit: 1.125
 

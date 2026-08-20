@@ -96,6 +96,7 @@ STEP_TRAVERSE_PARAMETER_NAMES = {
     'a3',
     'up_pre_lift_clearance',
     'b1',
+    'b1_linear_speed_limit',
     'b2',
     'b3',
     'lift_all_front',

@@ -37,6 +37,7 @@ def make_controller():
     controller.a2_backoff = 0.015
     controller.a3 = 0.35
     controller.b1 = 0.22
+    controller.b1_linear_speed_limit = 0.27
     controller.b2 = 0.44
     controller.b3 = 0.16
     controller.lift_all = (0.20, 0.20)
@@ -72,19 +73,19 @@ def test_up_step_prepositions_before_lifting_and_moves_relative_segments():
 def test_down_step_moves_relative_segments_with_lifts_between():
     controller = make_controller()
     calls = []
-    controller.move_relative = lambda distance: calls.append(
-        ('move', distance))
+    controller.move_relative = lambda distance, linear_speed_limit=0.0: (
+        calls.append(('move', distance, linear_speed_limit)))
     controller.set_lift = lambda positions: calls.append(
         ('lift', positions))
 
     controller.run_down_step(0.20)
 
     assert calls == [
-        ('move', pytest.approx(0.42)),
+        ('move', pytest.approx(0.42), pytest.approx(0.27)),
         ('lift', controller.lift_front_only),
-        ('move', pytest.approx(0.44)),
+        ('move', pytest.approx(0.44), pytest.approx(0.0)),
         ('lift', controller.lift_all),
-        ('move', pytest.approx(0.16)),
+        ('move', pytest.approx(0.16), pytest.approx(0.0)),
         ('lift', controller.lift_down),
     ]
 
@@ -127,9 +128,21 @@ def test_move_relative_uses_serial_source_and_forwards_distance():
     assert request.forward == pytest.approx(-0.02)
     assert request.left == pytest.approx(0.0)
     assert request.yaw_delta == pytest.approx(0.0)
+    assert request.linear_speed_limit == pytest.approx(0.0)
     assert request.position_tolerance == pytest.approx(0.0)
     assert request.yaw_tolerance == pytest.approx(0.0)
     assert request.timeout_sec == pytest.approx(35.0)
+
+
+def test_move_relative_forwards_linear_speed_limit():
+    controller = StepTraverseController.__new__(StepTraverseController)
+    controller.move_client = FakeClient()
+    controller.move_timeout_sec = 35.0
+
+    controller.move_relative(0.42, linear_speed_limit=0.27)
+
+    request = controller.move_client.requests[0]
+    assert request.linear_speed_limit == pytest.approx(0.27)
 
 
 @pytest.mark.parametrize('value', [-0.01, float('inf'), float('nan'), True])
@@ -194,6 +207,30 @@ def test_invalid_move_distance_update_is_rejected(name, value):
 
     assert not result.successful
     assert getattr(controller, name) == original
+
+
+def test_b1_linear_speed_limit_updates_at_runtime():
+    controller = make_controller()
+
+    result = controller.on_parameters_changed([
+        SimpleNamespace(name='b1_linear_speed_limit', value=0.31),
+    ])
+
+    assert result.successful
+    assert controller.b1_linear_speed_limit == pytest.approx(0.31)
+
+
+@pytest.mark.parametrize(
+    'value', [0.0, -0.01, float('inf'), float('nan'), True])
+def test_invalid_b1_linear_speed_limit_is_rejected(value):
+    controller = make_controller()
+
+    result = controller.on_parameters_changed([
+        SimpleNamespace(name='b1_linear_speed_limit', value=value),
+    ])
+
+    assert not result.successful
+    assert controller.b1_linear_speed_limit == pytest.approx(0.27)
 
 
 def test_lift_pair_parameters_update_at_runtime():

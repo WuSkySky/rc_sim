@@ -123,13 +123,13 @@ class PoseServo(Node):
         self.declare_parameter('x_ki', 0.0)
         self.declare_parameter('x_kd', 0.2)
         self.declare_parameter('x_integral_limit', 0.5)
-        self.declare_parameter('x_output_limit', 0.45)
+        self.declare_parameter('x_output_limit', 0.675)
 
         self.declare_parameter('y_kp', 2.5)
         self.declare_parameter('y_ki', 0.0)
         self.declare_parameter('y_kd', 0.2)
         self.declare_parameter('y_integral_limit', 0.5)
-        self.declare_parameter('y_output_limit', 0.45)
+        self.declare_parameter('y_output_limit', 0.675)
 
         self.declare_parameter('yaw_kp', 3.0)
         self.declare_parameter('yaw_ki', 0.0)
