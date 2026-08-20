@@ -82,21 +82,23 @@ GUI 才转换为服务使用的红方基准索引：蓝方横向索引保持 `1/
 两个热点属于独立接入点，不用于替代两台 Jetson 之间的有线 ROS 2 网络。
 
 实车使用两个 ROS 2 主机，二者需要处于同一网络、ROS domain，并使用仓库中的
-Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐、端头 MIPI 相机，以及下位机
-和 Odin 两套独立里程计。底盘位置伺服可由每个请求选择下位机或 Odin 位姿作为闭环
-来源。端头 MIPI 相机（IMX219，与左右同型号）发布
-`/r2/tip_camera/image_raw`，Odin 后摄像头发布 `/r2/rear_camera/image_raw`。LED
-检测路线仍不由 real1 启动：
+Fast DDS 配置。real1 负责控制、串口、KFS/端头对齐控制，以及下位机和
+Odin 两套独立里程计。底盘位置伺服可由每个请求选择下位机或 Odin 位姿
+作为闭环来源。real1 不再启动 MIPI 相机；real2 发布端头相机话题
+`/r2/tip_camera/image_raw`，在本机运行端头 YOLO 检测，并将 `/r2/tip/roi`
+发回 real1 供对齐控制使用。Odin 后摄像头发布
+`/r2/rear_camera/image_raw`。LED 检测路线仍不由 real1 启动：
 
 ```bash
 source install/setup.bash
 ros2 launch bringup real1.launch.py
 ```
 
-real2 负责前置 Yahboom USB 相机、左右 MIPI 相机、前/左/右三路融合 KFS 识别和
-KFS ROI。前置 Yahboom 相机默认发布自定义 `/r2/front_camera/image_raw`，
-ROI 节点默认直接使用该话题。两个节点的标准调试图均默认关闭，可通过
-`visualization_enabled` 动态开启。融合节点不会等待未接入的相机，因此只有部分相机
+real2 只使用端头 MIPI 相机，负责 KFS 识别、KFS ROI 和端头 YOLO 目标检测。
+原左右 MIPI 相机已移除，不使用 Yahboom USB 相机。端头相机发布自定义
+`/r2/tip_camera/image_raw`，KFS 融合节点的 front 输入和 ROI 节点都 remap 到该话题。
+KFS 和端头检测的调试图均默认关闭，可通过对应
+动态参数开启。融合节点不会等待未接入的相机，因此只有部分相机
 在线时也能正常推理：
 
 ```bash
@@ -104,15 +106,8 @@ source install/setup.bash
 ros2 launch bringup real2.launch.py
 ```
 
-real2 的 ROI 默认使用前置 Yahboom 相机，real1 的阶段任务默认使用左侧 KFS 识别
-服务。需要改用右侧时分别执行：
-
-```bash
-ros2 launch bringup real2.launch.py \
-  roi_image_topic:=/r2/right_camera/image_raw
-ros2 launch bringup real1.launch.py \
-  kfs_get_type_service:=/r2/detection/right/get_type
-```
+real2 的 ROI 默认使用端头 MIPI 相机，real1 的阶段任务默认使用融合
+KFS 识别服务 `/r2/detection/get_type`。
 
 ## ROS 2 服务
 
@@ -164,7 +159,10 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 
 阶段一仅由 `real1.launch.py` 启动。请求中的 `team` 只接受 `red` 或 `blue`；当前
 动作参数按红方定义，蓝方执行时仅反转左右平移方向。服务会依次执行底盘升降、
-斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向；武器旋转到最终角度
+斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向。转向完成后调用
+`/r2/led_detection/detect`，只有 LED 状态连续稳定匹配请求目标并返回成功，才会
+松开武器夹爪；检测失败、服务不可用或等待超时时保持夹持并令 Step1 返回失败。
+武器旋转到最终角度
 前，底盘会先抬升到 `action_8_pre_lift_height_m`（默认 `0.21 m`），旋转完成后
 再降回
 `0.01 m`，随后前移 `0.20 m`。动作 2 的左右/前后位移在同一个位置伺服请求中
@@ -191,6 +189,8 @@ GUI 顶部的比赛队伍选择器由 Step1、Step2、Step3 共用；`Step1` 区
 ```bash
 ros2 param set /stage_one action_2_left_m 0.790
 ros2 param set /stage_one weapon_grip_tolerance_m 0.0015
+ros2 param set /stage_one led_target_states "[true]"
+ros2 param set /stage_one final_weapon_grip_m 0.028
 ```
 
 
@@ -437,8 +437,8 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 ### KFS 与视觉
 
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
-前相机；实机的前置 Yahboom 相机和 ROI 节点都由 real2 启动，ROI 默认使用
-`/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
+前相机；实机的端头 MIPI 相机和 ROI 节点都由 real2 启动，ROI 默认使用
+`/r2/tip_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
 `/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、左右边界、左右
 边界列的最下方掩膜点和横向中心偏差，不包含图像像素：
 
@@ -493,10 +493,10 @@ ros2 service call /r2/align_to_tip \
 `0.0` 时，正在执行的任务会使用对应参数的最新值；请求中显式指定的正数不受
 后续参数修改影响。
 
-可视化默认关闭。所有可能发布调试图像的节点统一使用动态参数
-`visualization_enabled`（实机融合检测节点 kfs_detect_fused 例外：三路调试
-图像由 `visualization_enabled_front/left/right` 三个参数独立控制），
-可在运行时开启或关闭：
+可视化默认关闭。大多数可能发布调试图像的节点使用动态参数
+`visualization_enabled`；kfs_detect_fused 的三路调试图像由
+`visualization_enabled_front/left/right` 独立控制，端头 YOLO 检测节点则使用
+`visualization.enabled`。这些参数都可以在运行时开启或关闭：
 
 ```bash
 ros2 param set /kfs_roi visualization_enabled true
@@ -505,30 +505,40 @@ ros2 param set /kfs_detect_fused visualization_enabled_front true
 ros2 param set /kfs_detect_fused visualization_enabled_left true
 ros2 param set /kfs_detect_fused visualization_enabled_right true
 ros2 param set /r2/front_camera_controller visualization_enabled true
-ros2 param set /front_yahboom_camera visualization_enabled true
-ros2 param set /left_mipi_camera visualization_enabled true
-ros2 param set /right_mipi_camera visualization_enabled true
+ros2 param set /tip_mipi_camera visualization_enabled true
+ros2 param set /r2/target_alignment/yolo_target_detector \
+  visualization.enabled true
 ```
 
 将最后的 `true` 改为 `false` 即可关闭。`kfs_roi` 的五阶段调试图像发布在
-`/r2/kfs/roi/debug`；实机三路检测分别为
-`/r2/detection/{front,left,right}/debug`。
-仿真前相机、前置 Yahboom 相机以及左右 MIPI 相机也使用同一个动态参数控制各自的
+`/r2/kfs/roi/debug`；当前实机 KFS 检测图像为 `/r2/detection/front/debug`；
+端头 YOLO 检测调试图为
+`/r2/target_alignment/debug_image`。
+仿真前相机和实机端头 MIPI 相机也使用同一个动态参数控制各自的
 `/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
+图像主链路和所有调试图统一使用 Best Effort、Keep Last 1、Volatile QoS。
+查看端必须使用兼容的 Best Effort 订阅 QoS。
 
-实机 KFS 类型检测，以前相机为例：
+实机 KFS 类型检测：
 
 ```bash
-ros2 service call /r2/detection/front/get_type \
+ros2 service call /r2/detection/get_type \
   robot_r2_interfaces/srv/GetKfsType \
   "{sample_count: 10, timeout_sec: 10.0}"
 ```
 
-前、左、右相机分别使用 `/r2/detection/{front,left,right}/get_type`，请求格式相同。
+当前实机仅端头 MIPI 相机提供 KFS 图像输入，在融合节点中作为 front 路。
 仿真启动文件不再启动 KFS 类型检测节点。
 
 LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：
+
+实机 `real1.launch.py` 使用 Odin 后摄像头
+`/r2/rear_camera/image_raw`。开启 `visualization_enabled` 时节点持续订阅图像并
+发布 `/r2/led_detection/debug`；关闭可视化后，仅在服务调用期间或持续检测模式
+下保留订阅。服务连续 5 帧与请求状态一致时返回成功，30 秒内未满足则返回失败。rear
+`CameraFrame` 发布和 LED 处理频率都限制为最高 15 Hz（当前 Odin 设备配置
+实际为 10 Hz）。可视化图像使用 Best Effort QoS。
 
 ```bash
 ros2 service call /r2/led_detection/detect \

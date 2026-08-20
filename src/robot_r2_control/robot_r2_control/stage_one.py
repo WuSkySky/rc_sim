@@ -11,6 +11,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from robot_r2_interfaces.srv import (
     Align,
+    DetectLed,
     MoveRelative,
     SetJointPosition,
     SetLift,
@@ -24,6 +25,7 @@ SET_LIFT_SERVICE = '/r2/lift/set'
 ALIGN_TO_TIP_SERVICE = '/r2/align_to_tip'
 WEAPON_ROTATE_SERVICE = '/r2/weapon/set_rotate'
 WEAPON_GRIP_SERVICE = '/r2/weapon/set_grip'
+LED_DETECT_SERVICE = '/r2/led_detection/detect'
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,8 @@ class StageOneConfig:
     action_9_lift_height_m: float
     action_10_forward_m: float
     action_11_yaw_delta_rad: float
+    led_target_states: tuple[bool, ...]
+    final_weapon_grip_m: float
     lift_tolerance_m: float
     position_tolerance_m: float
     yaw_tolerance_rad: float
@@ -52,6 +56,7 @@ class StageOneConfig:
     lift_timeout_sec: float
     alignment_timeout_sec: float
     weapon_timeout_sec: float
+    led_detection_timeout_sec: float
 
 
 PARAMETER_DEFAULTS = {
@@ -69,6 +74,8 @@ PARAMETER_DEFAULTS = {
     'action_9_lift_height_m': 0.01,
     'action_10_forward_m': 0.20,
     'action_11_yaw_delta_rad': math.pi,
+    'led_target_states': [True],
+    'final_weapon_grip_m': 0.028,
     'lift_tolerance_m': 0.002,
     'position_tolerance_m': 0.005,
     'yaw_tolerance_rad': 0.01,
@@ -79,6 +86,7 @@ PARAMETER_DEFAULTS = {
     'lift_timeout_sec': 15.0,
     'alignment_timeout_sec': 15.0,
     'weapon_timeout_sec': 10.0,
+    'led_detection_timeout_sec': 32.0,
 }
 
 
@@ -118,6 +126,11 @@ class StageOneController(Node):
             WEAPON_GRIP_SERVICE,
             callback_group=self.callback_group,
         )
+        self.led_detect_client = self.create_client(
+            DetectLed,
+            LED_DETECT_SERVICE,
+            callback_group=self.callback_group,
+        )
         self.task_service = self.create_service(
             StageOne,
             STAGE_ONE_SERVICE,
@@ -130,9 +143,16 @@ class StageOneController(Node):
     @staticmethod
     def validate_config(config):
         for name in StageOneConfig.__dataclass_fields__:
+            if name == 'led_target_states':
+                continue
             value = getattr(config, name)
             if not math.isfinite(value):
                 raise ValueError(f'{name} must be finite')
+
+        if not config.led_target_states:
+            raise ValueError('led_target_states must not be empty')
+        if not all(type(state) is bool for state in config.led_target_states):
+            raise ValueError('led_target_states must contain only booleans')
 
         non_negative = (
             'action_1_lift_height_m',
@@ -147,6 +167,7 @@ class StageOneController(Node):
             'action_8_weapon_rotate_rad',
             'action_9_lift_height_m',
             'action_10_forward_m',
+            'final_weapon_grip_m',
         )
         for name in non_negative:
             if getattr(config, name) < 0.0:
@@ -164,6 +185,7 @@ class StageOneController(Node):
             'lift_timeout_sec',
             'alignment_timeout_sec',
             'weapon_timeout_sec',
+            'led_detection_timeout_sec',
         )
         for name in positive:
             if getattr(config, name) <= 0.0:
@@ -171,15 +193,22 @@ class StageOneController(Node):
 
     @classmethod
     def config_from_values(cls, values):
-        config = StageOneConfig(**values)
+        normalized = dict(values)
+        normalized['led_target_states'] = tuple(
+            normalized['led_target_states'])
+        config = StageOneConfig(**normalized)
         cls.validate_config(config)
         return config
 
     def _read_config(self):
-        values = {
-            name: float(self.get_parameter(name).value)
-            for name in StageOneConfig.__dataclass_fields__
-        }
+        values = {}
+        for name in StageOneConfig.__dataclass_fields__:
+            value = self.get_parameter(name).value
+            values[name] = (
+                tuple(bool(state) for state in value)
+                if name == 'led_target_states'
+                else float(value)
+            )
         return self.config_from_values(values)
 
     def config_snapshot(self):
@@ -194,6 +223,14 @@ class StageOneController(Node):
             }
             for parameter in parameters:
                 if parameter.name not in values:
+                    continue
+                if parameter.name == 'led_target_states':
+                    if parameter.type_ != Parameter.Type.BOOL_ARRAY:
+                        return SetParametersResult(
+                            successful=False,
+                            reason='led_target_states must be a bool array',
+                        )
+                    values[parameter.name] = tuple(parameter.value)
                     continue
                 if parameter.type_ != Parameter.Type.DOUBLE:
                     return SetParametersResult(
@@ -216,6 +253,7 @@ class StageOneController(Node):
             (self.align_client, 'AlignToTip'),
             (self.weapon_rotate_client, 'WeaponRotate'),
             (self.weapon_grip_client, 'WeaponGrip'),
+            (self.led_detect_client, 'LedDetect'),
         )
         for client, name in dependencies:
             if not client.wait_for_service(timeout_sec=timeout_sec):
@@ -358,16 +396,27 @@ class StageOneController(Node):
         self.wait_for_parallel_futures(
             futures, config.weapon_timeout_sec)
 
+    def detect_led(self, config):
+        request = DetectLed.Request()
+        request.target_states = list(config.led_target_states)
+        response = self.wait_for_future(
+            self.led_detect_client.call_async(request),
+            config.led_detection_timeout_sec,
+            'LedDetect',
+        )
+        if not response.success:
+            raise RuntimeError(f'LedDetect failed: {response.message}')
+
     def run_action(self, number, description, operation):
         self.get_logger().info(
-            f'Step1 action {number}/12 started: {description}')
+            f'Step1 action {number}/14 started: {description}')
         try:
             operation()
         except Exception as exc:
             raise RuntimeError(
                 f'Action {number} ({description}) failed: {exc}') from exc
         self.get_logger().info(
-            f'Step1 action {number}/12 completed: {description}')
+            f'Step1 action {number}/14 completed: {description}')
 
     def execute_task(self, config, team):
         lateral_sign = self.lateral_sign(team)
@@ -452,6 +501,22 @@ class StageOneController(Node):
             'rotate chassis by pi radians',
             lambda: self.move_relative(
                 0.0, 0.0, config.action_11_yaw_delta_rad, config),
+        )
+        self.run_action(
+            13,
+            'wait for target LED state',
+            lambda: self.detect_led(config),
+        )
+        self.run_action(
+            14,
+            'release weapon gripper after LED confirmation',
+            lambda: self.set_weapon_joint(
+                self.weapon_grip_client,
+                'WeaponGrip',
+                config.final_weapon_grip_m,
+                config.weapon_grip_tolerance_m,
+                config,
+            ),
         )
 
     def handle_task(self, request, response):

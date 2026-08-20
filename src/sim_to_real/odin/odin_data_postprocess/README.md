@@ -19,6 +19,10 @@ Odin 数据的 ROS 2 后处理节点，包括：
 ros2 param set /camera_frame_postprocess visualization_enabled true
 ```
 
+`/r2/rear_camera/image_raw` 的发布频率由动态参数 `max_publish_rate` 限制，
+最大允许值为 15 Hz。没有任何 `CameraFrame` 订阅者且调试图关闭时，节点会跳过
+大图打包与发布；`real1` 中的 LED 检测也只在服务请求期间订阅该话题。
+
 ## `odometry_postprocess` 调试
 
 以下命令均在工作区根目录执行。

@@ -110,7 +110,7 @@ def generate_launch_description():
         parameters=[led_detect_config],
         remappings=[
             (
-                '/r2/left_camera/image_raw',
+                '/r2/led_detection/image',
                 '/r2/front_camera/image_raw',
             ),
         ],

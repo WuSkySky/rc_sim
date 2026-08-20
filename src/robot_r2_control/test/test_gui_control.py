@@ -1208,7 +1208,7 @@ def test_stage_one_parameter_load_result_checks_every_yaml_parameter():
         0, output, '')
 
     assert success
-    assert message == 'Step1 参数写入成功：共 24 项'
+    assert message == 'Step1 参数写入成功：共 27 项'
 
 
 def test_stage_one_parameter_load_result_reports_missing_parameter():

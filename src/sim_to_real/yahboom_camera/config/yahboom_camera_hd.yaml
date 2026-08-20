@@ -1,8 +1,7 @@
 # Yahboom HD USB camera (new model, USB 05a3:9230, "HD USB Camera").
 # Native full-HD MJPG mode 1920x1080@30. The old Sunplus SDYH-8P0P model
-# (1bcf:0b09) config stays in yahboom_camera.yaml and is used by the robots'
-# real2.launch.py; this HD config is selected by the standalone
-# yahboom_camera.launch.py.
+# (1bcf:0b09) config stays in yahboom_camera.yaml. This HD config is selected
+# by the standalone yahboom_camera.launch.py.
 /**:
   ros__parameters:
     # Video device node. Install udev/90-yahboom-camera.rules for a stable

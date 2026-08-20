@@ -1,7 +1,6 @@
 # Yahboom USB UVC camera (old model: Sunplus SDYH-8P0P, USB 1bcf:0b09).
-# Used by the robots' real2.launch.py. The new HD USB Camera model
-# (05a3:9230) config lives in yahboom_camera_hd.yaml and is selected by the
-# standalone yahboom_camera.launch.py.
+# Retained for standalone use with the old model. The new HD USB Camera model
+# (05a3:9230) config lives in yahboom_camera_hd.yaml.
 /**:
   ros__parameters:
     # Video device node. Install udev/90-yahboom-camera.rules for a stable

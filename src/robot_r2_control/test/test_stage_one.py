@@ -9,7 +9,7 @@ from robot_r2_control.stage_one import (
     PARAMETER_DEFAULTS,
     StageOneController,
 )
-from robot_r2_interfaces.srv import MoveRelative, StageOne
+from robot_r2_interfaces.srv import DetectLed, MoveRelative, StageOne
 
 
 class FakeLogger:
@@ -29,15 +29,17 @@ class ImmediateFuture:
 
 
 class FakeClient:
-    def __init__(self, name, call_order):
+    def __init__(self, name, call_order, response=None):
         self.name = name
         self.call_order = call_order
         self.requests = []
+        self.response = response or SimpleNamespace(
+            success=True, message='ok')
 
     def call_async(self, request):
         self.call_order.append(self.name)
         self.requests.append(request)
-        return ImmediateFuture(SimpleNamespace(success=True, message='ok'))
+        return ImmediateFuture(self.response)
 
 
 class DependencyClient:
@@ -73,6 +75,8 @@ def make_sequence_controller():
         lambda client, _description, position, tolerance, _config:
         controller.calls.append(
             ('weapon_joint', client, position, tolerance)))
+    controller.detect_led = lambda config: controller.calls.append(
+        ('led_detect', config.led_target_states))
     return controller
 
 
@@ -100,6 +104,8 @@ def test_red_team_runs_all_numbered_actions_in_order():
         ('lift', 0.01),
         ('move', 0.20, 0.0, 0.0),
         ('move', 0.0, 0.0, math.pi),
+        ('led_detect', (True,)),
+        ('weapon_joint', 'grip_client', 0.028, 0.001),
     ]
 
 
@@ -151,6 +157,7 @@ def test_weapon_pair_dispatches_both_requests_before_waiting():
         ('action_4_pixel_tolerance_px', 0.0),
         ('action_8_pre_lift_height_m', -0.1),
         ('weapon_timeout_sec', math.inf),
+        ('led_target_states', []),
     ],
 )
 def test_invalid_config_is_rejected(name, value):
@@ -180,6 +187,22 @@ def test_parameter_update_atomically_replaces_config_snapshot():
     assert updated.position_tolerance_m == pytest.approx(0.006)
 
 
+def test_parameter_update_accepts_led_targets_and_final_grip_position():
+    controller = StageOneController.__new__(StageOneController)
+    controller.config_lock = threading.RLock()
+    controller._config = default_config()
+
+    result = controller.on_parameters_changed([
+        Parameter('led_target_states', value=[False, True]),
+        Parameter('final_weapon_grip_m', value=0.025),
+    ])
+
+    assert result.successful
+    updated = controller.config_snapshot()
+    assert updated.led_target_states == (False, True)
+    assert updated.final_weapon_grip_m == pytest.approx(0.025)
+
+
 def test_move_relative_uses_serial_source_and_forwards_request_values():
     controller = StageOneController.__new__(StageOneController)
     controller.move_client = FakeClient('move', [])
@@ -203,8 +226,22 @@ def test_unavailable_dependency_aborts_before_actions():
     controller.align_client = DependencyClient(False)
     controller.weapon_rotate_client = DependencyClient(True)
     controller.weapon_grip_client = DependencyClient(True)
+    controller.led_detect_client = DependencyClient(True)
 
     with pytest.raises(RuntimeError, match='AlignToTip service unavailable'):
+        controller.wait_for_dependencies(0.1)
+
+
+def test_unavailable_led_dependency_aborts_before_actions():
+    controller = StageOneController.__new__(StageOneController)
+    controller.move_client = DependencyClient(True)
+    controller.lift_client = DependencyClient(True)
+    controller.align_client = DependencyClient(True)
+    controller.weapon_rotate_client = DependencyClient(True)
+    controller.weapon_grip_client = DependencyClient(True)
+    controller.led_detect_client = DependencyClient(False)
+
+    with pytest.raises(RuntimeError, match='LedDetect service unavailable'):
         controller.wait_for_dependencies(0.1)
 
 
@@ -217,6 +254,54 @@ def test_blue_team_reverses_only_lateral_translation():
     assert controller.calls[5] == ('move', -0.10, 0.0, 0.0)
     assert controller.calls[10] == ('move', 0.20, 0.0, 0.0)
     assert controller.calls[11] == ('move', 0.0, 0.0, math.pi)
+
+
+def test_led_detection_request_uses_configured_target_states():
+    controller = StageOneController.__new__(StageOneController)
+    controller.led_detect_client = FakeClient('led_detect', [])
+    values = dict(PARAMETER_DEFAULTS)
+    values['led_target_states'] = [True, False, True]
+
+    controller.detect_led(StageOneController.config_from_values(values))
+
+    request = controller.led_detect_client.requests[0]
+    assert isinstance(request, DetectLed.Request)
+    assert request.target_states == [True, False, True]
+
+
+def test_led_detection_rejection_is_reported():
+    controller = StageOneController.__new__(StageOneController)
+    controller.led_detect_client = FakeClient(
+        'led_detect', [],
+        response=SimpleNamespace(
+            success=False,
+            message='target did not stabilize',
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='LedDetect failed: target did not stabilize',
+    ):
+        controller.detect_led(default_config())
+
+
+def test_led_detection_failure_keeps_weapon_gripper_closed():
+    controller = make_sequence_controller()
+
+    def fail_led_detection(config):
+        controller.calls.append(('led_detect', config.led_target_states))
+        raise RuntimeError('target not detected')
+
+    controller.detect_led = fail_led_detection
+
+    with pytest.raises(
+        RuntimeError,
+        match=r'Action 13 .*target not detected',
+    ):
+        controller.execute_task(default_config(), StageOne.Request.RED)
+
+    assert controller.calls[-1] == ('led_detect', (True,))
 
 
 @pytest.mark.parametrize('team', ['', 'RED', 'green'])

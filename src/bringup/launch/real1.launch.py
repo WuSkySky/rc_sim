@@ -8,7 +8,6 @@ from launch.actions import (
     SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -21,12 +20,10 @@ def generate_launch_description():
         'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
     control_pkg = get_package_share_directory('robot_r2_control')
-    mipi_camera_pkg = get_package_share_directory('mipi_camera')
+    detect_pkg = get_package_share_directory('robot_r2_detect')
     # ArUco 识别对接当前不在 real1 启动，以下变量保留待恢复：
     # aruco_pkg = get_package_share_directory('robot_r2_aruco')
     # controller_pkg = get_package_share_directory('robot_r2_controller')
-    target_alignment_pkg = get_package_share_directory(
-        'robot_r2_target_alignment')
     fastdds_profile = os.path.join(
         interfaces_pkg,
         'config',
@@ -58,18 +55,33 @@ def generate_launch_description():
         )
     )
 
-    # Odin 图像后处理当前停用；real1 直接使用驱动发布的去畸变图像。
-    # camera_frame_config = os.path.join(
-    #     odin_data_postprocess_pkg,
-    #     'config',
-    #     'camera_frame_postprocess.yaml',
-    # )
-    # camera_frame_postprocess = Node(
-    #     package='odin_data_postprocess',
-    #     executable='camera_frame_postprocess',
-    #     parameters=[camera_frame_config],
-    #     output='screen',
-    # )
+    camera_frame_config = os.path.join(
+        odin_data_postprocess_pkg,
+        'config',
+        'camera_frame_postprocess.yaml',
+    )
+    camera_frame_postprocess = Node(
+        package='odin_data_postprocess',
+        executable='camera_frame_postprocess',
+        parameters=[camera_frame_config],
+        output='screen',
+    )
+
+    led_detect_config = os.path.join(
+        detect_pkg,
+        'config',
+        'led_detect.yaml',
+    )
+    led_detect = Node(
+        package='robot_r2_detect',
+        executable='led_detect',
+        name='led_detect',
+        parameters=[led_detect_config],
+        remappings=[
+            ('/r2/led_detection/image', '/r2/rear_camera/image_raw'),
+        ],
+        output='screen',
+    )
 
     odin_odometry_config = os.path.join(
         odin_data_postprocess_pkg,
@@ -144,48 +156,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    # Weapon-tip MIPI camera (IMX219, same model as left/right). Its CameraFrame
-    # is published on /r2/tip_camera/image_raw for the tip-detection upstream.
-    mipi_camera_config = os.path.join(
-        mipi_camera_pkg,
-        'config',
-        'mipi_camera.yaml',
-    )
-    tip_mipi_camera = Node(
-        package='mipi_camera',
-        executable='mipi_camera',
-        name='tip_mipi_camera',
-        parameters=[mipi_camera_config],
-        remappings=[
-            ('/r2/mipi_camera/image_raw', '/r2/tip_camera/image_raw'),
-            (
-                '/r2/mipi_camera/image_raw/debug',
-                '/r2/tip_camera/image_raw/debug',
-            ),
-            ('/r2/mipi_camera/camera_info', '/r2/tip_camera/camera_info'),
-        ],
-        output='screen',
-    )
-
-    # Tip YOLO detector: subscribes the tip camera and publishes
-    # AlignmentDetection to /r2/tip/roi (consumed by tip_alignment above).
-    detector_config = os.path.join(
-        target_alignment_pkg,
-        'config',
-        'yolo_target_detector.yaml',
-    )
-    yolo_target_detector = Node(
-        package='robot_r2_target_alignment',
-        executable='yolo_target_detector',
-        namespace='r2/target_alignment',
-        name='yolo_target_detector',
-        parameters=[
-            detector_config,
-            {'input_video_topic': '/r2/tip_camera/image_raw'},
-        ],
-        output='screen',
-    )
-
     # ==================================================================
     # ArUco 二维码检测与专用底盘伺服（基于端头 MIPI 相机）均已注释停用，
     # 不在 real1 启动。需要恢复时取消本段及下方 LaunchDescription 中两行引用
@@ -254,7 +224,7 @@ def generate_launch_description():
             'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         DeclareLaunchArgument(
             'kfs_get_type_service',
-            default_value='/r2/detection/left/get_type',
+            default_value='/r2/detection/get_type',
             description='Remote KFS detection service used by control',
         ),
         # 与 ArUco 识别对接配套的开关，停用期间一并注释：
@@ -264,15 +234,14 @@ def generate_launch_description():
         #     description='Start tip-camera ArUco detection and chassis servo',
         # ),
         odin_launch,
-        # camera_frame_postprocess,
+        camera_frame_postprocess,
+        led_detect,
         odin_odometry_postprocess,
         control_launch,
         serial_bridge,
         odometry_tf,
         kfs_alignment,
         tip_alignment,
-        tip_mipi_camera,
-        yolo_target_detector,
         # ArUco 识别对接（当前停用）：
         # aruco_pipeline,
         # aruco_chassis_pose_servo,

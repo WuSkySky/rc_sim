@@ -10,37 +10,18 @@ from launch_ros.actions import Node
 MIPI_IMAGE_TOPIC = '/r2/mipi_camera/image_raw'
 MIPI_DEBUG_TOPIC = '/r2/mipi_camera/image_raw/debug'
 MIPI_CAMERA_INFO_TOPIC = '/r2/mipi_camera/camera_info'
-YAHBOOM_IMAGE_TOPIC = '/r2/yahboom_camera/image_raw'
-YAHBOOM_DEBUG_TOPIC = '/r2/yahboom_camera/image_raw/debug'
-YAHBOOM_CAMERA_INFO_TOPIC = '/r2/yahboom_camera/camera_info'
 
 
-def mipi_camera_node(side, config):
-    camera_prefix = f'/r2/{side}_camera'
+def tip_mipi_camera_node(config):
     return Node(
         package='mipi_camera',
         executable='mipi_camera',
-        name=f'{side}_mipi_camera',
+        name='tip_mipi_camera',
         parameters=[config],
         remappings=[
-            (MIPI_IMAGE_TOPIC, f'{camera_prefix}/image_raw'),
-            (MIPI_DEBUG_TOPIC, f'{camera_prefix}/image_raw/debug'),
-            (MIPI_CAMERA_INFO_TOPIC, f'{camera_prefix}/camera_info'),
-        ],
-        output='screen',
-    )
-
-
-def yahboom_camera_node(config):
-    return Node(
-        package='yahboom_camera',
-        executable='yahboom_camera',
-        name='front_yahboom_camera',
-        parameters=[config],
-        remappings=[
-            (YAHBOOM_IMAGE_TOPIC, '/r2/front_camera/image_raw'),
-            (YAHBOOM_DEBUG_TOPIC, '/r2/front_camera/image_raw/debug'),
-            (YAHBOOM_CAMERA_INFO_TOPIC, '/r2/front_camera/camera_info'),
+            (MIPI_IMAGE_TOPIC, '/r2/tip_camera/image_raw'),
+            (MIPI_DEBUG_TOPIC, '/r2/tip_camera/image_raw/debug'),
+            (MIPI_CAMERA_INFO_TOPIC, '/r2/tip_camera/camera_info'),
         ],
         output='screen',
     )
@@ -52,39 +33,32 @@ def fused_kfs_detect_node(config):
         executable='kfs_detect_fused',
         name='kfs_detect_fused',
         parameters=[config],
+        remappings=[
+            ('/r2/front_camera/image_raw', '/r2/tip_camera/image_raw'),
+        ],
         output='screen',
     )
 
 
 def generate_launch_description():
     interfaces_pkg = get_package_share_directory('robot_r2_interfaces')
-    yahboom_camera_pkg = get_package_share_directory('yahboom_camera')
     mipi_camera_pkg = get_package_share_directory('mipi_camera')
     detect_pkg = get_package_share_directory('robot_r2_detect')
     roi_pkg = get_package_share_directory('robot_r2_kfs_roi')
+    target_alignment_pkg = get_package_share_directory(
+        'robot_r2_target_alignment')
     fastdds_profile = os.path.join(
         interfaces_pkg,
         'config',
         'fastdds_camera.xml',
     )
 
-    # Both robots' front USB cameras are the new HD model (05a3:9230),
-    # which only advertises 60 fps at 720p MJPG, so real2 uses the HD config
-    # (1920x1080@30). The old-model 720p config stays in yahboom_camera.yaml.
-    yahboom_camera_config = os.path.join(
-        yahboom_camera_pkg,
-        'config',
-        'yahboom_camera_hd.yaml',
-    )
-    front_yahboom_camera = yahboom_camera_node(yahboom_camera_config)
-
     mipi_camera_config = os.path.join(
         mipi_camera_pkg,
         'config',
         'mipi_camera.yaml',
     )
-    left_mipi_camera = mipi_camera_node('left', mipi_camera_config)
-    right_mipi_camera = mipi_camera_node('right', mipi_camera_config)
+    tip_mipi_camera = tip_mipi_camera_node(mipi_camera_config)
 
     kfs_detect_config = os.path.join(
         detect_pkg,
@@ -112,6 +86,25 @@ def generate_launch_description():
         output='screen',
     )
 
+    # The tip camera and GPU detector now run together on real2. The detector
+    # publishes AlignmentDetection over DDS to real1's tip_alignment controller.
+    target_detector_config = os.path.join(
+        target_alignment_pkg,
+        'config',
+        'yolo_target_detector.yaml',
+    )
+    yolo_target_detector = Node(
+        package='robot_r2_target_alignment',
+        executable='yolo_target_detector',
+        namespace='r2/target_alignment',
+        name='yolo_target_detector',
+        parameters=[
+            target_detector_config,
+            {'input_video_topic': '/r2/tip_camera/image_raw'},
+        ],
+        output='screen',
+    )
+
     return LaunchDescription([
         SetEnvironmentVariable(
             'RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'),
@@ -123,12 +116,11 @@ def generate_launch_description():
             'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         DeclareLaunchArgument(
             'roi_image_topic',
-            default_value='/r2/front_camera/image_raw',
+            default_value='/r2/tip_camera/image_raw',
             description='Image topic used by the single KFS ROI node',
         ),
-        front_yahboom_camera,
-        left_mipi_camera,
-        right_mipi_camera,
+        tip_mipi_camera,
         fused_kfs_detect,
         kfs_roi,
+        yolo_target_detector,
     ])

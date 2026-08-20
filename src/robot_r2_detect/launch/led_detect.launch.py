@@ -42,6 +42,12 @@ def generate_launch_description():
                 name="led_detect",
                 output="screen",
                 parameters=[led_detect_config],
+                remappings=[
+                    (
+                        "/r2/led_detection/image",
+                        "/r2/left_camera/image_raw",
+                    ),
+                ],
             ),
         ]
     )

@@ -1,4 +1,6 @@
 camera_frame_postprocess:
   ros__parameters:
-    # This node currently exposes only the visualization switch.
     visualization_enabled: false
+    # Bound the rear CameraFrame topic itself, not just detector processing.
+    # Values above 15 Hz are rejected at startup and at runtime.
+    max_publish_rate: 15.0

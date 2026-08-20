@@ -1,15 +1,14 @@
 led_detect:
   ros__parameters:
-    image_topic: /r2/left_camera/image_raw
-    service_name: /r2/led_detection/detect
-    # Published once per processed frame only while continuous detection is on.
-    result_topic: /r2/led_detection/result
-    visualization_topic: /r2/led_detection/debug
+    # When enabled, keep the input subscription active and continuously publish
+    # annotated debug images even when no detection service is running.
     visualization_enabled: false
 
-    # When false, images are processed only while the service is active.
-    # This parameter can be changed at runtime.
-    continuous_detection: true
+    # Publish LedDetection results continuously instead of only tracking service
+    # requests. Visualization can remain active independently of this switch.
+    continuous_detection: false
+    stable_match_frames: 5
+    service_timeout_sec: 30.0
 
     aruco_dictionary: DICT_4X4_50
     # Set to -1 to accept the detected marker with the largest image area.
@@ -25,6 +24,5 @@ led_detect:
     led_radius_mm: 10.0
     brightness_threshold: 200.0
 
-    # Actual processing cap (not only a warning threshold). Incoming frames
-    # above this rate are dropped before CameraFrame conversion and ArUco work.
-    target_processing_rate: 5.0
+    # Actual processing cap. Values above 15 Hz are rejected.
+    target_processing_rate: 15.0

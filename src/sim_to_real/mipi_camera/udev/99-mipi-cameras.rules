@@ -1,12 +1,9 @@
 # IMX219 MIPI CSI camera aliases.
 #
-# Each Jetson exposes its physical CSI connectors at fixed addresses:
-#   9-0010  -> connector A
-#   10-0010 -> connector B
+# Jetson2 exposes CSI-A/B at 9-0010/10-0010. The former left/right cameras have
+# been removed, so whichever connector contains the single weapon-tip camera
+# receives the same stable alias.
 #
-# real2 (Jetson2) has the left and right cameras on the two connectors.
-# real1 (Jetson1) has only the weapon-tip camera on connector A, so on that
-# host replace "mipi_left" below with "mipi_tip" (or install a host-specific
-# rule mapping 9-0010 to mipi_tip). See mipi_camera/README.md.
-KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", ATTR{name}=="*9-0010", SYMLINK+="mipi_left"
-KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", ATTR{name}=="*10-0010", SYMLINK+="mipi_right"
+# real1 no longer has a MIPI camera and does not need this rule.
+KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", ATTR{name}=="*9-0010*", SYMLINK+="mipi_tip"
+KERNEL=="video[0-9]*", SUBSYSTEM=="video4linux", ATTR{name}=="*10-0010*", SYMLINK+="mipi_tip"
