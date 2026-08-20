@@ -37,6 +37,7 @@ class StageOneConfig:
     action_5_weapon_grip_m: float
     action_6_backward_m: float
     action_7_weapon_grip_m: float
+    action_8_pre_lift_height_m: float
     action_8_weapon_rotate_rad: float
     action_9_lift_height_m: float
     action_10_forward_m: float
@@ -63,6 +64,7 @@ PARAMETER_DEFAULTS = {
     'action_5_weapon_grip_m': 0.028,
     'action_6_backward_m': 0.10,
     'action_7_weapon_grip_m': 0.0,
+    'action_8_pre_lift_height_m': 0.21,
     'action_8_weapon_rotate_rad': math.radians(142.0),
     'action_9_lift_height_m': 0.01,
     'action_10_forward_m': 0.20,
@@ -141,6 +143,7 @@ class StageOneController(Node):
             'action_5_weapon_grip_m',
             'action_6_backward_m',
             'action_7_weapon_grip_m',
+            'action_8_pre_lift_height_m',
             'action_8_weapon_rotate_rad',
             'action_9_lift_height_m',
             'action_10_forward_m',
@@ -357,14 +360,14 @@ class StageOneController(Node):
 
     def run_action(self, number, description, operation):
         self.get_logger().info(
-            f'Step1 action {number}/11 started: {description}')
+            f'Step1 action {number}/12 started: {description}')
         try:
             operation()
         except Exception as exc:
             raise RuntimeError(
                 f'Action {number} ({description}) failed: {exc}') from exc
         self.get_logger().info(
-            f'Step1 action {number}/11 completed: {description}')
+            f'Step1 action {number}/12 completed: {description}')
 
     def execute_task(self, config, team):
         lateral_sign = self.lateral_sign(team)
@@ -418,6 +421,12 @@ class StageOneController(Node):
         )
         self.run_action(
             8,
+            'lift chassis before final weapon rotate',
+            lambda: self.set_lift(
+                config.action_8_pre_lift_height_m, config),
+        )
+        self.run_action(
+            9,
             'rotate weapon to final angle',
             lambda: self.set_weapon_joint(
                 self.weapon_rotate_client,
@@ -428,18 +437,18 @@ class StageOneController(Node):
             ),
         )
         self.run_action(
-            9,
+            10,
             'lower chassis to travel height',
             lambda: self.set_lift(config.action_9_lift_height_m, config),
         )
         self.run_action(
-            10,
+            11,
             'move forward',
             lambda: self.move_relative(
                 config.action_10_forward_m, 0.0, 0.0, config),
         )
         self.run_action(
-            11,
+            12,
             'rotate chassis by pi radians',
             lambda: self.move_relative(
                 0.0, 0.0, config.action_11_yaw_delta_rad, config),

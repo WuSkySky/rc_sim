@@ -1,10 +1,5 @@
-stage_two_point_one:
+/stage_two_point_one:
   ros__parameters:
-    service_name: /r2/stage_two_point_one
-    move_to_pose_service: /r2/move_to_pose
-    set_lift_service: /r2/lift/set
-    get_kfs_type_service: /r2/detection/get_type
-    align_to_kfs_service: /r2/align_to_kfs
     dependency_timeout_sec: 2.0
     move_timeout_sec: 35.0
     lift_timeout_sec: 15.0

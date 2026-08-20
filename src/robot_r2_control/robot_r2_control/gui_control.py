@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import Twist
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
@@ -18,7 +18,7 @@ from robot_r2_interfaces.msg import LiftCommand
 from robot_r2_interfaces.srv import (
     Align,
     KfsAction,
-    MoveToPose,
+    MoveRelative,
     SetBasePose,
     StageOne,
     StageTwoPointOne,
@@ -52,6 +52,7 @@ STAGE_ONE_PARAMETER_NAMES = {
     'action_5_weapon_grip_m',
     'action_6_backward_m',
     'action_7_weapon_grip_m',
+    'action_8_pre_lift_height_m',
     'action_8_weapon_rotate_rad',
     'action_9_lift_height_m',
     'action_10_forward_m',
@@ -69,6 +70,76 @@ STAGE_ONE_PARAMETER_NAMES = {
 }
 STAGE_ONE_SOURCE_RELATIVE_PATH = Path(
     'src/robot_r2_control/config/stage_one.yaml')
+STEP_TRAVERSE_PARAMETER_NAMES = {
+    'dependency_timeout_sec',
+    'move_timeout_sec',
+    'lift_timeout_sec',
+    'a1',
+    'a1_backoff',
+    'a2',
+    'a2_backoff',
+    'a3',
+    'up_pre_lift_clearance',
+    'b1',
+    'b2',
+    'b3',
+    'lift_all_front',
+    'lift_all_rear',
+    'lift_front_only_front',
+    'lift_front_only_rear',
+    'lift_rear_only_front',
+    'lift_rear_only_rear',
+    'lift_down_front',
+    'lift_down_rear',
+}
+STAGE_TWO_POINT_ONE_PARAMETER_NAMES = {
+    'dependency_timeout_sec',
+    'move_timeout_sec',
+    'lift_timeout_sec',
+    'detection_timeout_sec',
+    'align_timeout_sec',
+    'load_timeout_sec',
+    'release_timeout_sec',
+    'cell_5_3_high_kfs_edge_pose',
+    'cell_5_2_high_kfs_edge_pose',
+    'cell_5_1_high_kfs_edge_pose',
+    'high_kfs_edge_offset',
+    'release_edge_offset',
+    'detection_sample_count',
+    'lift_up_front',
+    'lift_up_rear',
+    'lift_initial_front',
+    'lift_initial_rear',
+    'lift_down_front',
+    'lift_down_rear',
+}
+STAGE_TWO_POINT_TWO_PARAMETER_NAMES = {
+    'dependency_timeout_sec',
+    'pose_timeout_sec',
+    'move_timeout_sec',
+    'traverse_timeout_sec',
+    'detection_timeout_sec',
+    'align_timeout_sec',
+    'load_timeout_sec',
+    'release_timeout_sec',
+    'forward_x',
+    'lateral_y',
+    'cell_heights',
+    'initial_forward_index',
+    'initial_lateral_index',
+    'terminal_forward_index',
+    'chassis_front_offset',
+    'higher_kfs_edge_offset',
+    'lower_kfs_edge_offset',
+    'release_edge_offset',
+    'detection_sample_count',
+}
+STEP_TRAVERSE_SOURCE_RELATIVE_PATH = Path(
+    'src/robot_r2_control/config/step_traverse.yaml')
+STAGE_TWO_POINT_ONE_SOURCE_RELATIVE_PATH = Path(
+    'src/robot_r2_control/config/stage_two_point_one.yaml')
+STAGE_TWO_POINT_TWO_SOURCE_RELATIVE_PATH = Path(
+    'src/robot_r2_control/config/stage_two_point_two.yaml')
 RELOCALIZATION_FIELDS = ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
 
 
@@ -107,20 +178,25 @@ def resolve_stage_one_source_config(package_share_directory):
     )
 
 
-def normalize_angle(angle):
-    return math.atan2(math.sin(angle), math.cos(angle))
+def resolve_step_traverse_source_config(package_share_directory):
+    return resolve_source_config(
+        package_share_directory,
+        STEP_TRAVERSE_SOURCE_RELATIVE_PATH,
+    )
 
 
-def yaw_from_quaternion(quaternion):
-    sin_yaw = 2.0 * (
-        quaternion.w * quaternion.z +
-        quaternion.x * quaternion.y
+def resolve_stage_two_point_one_source_config(package_share_directory):
+    return resolve_source_config(
+        package_share_directory,
+        STAGE_TWO_POINT_ONE_SOURCE_RELATIVE_PATH,
     )
-    cos_yaw = 1.0 - 2.0 * (
-        quaternion.y * quaternion.y +
-        quaternion.z * quaternion.z
+
+
+def resolve_stage_two_point_two_source_config(package_share_directory):
+    return resolve_source_config(
+        package_share_directory,
+        STAGE_TWO_POINT_TWO_SOURCE_RELATIVE_PATH,
     )
-    return math.atan2(sin_yaw, cos_yaw)
 
 
 def manual_twist_components(active_keys, linear_speed, angular_speed):
@@ -172,24 +248,21 @@ def motion_control_text(config):
                 f'{test_angular} rad/s 逆时针旋转 {test_duration} s'),
         },
         'pose': {
-            'forward': f'位置伺服前进 {pose_distance} m',
-            'left': f'位置伺服左平移 {pose_distance} m',
-            'rotate_left': f'位置伺服逆时针旋转 {pose_yaw} rad',
+            'serial': {
+                'forward': f'位置伺服前进 {pose_distance} m（下位机）',
+                'left': f'位置伺服左平移 {pose_distance} m（下位机）',
+                'rotate_left': (
+                    f'位置伺服逆时针旋转 {pose_yaw} rad（下位机）'),
+            },
+            'odin': {
+                'forward': f'位置伺服前进 {pose_distance} m（Odin）',
+                'left': f'位置伺服左平移 {pose_distance} m（Odin）',
+                'rotate_left': f'位置伺服逆时针旋转 {pose_yaw} rad（Odin）',
+            },
         },
         'kfs_alignment': 'KFS 对齐',
         'tip_alignment': '端头对齐',
     }
-
-
-def relative_pose_goal(current_pose, forward, left, yaw_delta):
-    current_x, current_y, current_yaw = current_pose
-    cos_yaw = math.cos(current_yaw)
-    sin_yaw = math.sin(current_yaw)
-    return (
-        current_x + cos_yaw * forward - sin_yaw * left,
-        current_y + sin_yaw * forward + cos_yaw * left,
-        normalize_angle(current_yaw + yaw_delta),
-    )
 
 
 def parse_relocalization_values(raw_values):
@@ -281,24 +354,27 @@ def make_stage_one_parameter_load_command(config_path):
 
 class GuiControlNode(Node):
     CMD_VEL_TOPIC = '/r2/cmd_vel'
-    POSE_FEEDBACK_TOPIC = '/r2/pose_feedback'
-    MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+    MOVE_RELATIVE_SERVICE = '/r2/move_relative'
     KFS_ALIGNMENT_SERVICE = '/r2/align_to_kfs'
     TIP_ALIGNMENT_SERVICE = '/r2/align_to_tip'
     KFS_ACTION_SERVICE = '/r2/kfs/action'
     SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
+    SET_BASE_POSE_ODIN_SERVICE = '/r2/set_base_pose_odin'
     STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
     STAGE_ONE_SERVICE = '/r2/stage_one'
     STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
     STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
     LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
 
-    # 半车长：base_link 原点到车头的距离（米）。
-    CHASSIS_FRONT_OFFSET = 0.35
-    # 中间车道 (5,2) 与 (4,2) 的边界（车头目标位姿）：x, y, yaw。
-    # (5,2) 中心 (3.4, -3.0)，(4,2) 中心 (2.2, -3.0)，边界 x=2.8；
-    # yaw=pi 使车头朝 -x，从 (5,2) 面向 (4,2)。
-    MIDDLE_STEP_EDGE_POSE = (2.8, -3.0, math.pi)
+    # Step2 测试重定位位姿：base_link 在 map 中的目标位姿
+    # （x, y, z, roll, pitch, yaw）；yaw=pi 使车头朝 -x，面向梅林区。
+    # 2.1：x 比 (4,1) 格心 (2.2, -4.2) 大 3.368 m，y 比该格心大 0.2362 m。
+    STEP_TWO_POINT_ONE_RELOCALIZATION_POSE = (
+        5.568, -3.9638, 0.0, 0.0, 0.0, math.pi)
+    # 2.2：(5,2) 格心 (3.4, -3.0)，该格为最低高度层（cell_heights=0.0），
+    # 同时也是 2.2 的 initial_index 起点。
+    STEP_TWO_POINT_TWO_RELOCALIZATION_POSE = (
+        3.4, -3.0, 0.0, 0.0, 0.0, math.pi)
 
     KFS_LOAD_MOTOR_FEEDBACK_TOPICS = {
         'root_rotate': '/r2/gripper/rotate_feedback',
@@ -306,6 +382,28 @@ class GuiControlNode(Node):
         'grip': '/r2/gripper/grip_feedback',
         'weapon_rotate': '/r2/weapon/rotate_feedback',
         'weapon_grip': '/r2/weapon/grip_feedback',
+    }
+
+    # GUI 中可从工作区 src 源码直接加载参数的 Step2 相关节点。
+    STEP_TWO_PARAMETER_LOAD_TARGETS = {
+        'step_traverse': {
+            'display': '台阶跨越',
+            'parameter_names': STEP_TRAVERSE_PARAMETER_NAMES,
+            'source_relative_path': STEP_TRAVERSE_SOURCE_RELATIVE_PATH,
+            'node_name': '/step_traverse',
+        },
+        'stage_two_point_one': {
+            'display': '2.1',
+            'parameter_names': STAGE_TWO_POINT_ONE_PARAMETER_NAMES,
+            'source_relative_path': STAGE_TWO_POINT_ONE_SOURCE_RELATIVE_PATH,
+            'node_name': '/stage_two_point_one',
+        },
+        'stage_two_point_two': {
+            'display': '2.2',
+            'parameter_names': STAGE_TWO_POINT_TWO_PARAMETER_NAMES,
+            'source_relative_path': STAGE_TWO_POINT_TWO_SOURCE_RELATIVE_PATH,
+            'node_name': '/stage_two_point_two',
+        },
     }
 
     FLOAT_CONTROL_PARAMETERS = {
@@ -365,7 +463,6 @@ class GuiControlNode(Node):
         self.kfs_load_motor_feedback = {
             name: None for name in self.KFS_LOAD_MOTOR_FEEDBACK_TOPICS
         }
-        self.current_pose = None
         self.active_manual_keys = set()
         self.velocity_test_kind = None
         self.velocity_test_deadline = None
@@ -390,6 +487,16 @@ class GuiControlNode(Node):
         self.stage_one_config_path = resolve_stage_one_source_config(
             get_package_share_directory('robot_r2_control'),
         )
+        self.step_two_parameter_load_in_flight = {
+            key: False for key in self.STEP_TWO_PARAMETER_LOAD_TARGETS
+        }
+        self.step_two_parameter_load_config_paths = {
+            key: resolve_source_config(
+                get_package_share_directory('robot_r2_control'),
+                target['source_relative_path'],
+            )
+            for key, target in self.STEP_TWO_PARAMETER_LOAD_TARGETS.items()
+        }
 
         self.declare_parameter('lift_min', 0.0)
         self.declare_parameter('lift_max', 0.376)
@@ -437,12 +544,6 @@ class GuiControlNode(Node):
         }
         self.cmd_vel_publisher = self.create_publisher(
             Twist, self.CMD_VEL_TOPIC, 10)
-        self.pose_subscriber = self.create_subscription(
-            PoseStamped,
-            self.POSE_FEEDBACK_TOPIC,
-            self._on_pose_feedback,
-            10,
-        )
         self.kfs_load_feedback_subscribers = {
             name: self.create_subscription(
                 Float64,
@@ -452,8 +553,8 @@ class GuiControlNode(Node):
             )
             for name, topic in self.KFS_LOAD_MOTOR_FEEDBACK_TOPICS.items()
         }
-        self.move_client = self.create_client(
-            MoveToPose, self.MOVE_TO_POSE_SERVICE)
+        self.move_relative_client = self.create_client(
+            MoveRelative, self.MOVE_RELATIVE_SERVICE)
         self.kfs_alignment_client = self.create_client(
             Align, self.KFS_ALIGNMENT_SERVICE)
         self.tip_alignment_client = self.create_client(
@@ -462,6 +563,8 @@ class GuiControlNode(Node):
             KfsAction, self.KFS_ACTION_SERVICE)
         self.set_base_pose_client = self.create_client(
             SetBasePose, self.SET_BASE_POSE_SERVICE)
+        self.set_base_pose_odin_client = self.create_client(
+            SetBasePose, self.SET_BASE_POSE_ODIN_SERVICE)
         self.step_traverse_client = self.create_client(
             TraverseStep, self.STEP_TRAVERSE_SERVICE)
         self.stage_one_client = self.create_client(
@@ -608,18 +711,6 @@ class GuiControlNode(Node):
         command.data = float(value)
         self.float_command_publishers[control_name].publish(command)
 
-    def _on_pose_feedback(self, message):
-        pose = message.pose
-        current = (
-            float(pose.position.x),
-            float(pose.position.y),
-            yaw_from_quaternion(pose.orientation),
-        )
-        if not all(math.isfinite(value) for value in current):
-            return
-        with self.state_lock:
-            self.current_pose = current
-
     def _on_kfs_load_motor_feedback(self, motor_name, message):
         value = float(message.data)
         if not math.isfinite(value):
@@ -734,7 +825,17 @@ class GuiControlNode(Node):
         self.cmd_vel_publisher.publish(command)
         return True
 
-    def request_relative_pose(self, kind):
+    def request_relative_pose(self, kind, pose_source):
+        if pose_source not in (
+            MoveRelative.Request.SERIAL,
+            MoveRelative.Request.ODIN,
+        ):
+            return False, f'未知位姿来源：{pose_source}'
+        source_label = (
+            '下位机'
+            if pose_source == MoveRelative.Request.SERIAL
+            else 'Odin'
+        )
         with self.state_lock:
             if self.pose_request_in_flight:
                 return False, '位置伺服正在执行'
@@ -747,10 +848,8 @@ class GuiControlNode(Node):
                 self.step_test_request_in_flight
             ):
                 return False, '底盘操作正在执行'
-            if self.current_pose is None:
-                return False, '尚未收到 /r2/pose_feedback'
-            if not self.move_client.service_is_ready():
-                return False, '/r2/move_to_pose 服务不可用'
+            if not self.move_relative_client.service_is_ready():
+                return False, '/r2/move_relative 服务不可用'
 
             distance = self.motion_config['pose_test_linear_distance']
             yaw_delta = self.motion_config['pose_test_yaw']
@@ -763,7 +862,6 @@ class GuiControlNode(Node):
             else:
                 raise ValueError(f'Unknown pose test: {kind}')
 
-            target = relative_pose_goal(self.current_pose, *offsets)
             timeout_sec = self.motion_config['move_timeout_sec']
             self.active_manual_keys.clear()
             self.velocity_test_kind = None
@@ -771,24 +869,25 @@ class GuiControlNode(Node):
             self.pose_request_in_flight = True
 
         self.cmd_vel_publisher.publish(Twist())
-        request = MoveToPose.Request()
-        request.pose_source = MoveToPose.Request.SERIAL
-        request.x = target[0]
-        request.y = target[1]
-        request.yaw = target[2]
+        request = MoveRelative.Request()
+        request.pose_source = pose_source
+        request.forward = offsets[0]
+        request.left = offsets[1]
+        request.yaw_delta = offsets[2]
         request.position_tolerance = 0.0
         request.yaw_tolerance = 0.0
         request.timeout_sec = timeout_sec
         try:
-            future = self.move_client.call_async(request)
+            future = self.move_relative_client.call_async(request)
         except Exception as exc:
             with self.state_lock:
                 self.pose_request_in_flight = False
             return False, f'位置伺服请求发送失败：{exc}'
         future.add_done_callback(self._on_move_complete)
         return True, (
-            f'已发送位置目标：x={target[0]:.3f} m，'
-            f'y={target[1]:.3f} m，yaw={target[2]:.3f} rad'
+            f'已发送 {source_label} 相对移动：'
+            f'前 {offsets[0]:.3f} m，左 {offsets[1]:.3f} m，'
+            f'旋转 {offsets[2]:.3f} rad'
         )
 
     def _on_move_complete(self, future):
@@ -1028,17 +1127,6 @@ class GuiControlNode(Node):
             self.step_test_direction = None
         self._queue_status(message)
 
-    @classmethod
-    def _middle_step_edge_center(cls):
-        edge_x, edge_y, edge_yaw = cls.MIDDLE_STEP_EDGE_POSE
-        return (
-            edge_x - cls.CHASSIS_FRONT_OFFSET * math.cos(edge_yaw),
-            edge_y - cls.CHASSIS_FRONT_OFFSET * math.sin(edge_yaw),
-            0.0,
-            0.0,
-            0.0,
-            edge_yaw,
-        )
 
     @staticmethod
     def _stage_one_team_label(team):
@@ -1141,8 +1229,8 @@ class GuiControlNode(Node):
         with self.state_lock:
             if self._chassis_service_in_flight_locked():
                 return False, '底盘操作正在执行'
-            if not self.set_base_pose_client.service_is_ready():
-                return False, '/r2/set_base_pose 服务不可用'
+            if not self.set_base_pose_odin_client.service_is_ready():
+                return False, '/r2/set_base_pose_odin 服务不可用'
             if not self.stage_two_point_one_client.service_is_ready():
                 return False, '/r2/stage_two_point_one 服务不可用'
             self.active_manual_keys.clear()
@@ -1153,9 +1241,9 @@ class GuiControlNode(Node):
 
         self.cmd_vel_publisher.publish(Twist())
         request = self._make_set_base_pose_request(
-            self._middle_step_edge_center())
+            self.STEP_TWO_POINT_ONE_RELOCALIZATION_POSE)
         try:
-            future = self.set_base_pose_client.call_async(request)
+            future = self.set_base_pose_odin_client.call_async(request)
         except Exception as exc:
             with self.state_lock:
                 self.stage_two_point_one_request_in_flight = False
@@ -1164,7 +1252,7 @@ class GuiControlNode(Node):
         future.add_done_callback(
             self._on_stage_two_point_one_relocalization_complete)
         skip_name = 'skip' if skip else '正常'
-        return True, f'2.1 {skip_name}测试：正在重定位到中间台阶边缘'
+        return True, f'2.1 {skip_name}测试：正在重定位到测试起点'
 
     def _on_stage_two_point_one_relocalization_complete(self, future):
         try:
@@ -1227,8 +1315,8 @@ class GuiControlNode(Node):
         with self.state_lock:
             if self._chassis_service_in_flight_locked():
                 return False, '底盘操作正在执行'
-            if not self.set_base_pose_client.service_is_ready():
-                return False, '/r2/set_base_pose 服务不可用'
+            if not self.set_base_pose_odin_client.service_is_ready():
+                return False, '/r2/set_base_pose_odin 服务不可用'
             if not self.stage_two_point_two_client.service_is_ready():
                 return False, '/r2/stage_two_point_two 服务不可用'
             self.active_manual_keys.clear()
@@ -1239,9 +1327,9 @@ class GuiControlNode(Node):
 
         self.cmd_vel_publisher.publish(Twist())
         request = self._make_set_base_pose_request(
-            self._middle_step_edge_center())
+            self.STEP_TWO_POINT_TWO_RELOCALIZATION_POSE)
         try:
-            future = self.set_base_pose_client.call_async(request)
+            future = self.set_base_pose_odin_client.call_async(request)
         except Exception as exc:
             with self.state_lock:
                 self.stage_two_point_two_request_in_flight = False
@@ -1250,7 +1338,7 @@ class GuiControlNode(Node):
         future.add_done_callback(
             self._on_stage_two_point_two_relocalization_complete)
         skip_name = 'skip' if skip else '正常'
-        return True, f'2.2 {skip_name}测试：正在重定位到 (5,2)-(4,2) 边界'
+        return True, f'2.2 {skip_name}测试：正在重定位到测试起点'
 
     def _on_stage_two_point_two_relocalization_complete(self, future):
         try:
@@ -1508,6 +1596,68 @@ class GuiControlNode(Node):
         with self.state_lock:
             return self.stage_one_parameter_load_in_flight
 
+    def request_step_two_parameter_load(self, key):
+        target = self.STEP_TWO_PARAMETER_LOAD_TARGETS[key]
+        display_name = target['display']
+        config_path = self.step_two_parameter_load_config_paths[key]
+        with self.state_lock:
+            if self.step_two_parameter_load_in_flight[key]:
+                return False, f'{display_name}参数正在写入'
+            if not os.path.isfile(config_path):
+                return (
+                    False,
+                    f'{display_name}参数文件不存在：{config_path}',
+                )
+            self.step_two_parameter_load_in_flight[key] = True
+
+        worker = threading.Thread(
+            target=self._load_step_two_parameters,
+            args=(key,),
+            daemon=True,
+        )
+        worker.start()
+        return (
+            True,
+            f'正在从 YAML 写入 {display_name}参数：{config_path}',
+        )
+
+    def _load_step_two_parameters(self, key):
+        target = self.STEP_TWO_PARAMETER_LOAD_TARGETS[key]
+        display_name = target['display']
+        config_path = self.step_two_parameter_load_config_paths[key]
+        try:
+            result = subprocess.run(
+                make_parameter_load_command(
+                    config_path,
+                    target['node_name'],
+                ),
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=15.0,
+            )
+            _, message = summarize_named_parameter_load_result(
+                display_name + ' ',
+                target['parameter_names'],
+                result.returncode,
+                result.stdout,
+                result.stderr,
+            )
+        except FileNotFoundError:
+            message = f'{display_name}参数写入失败：找不到 ros2 命令'
+        except subprocess.TimeoutExpired:
+            message = f'{display_name}参数写入失败：15 秒内未完成'
+        except Exception as exc:
+            message = f'{display_name}参数写入异常：{exc}'
+        finally:
+            with self.state_lock:
+                self.step_two_parameter_load_in_flight[key] = False
+        self._queue_status(message)
+
+    def is_step_two_parameter_load_in_flight(self, key):
+        with self.state_lock:
+            return self.step_two_parameter_load_in_flight[key]
+
     def stop_chassis(self):
         with self.state_lock:
             self.active_manual_keys.clear()
@@ -1613,6 +1763,10 @@ class GuiControlApp:
         self.last_kfs_action_busy = None
         self.last_kfs_parameter_load_busy = None
         self.last_stage_one_parameter_load_busy = None
+        self.last_step_two_parameter_load_busy = {
+            key: None
+            for key in GuiControlNode.STEP_TWO_PARAMETER_LOAD_TARGETS
+        }
         self._closed = False
         self.chassis_buttons = []
         self.velocity_test_buttons = {}
@@ -1623,6 +1777,9 @@ class GuiControlApp:
         self.stage_one_red_button = None
         self.stage_one_blue_button = None
         self.stage_one_parameter_load_button = None
+        self.step_traverse_parameter_load_button = None
+        self.stage_two_point_one_parameter_load_button = None
+        self.stage_two_point_two_parameter_load_button = None
         self.stage_two_point_one_skip_button = None
         self.stage_two_point_one_normal_button = None
         self.stage_two_point_two_skip_button = None
@@ -1662,6 +1819,7 @@ class GuiControlApp:
             chassis_column, text='底盘测试', padding=12)
         test_frame.grid(row=1, column=0, sticky='ew')
         test_kinds = ('forward', 'left', 'rotate_left')
+        pose_sources = ('serial', 'odin')
         for row, kind in enumerate(test_kinds):
             button = ttk.Button(
                 test_frame,
@@ -1670,14 +1828,25 @@ class GuiControlApp:
             button.grid(row=row, column=0, sticky='ew', pady=3)
             self.velocity_test_buttons[kind] = button
             self.chassis_buttons.append(button)
-        for row, kind in enumerate(test_kinds):
-            button = ttk.Button(
-                test_frame,
-                command=partial(self._start_pose_test, kind),
-            )
-            button.grid(row=row, column=1, sticky='ew', padx=(8, 0), pady=3)
-            self.pose_test_buttons[kind] = button
-            self.chassis_buttons.append(button)
+        for column, pose_source in enumerate(pose_sources, start=1):
+            for row, kind in enumerate(test_kinds):
+                button = ttk.Button(
+                    test_frame,
+                    command=partial(
+                        self._start_pose_test,
+                        pose_source,
+                        kind,
+                    ),
+                )
+                button.grid(
+                    row=row,
+                    column=column,
+                    sticky='ew',
+                    padx=(8, 0),
+                    pady=3,
+                )
+                self.pose_test_buttons[(pose_source, kind)] = button
+                self.chassis_buttons.append(button)
 
         relocalization_frame = ttk.LabelFrame(
             chassis_column, text='重定位', padding=12)
@@ -1736,6 +1905,13 @@ class GuiControlApp:
         self.down_step_test_button.grid(
             row=0, column=1, sticky='ew', padx=(8, 0))
         self.chassis_buttons.append(self.down_step_test_button)
+        self.step_traverse_parameter_load_button = ttk.Button(
+            traverse_test_frame,
+            text='从 YAML 写入台阶跨越参数',
+            command=self._write_step_traverse_parameters,
+        )
+        self.step_traverse_parameter_load_button.grid(
+            row=1, column=0, columnspan=2, sticky='ew', pady=(8, 0))
 
         stage_one_frame = ttk.LabelFrame(
             chassis_column, text='Step1', padding=12)
@@ -1789,6 +1965,13 @@ class GuiControlApp:
         self.stage_two_point_one_normal_button.grid(
             row=0, column=1, sticky='ew', padx=(8, 0))
         self.chassis_buttons.append(self.stage_two_point_one_normal_button)
+        self.stage_two_point_one_parameter_load_button = ttk.Button(
+            stage_two_point_one_frame,
+            text='从 YAML 写入 2.1 参数',
+            command=self._write_stage_two_point_one_parameters,
+        )
+        self.stage_two_point_one_parameter_load_button.grid(
+            row=1, column=0, columnspan=2, sticky='ew', pady=(8, 0))
 
         stage_two_point_two_frame = ttk.LabelFrame(
             chassis_column, text='Step2.2 测试', padding=12)
@@ -1810,6 +1993,13 @@ class GuiControlApp:
         self.stage_two_point_two_normal_button.grid(
             row=0, column=1, sticky='ew', padx=(8, 0))
         self.chassis_buttons.append(self.stage_two_point_two_normal_button)
+        self.stage_two_point_two_parameter_load_button = ttk.Button(
+            stage_two_point_two_frame,
+            text='从 YAML 写入 2.2 参数',
+            command=self._write_stage_two_point_two_parameters,
+        )
+        self.stage_two_point_two_parameter_load_button.grid(
+            row=1, column=0, columnspan=2, sticky='ew', pady=(8, 0))
 
         kfs_test_frame = ttk.LabelFrame(
             chassis_column, text='KFS 测试', padding=12)
@@ -2018,8 +2208,8 @@ class GuiControlApp:
             }
             self.status_text.set(f'{labels[kind]}已开始')
 
-    def _start_pose_test(self, kind):
-        _, message = self.node.request_relative_pose(kind)
+    def _start_pose_test(self, pose_source, kind):
+        _, message = self.node.request_relative_pose(kind, pose_source)
         self.status_text.set(message)
 
     def _start_kfs_alignment_test(self):
@@ -2080,6 +2270,21 @@ class GuiControlApp:
 
     def _write_stage_one_parameters(self):
         _, message = self.node.request_stage_one_parameter_load()
+        self.status_text.set(message)
+
+    def _write_step_traverse_parameters(self):
+        _, message = self.node.request_step_two_parameter_load(
+            'step_traverse')
+        self.status_text.set(message)
+
+    def _write_stage_two_point_one_parameters(self):
+        _, message = self.node.request_step_two_parameter_load(
+            'stage_two_point_one')
+        self.status_text.set(message)
+
+    def _write_stage_two_point_two_parameters(self):
+        _, message = self.node.request_step_two_parameter_load(
+            'stage_two_point_two')
         self.status_text.set(message)
 
     def _publish_lift_command(self, _event=None):
@@ -2146,8 +2351,9 @@ class GuiControlApp:
         self.keyboard_hint.configure(text=control_text['keyboard_hint'])
         for kind, button in self.velocity_test_buttons.items():
             button.configure(text=control_text['velocity'][kind])
-        for kind, button in self.pose_test_buttons.items():
-            button.configure(text=control_text['pose'][kind])
+        for (pose_source, kind), button in self.pose_test_buttons.items():
+            button.configure(
+                text=control_text['pose'][pose_source][kind])
         self.kfs_test_button.configure(
             text=control_text['kfs_alignment'])
         self.tip_test_button.configure(
@@ -2213,6 +2419,19 @@ class GuiControlApp:
                     else tk.NORMAL
                 )
                 self.stage_one_parameter_load_button.configure(state=state)
+            step_two_buttons = {
+                'step_traverse': self.step_traverse_parameter_load_button,
+                'stage_two_point_one': (
+                    self.stage_two_point_one_parameter_load_button),
+                'stage_two_point_two': (
+                    self.stage_two_point_two_parameter_load_button),
+            }
+            for key, button in step_two_buttons.items():
+                busy = self.node.is_step_two_parameter_load_in_flight(key)
+                if busy != self.last_step_two_parameter_load_busy[key]:
+                    self.last_step_two_parameter_load_busy[key] = busy
+                    button.configure(
+                        state=tk.DISABLED if busy else tk.NORMAL)
         except Exception as exc:
             self.node.get_logger().error(f'GUI ROS 回调异常：{exc}')
             self.status_text.set(f'ROS 回调异常：{exc}')

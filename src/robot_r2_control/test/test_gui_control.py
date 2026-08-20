@@ -8,22 +8,25 @@ import pytest
 from robot_r2_control.gui_control import (
     GuiControlNode,
     STAGE_ONE_PARAMETER_NAMES,
+    STAGE_TWO_POINT_ONE_PARAMETER_NAMES,
+    STAGE_TWO_POINT_TWO_PARAMETER_NAMES,
+    STEP_TRAVERSE_PARAMETER_NAMES,
     make_parameter_load_command,
     make_stage_one_parameter_load_command,
     manual_twist_components,
     motion_control_text,
-    normalize_angle,
     normalize_motion_key,
     parse_relocalization_values,
-    relative_pose_goal,
     resolve_kfs_loader_source_config,
     resolve_stage_one_source_config,
+    summarize_named_parameter_load_result,
     summarize_parameter_load_result,
     summarize_stage_one_parameter_load_result,
     velocity_test_twist_components,
 )
 from robot_r2_interfaces.srv import (
     KfsAction,
+    MoveRelative,
     StageOne,
     StageTwoPointTwo,
     TraverseStep,
@@ -93,6 +96,13 @@ def make_node_stub():
     node.kfs_action_request_in_flight = False
     node.kfs_parameter_load_in_flight = False
     node.stage_one_parameter_load_in_flight = False
+    node.step_two_parameter_load_in_flight = {
+        key: False for key in GuiControlNode.STEP_TWO_PARAMETER_LOAD_TARGETS
+    }
+    node.step_two_parameter_load_config_paths = {
+        key: '/nonexistent/step_two.yaml'
+        for key in GuiControlNode.STEP_TWO_PARAMETER_LOAD_TARGETS
+    }
     node.config_generation = 0
     node.lift_min = 0.0
     node.lift_max = 0.376
@@ -106,10 +116,12 @@ def make_node_stub():
     }
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()
+    node.move_relative_client = FakeClient()
     node.kfs_alignment_client = FakeClient()
     node.tip_alignment_client = FakeClient()
     node.kfs_action_client = FakeClient()
     node.set_base_pose_client = FakeClient()
+    node.set_base_pose_odin_client = FakeClient()
     node.step_traverse_client = FakeClient()
     node.stage_one_client = FakeClient()
     node.stage_two_point_one_client = FakeClient()
@@ -203,6 +215,43 @@ def test_stage_one_source_yaml_targets_absolute_node_name():
     assert config_path.read_text(encoding='utf-8').startswith('/stage_one:')
 
 
+@pytest.mark.parametrize(
+    'file_name, expected_node',
+    [
+        ('step_traverse.yaml', '/step_traverse'),
+        ('stage_two_point_one.yaml', '/stage_two_point_one'),
+        ('stage_two_point_two.yaml', '/stage_two_point_two'),
+    ],
+)
+def test_step_two_source_yaml_targets_absolute_node_name(
+        file_name, expected_node):
+    config_path = (
+        Path(__file__).parents[1] / 'config' / file_name)
+
+    assert config_path.read_text(encoding='utf-8').startswith(
+        f'{expected_node}:')
+
+
+@pytest.mark.parametrize(
+    'key, node_name',
+    [
+        ('step_traverse', '/step_traverse'),
+        ('stage_two_point_one', '/stage_two_point_one'),
+        ('stage_two_point_two', '/stage_two_point_two'),
+    ],
+)
+def test_step_two_parameter_load_command_targets_node(key, node_name):
+    command = make_parameter_load_command(
+        '/workspace/step_two.yaml', node_name)
+
+    assert command == [
+        'ros2', 'param', 'load',
+        '--no-daemon', '--spin-time', '2.0',
+        node_name, '/workspace/step_two.yaml',
+    ]
+    assert key in GuiControlNode.STEP_TWO_PARAMETER_LOAD_TARGETS
+
+
 def test_manual_key_components_combine_and_cancel_opposites():
     assert manual_twist_components({'w', 'a', 'q'}, 0.2, 1.0) == (
         0.2, 0.2, 1.0)
@@ -241,8 +290,12 @@ def test_motion_control_text_uses_parameter_values():
     assert text['velocity']['forward'] == '0.75 m/s 前进 1.25 s'
     assert text['velocity']['rotate_left'] == (
         '2.5 rad/s 逆时针旋转 1.25 s')
-    assert text['pose']['forward'] == '位置伺服前进 0.8 m'
-    assert text['pose']['rotate_left'] == '位置伺服逆时针旋转 0.785 rad'
+    assert text['pose']['serial']['forward'] == '位置伺服前进 0.8 m（下位机）'
+    assert text['pose']['serial']['rotate_left'] == (
+        '位置伺服逆时针旋转 0.785 rad（下位机）')
+    assert text['pose']['odin']['forward'] == '位置伺服前进 0.8 m（Odin）'
+    assert text['pose']['odin']['rotate_left'] == (
+        '位置伺服逆时针旋转 0.785 rad（Odin）')
     assert text['kfs_alignment'] == 'KFS 对齐'
     assert text['tip_alignment'] == '端头对齐'
 
@@ -577,16 +630,17 @@ def test_stage_two_point_one_relocalizes_to_middle_edge_then_calls_service():
     success, message = node.request_stage_two_point_one(skip=True)
 
     assert success
-    assert message == '2.1 skip测试：正在重定位到中间台阶边缘'
-    request = node.set_base_pose_client.requests[0]
-    assert (request.x, request.y, request.yaw) == (3.15, -3.0, math.pi)
+    assert message == '2.1 skip测试：正在重定位到测试起点'
+    request = node.set_base_pose_odin_client.requests[0]
+    assert (request.x, request.y, request.yaw) == (
+        5.568, -3.9638, math.pi)
     assert request.z == 0.0
     assert request.roll == 0.0
     assert request.pitch == 0.0
     assert node.stage_two_point_one_request_in_flight
     assert not node.stage_two_point_one_client.requests
 
-    node.set_base_pose_client.future.complete(SimpleNamespace(
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
         success=True,
         message='base_link pose updated',
     ))
@@ -612,7 +666,7 @@ def test_stage_two_point_one_normal_passes_skip_false():
     success, _ = node.request_stage_two_point_one(skip=False)
     assert success
 
-    node.set_base_pose_client.future.complete(SimpleNamespace(
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
         success=True,
         message='base_link pose updated',
     ))
@@ -627,13 +681,14 @@ def test_stage_two_point_two_relocalizes_then_calls_service():
     success, message = node.request_stage_two_point_two(skip=True)
 
     assert success
-    assert message == '2.2 skip测试：正在重定位到 (5,2)-(4,2) 边界'
-    request = node.set_base_pose_client.requests[0]
-    assert (request.x, request.y, request.yaw) == (3.15, -3.0, math.pi)
+    assert message == '2.2 skip测试：正在重定位到测试起点'
+    request = node.set_base_pose_odin_client.requests[0]
+    assert (request.x, request.y, request.yaw) == (
+        3.4, -3.0, math.pi)
     assert node.stage_two_point_two_request_in_flight
     assert not node.stage_two_point_two_client.requests
 
-    node.set_base_pose_client.future.complete(SimpleNamespace(
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
         success=True,
         message='base_link pose updated',
     ))
@@ -651,6 +706,23 @@ def test_stage_two_point_two_relocalizes_then_calls_service():
         '2.2 skip测试：重定位完成，正在调用 2.2',
         '2.2 skip测试完成：Stage 2.2 completed at (0, 1)',
     ]
+
+
+def test_stage_two_point_two_normal_passes_skip_false():
+    node = make_node_stub()
+
+    success, message = node.request_stage_two_point_two(skip=False)
+
+    assert success
+    assert message == '2.2 正常测试：正在重定位到测试起点'
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link_odin pose updated',
+    ))
+    step_request = node.stage_two_point_two_client.requests[0]
+    assert step_request.fake_kfs_decision == StageTwoPointTwo.Request.LEFT
+    assert step_request.loaded_count == 0
+    assert step_request.skip_kfs_detection is False
 
 
 def test_parse_relocalization_values_requires_six_values():
@@ -832,7 +904,7 @@ def test_stage_one_parameter_load_result_checks_every_yaml_parameter():
         0, output, '')
 
     assert success
-    assert message == 'Step1 参数写入成功：共 23 项'
+    assert message == 'Step1 参数写入成功：共 24 项'
 
 
 def test_stage_one_parameter_load_result_reports_missing_parameter():
@@ -847,6 +919,66 @@ def test_stage_one_parameter_load_result_reports_missing_parameter():
 
     assert not success
     assert '未确认写入：move_timeout_sec' in message
+
+
+@pytest.mark.parametrize(
+    'key, names, display_name',
+    [
+        (
+            'step_traverse',
+            STEP_TRAVERSE_PARAMETER_NAMES,
+            '台阶跨越',
+        ),
+        (
+            'stage_two_point_one',
+            STAGE_TWO_POINT_ONE_PARAMETER_NAMES,
+            '2.1',
+        ),
+        (
+            'stage_two_point_two',
+            STAGE_TWO_POINT_TWO_PARAMETER_NAMES,
+            '2.2',
+        ),
+    ],
+)
+def test_step_two_parameter_load_result_checks_every_yaml_parameter(
+        key, names, display_name):
+    target = GuiControlNode.STEP_TWO_PARAMETER_LOAD_TARGETS[key]
+    assert target['parameter_names'] == names
+    output = '\n'.join(
+        f'Set parameter {name} successful'
+        for name in sorted(names)
+    )
+
+    success, message = summarize_named_parameter_load_result(
+        display_name + ' ', names, 0, output, '')
+
+    assert success
+    assert message == f'{display_name} 参数写入成功：共 {len(names)} 项'
+
+
+def test_step_two_parameter_load_result_reports_missing_parameter():
+    successful_names = STEP_TRAVERSE_PARAMETER_NAMES - {'a1'}
+    output = '\n'.join(
+        f'Set parameter {name} successful'
+        for name in sorted(successful_names)
+    )
+
+    success, message = summarize_named_parameter_load_result(
+        '台阶跨越 ', STEP_TRAVERSE_PARAMETER_NAMES, 0, output, '')
+
+    assert not success
+    assert '未确认写入：a1' in message
+
+
+def test_step_two_parameter_load_reports_missing_config_file():
+    node = make_node_stub()
+
+    success, message = node.request_step_two_parameter_load('step_traverse')
+
+    assert not success
+    assert '台阶跨越参数文件不存在' in message
+    assert not node.step_two_parameter_load_in_flight['step_traverse']
 
 
 def test_repeated_key_press_is_ignored_and_release_publishes_zero():
@@ -892,20 +1024,58 @@ def test_keyboard_is_ignored_during_pose_servo():
     assert not node.cmd_vel_publisher.messages
 
 
-def test_relative_forward_uses_current_body_heading():
-    target = relative_pose_goal((1.0, 2.0, math.pi / 2.0), 0.5, 0.0, 0.0)
-    assert target == pytest.approx((1.0, 2.5, math.pi / 2.0))
+@pytest.mark.parametrize(
+    'pose_source, source_label',
+    [
+        (MoveRelative.Request.SERIAL, '下位机'),
+        (MoveRelative.Request.ODIN, 'Odin'),
+    ],
+)
+def test_request_relative_pose_uses_selected_source(
+        pose_source, source_label):
+    node = make_node_stub()
+
+    success, message = node.request_relative_pose('forward', pose_source)
+
+    assert success
+    assert message == (
+        f'已发送 {source_label} 相对移动：'
+        '前 0.500 m，左 0.000 m，旋转 0.000 rad')
+    request = node.move_relative_client.requests[0]
+    assert request.pose_source == pose_source
+    assert request.forward == pytest.approx(0.5)
+    assert request.left == pytest.approx(0.0)
+    assert request.yaw_delta == pytest.approx(0.0)
+    assert request.position_tolerance == pytest.approx(0.0)
+    assert request.yaw_tolerance == pytest.approx(0.0)
+    assert request.timeout_sec == pytest.approx(20.0)
+    assert node.pose_request_in_flight
 
 
-def test_relative_left_uses_current_body_heading():
-    target = relative_pose_goal((1.0, 2.0, math.pi / 2.0), 0.0, 0.5, 0.0)
-    assert target == pytest.approx((0.5, 2.0, math.pi / 2.0))
+def test_request_relative_pose_rotate_uses_yaw_parameter():
+    node = make_node_stub()
+    node.motion_config['pose_test_yaw'] = 0.785
+
+    success, _ = node.request_relative_pose(
+        'rotate_left', MoveRelative.Request.ODIN)
+
+    assert success
+    request = node.move_relative_client.requests[0]
+    assert request.pose_source == MoveRelative.Request.ODIN
+    assert request.forward == pytest.approx(0.0)
+    assert request.left == pytest.approx(0.0)
+    assert request.yaw_delta == pytest.approx(0.785)
 
 
-def test_relative_rotation_is_counterclockwise_and_normalized():
-    target = relative_pose_goal((1.0, 2.0, 3.0), 0.0, 0.0, 1.57)
-    assert target[:2] == (1.0, 2.0)
-    assert target[2] == pytest.approx(normalize_angle(4.57))
+@pytest.mark.parametrize('pose_source', ['', 'gps', None])
+def test_request_relative_pose_rejects_unknown_source(pose_source):
+    node = make_node_stub()
+
+    success, message = node.request_relative_pose('forward', pose_source)
+
+    assert not success
+    assert '未知位姿来源' in message
+    assert not node.move_relative_client.requests
 
 
 @pytest.mark.parametrize(

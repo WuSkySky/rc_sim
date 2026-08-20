@@ -17,8 +17,16 @@ from robot_r2_interfaces.srv import (
 )
 
 
+STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
+POSE_FEEDBACK_TOPIC = '/r2/pose_feedback_odin'
+MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
+GET_KFS_TYPE_SERVICE = '/r2/detection/get_type'
+ALIGN_TO_KFS_SERVICE = '/r2/align_to_kfs'
+KFS_ACTION_SERVICE = '/r2/kfs/action'
+
+
 class StageTwoPointTwoController(Node):
-    KFS_ACTION_SERVICE = '/r2/kfs/action'
     FORWARD = (-1, 0)
     LEFT = (0, -1)
     RIGHT = (0, 1)
@@ -35,15 +43,6 @@ class StageTwoPointTwoController(Node):
         self.arrival_direction = None
         self._skip_kfs_detection = False
 
-        self.declare_parameter('service_name', '/r2/stage_two_point_two')
-        self.declare_parameter('current_pose_topic', '/r2/pose_feedback')
-        self.declare_parameter('move_to_pose_service', '/r2/move_to_pose')
-        self.declare_parameter(
-            'traverse_step_service', '/r2/step_traverse')
-        self.declare_parameter(
-            'get_kfs_type_service', '/r2/detection/get_type')
-        self.declare_parameter(
-            'align_to_kfs_service', '/r2/align_to_kfs')
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('pose_timeout_sec', 2.0)
         self.declare_parameter('move_timeout_sec', 35.0)
@@ -65,15 +64,6 @@ class StageTwoPointTwoController(Node):
         self.declare_parameter('release_edge_offset', 0.2)
         self.declare_parameter('detection_sample_count', 10)
 
-        service_name = self.get_parameter('service_name').value
-        pose_topic = self.get_parameter('current_pose_topic').value
-        move_service = self.get_parameter('move_to_pose_service').value
-        traverse_service = self.get_parameter(
-            'traverse_step_service').value
-        detection_service = self.get_parameter(
-            'get_kfs_type_service').value
-        align_service = self.get_parameter(
-            'align_to_kfs_service').value
         self.dependency_timeout_sec = self._positive_parameter(
             'dependency_timeout_sec')
         self.pose_timeout_sec = self._positive_parameter(
@@ -132,39 +122,39 @@ class StageTwoPointTwoController(Node):
 
         self.pose_subscription = self.create_subscription(
             PoseStamped,
-            pose_topic,
+            POSE_FEEDBACK_TOPIC,
             self.on_pose_feedback,
             10,
             callback_group=self.callback_group,
         )
         self.move_client = self.create_client(
             MoveToPose,
-            move_service,
+            MOVE_TO_POSE_SERVICE,
             callback_group=self.callback_group,
         )
         self.traverse_client = self.create_client(
             TraverseStep,
-            traverse_service,
+            STEP_TRAVERSE_SERVICE,
             callback_group=self.callback_group,
         )
         self.detection_client = self.create_client(
             GetKfsType,
-            detection_service,
+            GET_KFS_TYPE_SERVICE,
             callback_group=self.callback_group,
         )
         self.align_client = self.create_client(
             Align,
-            align_service,
+            ALIGN_TO_KFS_SERVICE,
             callback_group=self.callback_group,
         )
         self.kfs_action_client = self.create_client(
             KfsAction,
-            self.KFS_ACTION_SERVICE,
+            KFS_ACTION_SERVICE,
             callback_group=self.callback_group,
         )
         self.task_service = self.create_service(
             StageTwoPointTwo,
-            service_name,
+            STAGE_TWO_POINT_TWO_SERVICE,
             self.handle_task,
             callback_group=self.callback_group,
         )
@@ -299,7 +289,7 @@ class StageTwoPointTwoController(Node):
 
     def move_to_pose(self, x, y, yaw):
         request = MoveToPose.Request()
-        request.pose_source = MoveToPose.Request.SERIAL
+        request.pose_source = MoveToPose.Request.ODIN
         request.x = float(x)
         request.y = float(y)
         request.yaw = float(yaw)

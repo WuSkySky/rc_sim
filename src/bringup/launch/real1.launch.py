@@ -22,8 +22,9 @@ def generate_launch_description():
     serial_pkg = get_package_share_directory('serial_pkg')
     control_pkg = get_package_share_directory('robot_r2_control')
     mipi_camera_pkg = get_package_share_directory('mipi_camera')
-    aruco_pkg = get_package_share_directory('robot_r2_aruco')
-    controller_pkg = get_package_share_directory('robot_r2_controller')
+    # ArUco 识别对接当前不在 real1 启动，以下变量保留待恢复：
+    # aruco_pkg = get_package_share_directory('robot_r2_aruco')
+    # controller_pkg = get_package_share_directory('robot_r2_controller')
     target_alignment_pkg = get_package_share_directory(
         'robot_r2_target_alignment')
     fastdds_profile = os.path.join(
@@ -184,39 +185,62 @@ def generate_launch_description():
         output='screen',
     )
 
-    aruco_pipeline = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(
-                aruco_pkg,
-                'launch',
-                'aruco_subscribe.launch.py',
-            )
-        ),
-        launch_arguments={
-            'image_topic': '/r2/tip_camera/image_raw',
-            'camera_info_topic': '/r2/tip_camera/camera_info',
-        }.items(),
-        condition=IfCondition(LaunchConfiguration('enable_aruco')),
-    )
-
-    aruco_servo_config = os.path.join(
-        controller_pkg,
-        'config',
-        'aruco_chassis_pose_servo.yaml',
-    )
-    aruco_chassis_pose_servo = Node(
-        package='robot_r2_controller',
-        executable='chassis_pose_servo',
-        name='aruco_chassis_pose_servo',
-        parameters=[aruco_servo_config],
-        remappings=[
-            ('/r2/pose_feedback', '/r2/aruco/pose_feedback'),
-            ('/r2/move_to_pose', '/r2/aruco/move_to_pose'),
-            ('/r2/move_relative', '/r2/aruco/move_relative'),
-        ],
-        condition=IfCondition(LaunchConfiguration('enable_aruco')),
-        output='screen',
-    )
+    # ==================================================================
+    # ArUco 二维码识别对接（基于端头 MIPI 相机）——当前注释停用，不在
+    # real1 启动。需要恢复时取消本段及下方 LaunchDescription 中两行引用
+    # 与 enable_aruco 参数声明的注释即可。
+    #
+    # aruco_subscribe.launch.py 启动三个节点：
+    #   - aruco_detect      : 订阅端头相机图像，检测 ArUco 码并估计 6-DOF
+    #                         位姿，广播 TF camera -> marker_<id>，发布
+    #                         /r2/aruco/detections（调试图 /r2/aruco/debug）
+    #   - aruco_camera_tf   : 按 YAML 外参发布静态 TF base_link -> camera，
+    #                         使 TF 树 base_link -> camera -> marker_<id>
+    #                         保持连通
+    #   - aruco_pose_bridge : 查询 TF marker_<id> -> base_link（底盘在
+    #                         marker 坐标系中的位姿），发布
+    #                         /r2/aruco/pose_feedback
+    #
+    # marker 固定在静止的 R1 机器人上，其坐标系作为一次性对接的"世界"
+    # 参考系。
+    # ==================================================================
+    # aruco_pipeline = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(
+    #         os.path.join(
+    #             aruco_pkg,
+    #             'launch',
+    #             'aruco_subscribe.launch.py',
+    #         )
+    #     ),
+    #     launch_arguments={
+    #         'image_topic': '/r2/tip_camera/image_raw',
+    #         'camera_info_topic': '/r2/tip_camera/camera_info',
+    #     }.items(),
+    #     condition=IfCondition(LaunchConfiguration('enable_aruco')),
+    # )
+    #
+    # # ArUco 专用底盘位置伺服：chassis_pose_servo 的独立实例，闭环来源为
+    # # /r2/aruco/pose_feedback（marker 坐标系下的底盘位姿），对外提供
+    # # /r2/aruco/move_to_pose 与 /r2/aruco/move_relative 一次性对接服务，
+    # # 与常规 serial/Odin 位置伺服（/r2/move_to_pose 等）互不干扰。
+    # aruco_servo_config = os.path.join(
+    #     controller_pkg,
+    #     'config',
+    #     'aruco_chassis_pose_servo.yaml',
+    # )
+    # aruco_chassis_pose_servo = Node(
+    #     package='robot_r2_controller',
+    #     executable='chassis_pose_servo',
+    #     name='aruco_chassis_pose_servo',
+    #     parameters=[aruco_servo_config],
+    #     remappings=[
+    #         ('/r2/pose_feedback', '/r2/aruco/pose_feedback'),
+    #         ('/r2/move_to_pose', '/r2/aruco/move_to_pose'),
+    #         ('/r2/move_relative', '/r2/aruco/move_relative'),
+    #     ],
+    #     condition=IfCondition(LaunchConfiguration('enable_aruco')),
+    #     output='screen',
+    # )
 
     return LaunchDescription([
         SetEnvironmentVariable(
@@ -232,11 +256,12 @@ def generate_launch_description():
             default_value='/r2/detection/left/get_type',
             description='Remote KFS detection service used by control',
         ),
-        DeclareLaunchArgument(
-            'enable_aruco',
-            default_value='true',
-            description='Start tip-camera ArUco detection and chassis servo',
-        ),
+        # 与 ArUco 识别对接配套的开关，停用期间一并注释：
+        # DeclareLaunchArgument(
+        #     'enable_aruco',
+        #     default_value='true',
+        #     description='Start tip-camera ArUco detection and chassis servo',
+        # ),
         odin_launch,
         camera_frame_postprocess,
         odin_odometry_postprocess,
@@ -247,6 +272,7 @@ def generate_launch_description():
         tip_alignment,
         tip_mipi_camera,
         yolo_target_detector,
-        aruco_pipeline,
-        aruco_chassis_pose_servo,
+        # ArUco 识别对接（当前停用）：
+        # aruco_pipeline,
+        # aruco_chassis_pose_servo,
     ])

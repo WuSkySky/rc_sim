@@ -15,8 +15,15 @@ from robot_r2_interfaces.srv import (
 )
 
 
+STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
+MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+SET_LIFT_SERVICE = '/r2/lift/set'
+GET_KFS_TYPE_SERVICE = '/r2/detection/get_type'
+ALIGN_TO_KFS_SERVICE = '/r2/align_to_kfs'
+KFS_ACTION_SERVICE = '/r2/kfs/action'
+
+
 class StageTwoPointOneController(Node):
-    KFS_ACTION_SERVICE = '/r2/kfs/action'
     KFS_TRUE_CLASS = 'true'
 
     def __init__(self):
@@ -28,13 +35,6 @@ class StageTwoPointOneController(Node):
         self.arrival_direction = None
         self.current_cell_center = None
 
-        self.declare_parameter('service_name', '/r2/stage_two_point_one')
-        self.declare_parameter('move_to_pose_service', '/r2/move_to_pose')
-        self.declare_parameter('set_lift_service', '/r2/lift/set')
-        self.declare_parameter(
-            'get_kfs_type_service', '/r2/detection/get_type')
-        self.declare_parameter(
-            'align_to_kfs_service', '/r2/align_to_kfs')
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('move_timeout_sec', 35.0)
         self.declare_parameter('lift_timeout_sec', 15.0)
@@ -59,13 +59,6 @@ class StageTwoPointOneController(Node):
         self.declare_parameter('lift_down_front', 0.01)
         self.declare_parameter('lift_down_rear', 0.01)
 
-        service_name = self.get_parameter('service_name').value
-        move_service = self.get_parameter('move_to_pose_service').value
-        lift_service = self.get_parameter('set_lift_service').value
-        detection_service = self.get_parameter(
-            'get_kfs_type_service').value
-        align_service = self.get_parameter(
-            'align_to_kfs_service').value
         self.dependency_timeout_sec = self._positive_float_parameter(
             'dependency_timeout_sec')
         self.move_timeout_sec = self._positive_float_parameter(
@@ -102,32 +95,32 @@ class StageTwoPointOneController(Node):
 
         self.move_client = self.create_client(
             MoveToPose,
-            move_service,
+            MOVE_TO_POSE_SERVICE,
             callback_group=self.callback_group,
         )
         self.lift_client = self.create_client(
             SetLift,
-            lift_service,
+            SET_LIFT_SERVICE,
             callback_group=self.callback_group,
         )
         self.detection_client = self.create_client(
             GetKfsType,
-            detection_service,
+            GET_KFS_TYPE_SERVICE,
             callback_group=self.callback_group,
         )
         self.align_client = self.create_client(
             Align,
-            align_service,
+            ALIGN_TO_KFS_SERVICE,
             callback_group=self.callback_group,
         )
         self.kfs_action_client = self.create_client(
             KfsAction,
-            self.KFS_ACTION_SERVICE,
+            KFS_ACTION_SERVICE,
             callback_group=self.callback_group,
         )
         self.task_service = self.create_service(
             StageTwoPointOne,
-            service_name,
+            STAGE_TWO_POINT_ONE_SERVICE,
             self.handle_task,
             callback_group=self.callback_group,
         )
@@ -211,7 +204,7 @@ class StageTwoPointOneController(Node):
 
     def move_to_pose(self, pose):
         request = MoveToPose.Request()
-        request.pose_source = MoveToPose.Request.SERIAL
+        request.pose_source = MoveToPose.Request.ODIN
         request.x = pose[0]
         request.y = pose[1]
         request.yaw = pose[2]

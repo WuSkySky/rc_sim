@@ -90,6 +90,7 @@ def test_red_team_runs_all_numbered_actions_in_order():
         ('weapon_pair', math.pi / 2.0, 0.028),
         ('move', -0.10, 0.0, 0.0),
         ('weapon_joint', 'grip_client', 0.0, 0.001),
+        ('lift', 0.21),
         (
             'weapon_joint',
             'rotate_client',
@@ -148,6 +149,7 @@ def test_weapon_pair_dispatches_both_requests_before_waiting():
     [
         ('action_2_left_m', -0.1),
         ('action_4_pixel_tolerance_px', 0.0),
+        ('action_8_pre_lift_height_m', -0.1),
         ('weapon_timeout_sec', math.inf),
     ],
 )
@@ -213,8 +215,8 @@ def test_blue_team_reverses_only_lateral_translation():
 
     assert controller.calls[1] == ('move', -0.887, -0.781, 0.0)
     assert controller.calls[5] == ('move', -0.10, 0.0, 0.0)
-    assert controller.calls[9] == ('move', 0.20, 0.0, 0.0)
-    assert controller.calls[10] == ('move', 0.0, 0.0, math.pi)
+    assert controller.calls[10] == ('move', 0.20, 0.0, 0.0)
+    assert controller.calls[11] == ('move', 0.0, 0.0, math.pi)
 
 
 @pytest.mark.parametrize('team', ['', 'RED', 'green'])
