@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from robot_r2_control.gui_control import (
+    GuiControlApp,
     GuiControlNode,
     STAGE_ONE_PARAMETER_NAMES,
     STAGE_TWO_POINT_ONE_PARAMETER_NAMES,
@@ -25,10 +26,12 @@ from robot_r2_control.gui_control import (
     summarize_stage_one_parameter_load_result,
     velocity_test_twist_components,
 )
+from robot_r2_control.stage_two_grid_gui import StageTwoGridModel
 from robot_r2_interfaces.srv import (
     KfsAction,
     MoveRelative,
     StageOne,
+    StageTwo,
     StageTwoPointOne,
     StageTwoPointTwo,
     StageTwoPointTwoExit,
@@ -49,15 +52,22 @@ class FakeFuture:
     def __init__(self):
         self.callback = None
         self.response = None
+        self.error = None
 
     def add_done_callback(self, callback):
         self.callback = callback
 
     def result(self):
+        if self.error is not None:
+            raise self.error
         return self.response
 
     def complete(self, response):
         self.response = response
+        self.callback(self)
+
+    def fail(self, error):
+        self.error = error
         self.callback(self)
 
 
@@ -93,6 +103,8 @@ def make_node_stub():
     node.step_test_direction = None
     node.stage_one_request_in_flight = False
     node.stage_one_team = None
+    node.stage_two_request_in_flight = False
+    node.stage_two_team = None
     node.stage_two_point_one_request_in_flight = False
     node.stage_two_point_one_mode = None
     node.stage_two_point_one_route = ()
@@ -136,11 +148,14 @@ def make_node_stub():
     node.set_base_pose_odin_client = FakeClient()
     node.step_traverse_client = FakeClient()
     node.stage_one_client = FakeClient()
+    node.stage_two_client = FakeClient()
     node.stage_two_point_one_client = FakeClient()
     node.stage_two_point_two_client = FakeClient()
     node.stage_two_point_two_exit_client = FakeClient()
     node.stage_three_client = FakeClient()
     node.stage_one_relocalization_pose = (0.0,) * 6
+    node.stage_two_relocalization_pose = (
+        GuiControlNode.STEP_TWO_RELOCALIZATION_DEFAULT)
     node.stage_two_point_one_relocalization_pose = (
         GuiControlNode.STEP_TWO_POINT_ONE_RELOCALIZATION_DEFAULT)
     node.stage_two_point_two_relocalization_pose = (
@@ -642,6 +657,165 @@ def test_stage_one_rejects_unknown_team_without_relocalizing():
     assert not success
     assert message == 'Unknown Stage 1 team: green'
     assert not node.set_base_pose_client.requests
+
+
+@pytest.mark.parametrize(
+    'team,label,expected_y,expected_route,expected_kfs',
+    [
+        (
+            StageTwo.Request.RED,
+            '红方',
+            -3.0,
+            [(4, 2), (3, 2), (2, 2), (1, 2), (1, 1)],
+            [(2, 1), (4, 3)],
+        ),
+        (
+            StageTwo.Request.BLUE,
+            '蓝方',
+            3.0,
+            [(4, 2), (3, 2), (2, 2), (1, 2), (1, 3)],
+            [(2, 3), (4, 1)],
+        ),
+    ],
+)
+def test_complete_stage_two_relocalizes_to_cell_five_two_then_calls_service(
+        team, label, expected_y, expected_route, expected_kfs):
+    node = make_node_stub()
+    route = ((4, 2), (3, 2), (2, 2), (1, 2), (1, 3))
+
+    success, message = node.request_stage_two(
+        team, route, ((4, 1), (2, 3)))
+
+    assert success
+    assert message == (
+        f'完整 Step2 {label}：正在重定位到 (5,2) 格心')
+    pose_request = node.set_base_pose_odin_client.requests[0]
+    assert (pose_request.x, pose_request.y, pose_request.yaw) == pytest.approx(
+        (3.4, expected_y, math.pi))
+    assert not node.stage_two_client.requests
+
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    stage_request = node.stage_two_client.requests[0]
+    assert stage_request.team == team
+    assert stage_request.mode == StageTwo.Request.ROUTE
+    assert stage_request.fake_kfs_decision == 0
+    assert [
+        (cell.forward_index, cell.lateral_index)
+        for cell in stage_request.move_cells
+    ] == expected_route
+    assert [
+        (cell.forward_index, cell.lateral_index)
+        for cell in stage_request.kfs_cells
+    ] == expected_kfs
+
+    node.stage_two_client.future.complete(SimpleNamespace(
+        success=True,
+        message='stage two completed',
+        loaded_count=2,
+    ))
+    assert not node.stage_two_request_in_flight
+    assert node.stage_two_team is None
+    assert node.pop_status_events() == [
+        f'完整 Step2 {label}：重定位完成，正在调用阶段服务',
+        f'完整 Step2 {label}完成：stage two completed；已装载 2 个 KFS',
+    ]
+
+
+def test_complete_stage_two_relocalization_failure_stops_service_call():
+    node = make_node_stub()
+    route = ((4, 2), (3, 2), (2, 2), (1, 2), (1, 1))
+
+    success, _ = node.request_stage_two(
+        StageTwo.Request.RED, route, ())
+    assert success
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
+        success=False,
+        message='relocalization rejected',
+    ))
+
+    assert not node.stage_two_client.requests
+    assert not node.stage_two_request_in_flight
+    assert node.pop_status_events() == [
+        '完整 Step2 红方重定位失败：relocalization rejected',
+    ]
+
+
+def test_complete_stage_two_requires_both_services_before_relocalizing():
+    node = make_node_stub()
+    node.stage_two_client = FakeClient(ready=False)
+    route = ((4, 2), (3, 2), (2, 2), (1, 2), (1, 1))
+
+    success, message = node.request_stage_two(
+        StageTwo.Request.BLUE, route, ())
+
+    assert not success
+    assert message == '/r2/stage_two 服务不可用'
+    assert not node.set_base_pose_odin_client.requests
+
+
+def test_debug_gui_invalid_complete_route_does_not_request_stage_two():
+    messages = []
+    app = GuiControlApp.__new__(GuiControlApp)
+    app.stage_two_grid_editor = SimpleNamespace(model=StageTwoGridModel())
+    app.team_value = SimpleNamespace(get=lambda: StageTwo.Request.RED)
+    app.status_text = SimpleNamespace(set=messages.append)
+    app.node = SimpleNamespace(
+        request_stage_two=lambda *_args: pytest.fail(
+            'invalid route must not call StageTwo'))
+
+    app._start_stage_two()
+
+    assert messages == ['Step2 路线不能为空']
+
+
+def test_complete_stage_two_relocalization_exception_releases_interlock():
+    node = make_node_stub()
+    route = ((4, 2), (3, 2), (2, 2), (1, 2), (1, 1))
+    node.request_stage_two(StageTwo.Request.BLUE, route, ())
+
+    node.set_base_pose_odin_client.future.fail(RuntimeError('odin failed'))
+
+    assert not node.stage_two_request_in_flight
+    assert not node.stage_two_client.requests
+    assert 'odin failed' in node.pop_status_events()[-1]
+
+
+def test_complete_stage_two_pose_update_is_atomic_with_other_pose_updates():
+    node = make_node_stub()
+    new_stage_two_pose = [3.5, -3.1, 0.0, 0.0, 0.0, math.pi]
+
+    result = node._on_parameters_changed([
+        SimpleNamespace(
+            name='stage_two_relocalization_pose',
+            value=new_stage_two_pose,
+        ),
+        SimpleNamespace(
+            name='stage_one_relocalization_pose',
+            value=[0.0] * 5,
+        ),
+    ])
+
+    assert not result.successful
+    assert node.stage_two_relocalization_pose == pytest.approx(
+        GuiControlNode.STEP_TWO_RELOCALIZATION_DEFAULT)
+
+
+def test_complete_stage_two_pose_supports_dynamic_update():
+    node = make_node_stub()
+    updated_pose = [3.5, -3.1, 0.0, 0.0, 0.0, math.pi]
+
+    result = node._on_parameters_changed([
+        SimpleNamespace(
+            name='stage_two_relocalization_pose',
+            value=updated_pose,
+        ),
+    ])
+
+    assert result.successful
+    assert node.stage_two_relocalization_pose == pytest.approx(updated_pose)
 
 
 @pytest.mark.parametrize(

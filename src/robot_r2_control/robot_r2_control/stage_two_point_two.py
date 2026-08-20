@@ -12,6 +12,7 @@ from robot_r2_interfaces.srv import (
     Align,
     GetKfsType,
     KfsAction,
+    MoveRelative,
     MoveToPose,
     SetLift,
     StageTwoPointTwo,
@@ -24,6 +25,7 @@ STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
 STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
 POSE_FEEDBACK_TOPIC = '/r2/pose_feedback_odin'
 MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+MOVE_RELATIVE_SERVICE = '/r2/move_relative'
 SET_LIFT_SERVICE = '/r2/lift/set'
 STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
 GET_KFS_TYPE_SERVICE = '/r2/detection/get_type'
@@ -154,6 +156,11 @@ class StageTwoPointTwoController(Node):
         self.move_client = self.create_client(
             MoveToPose,
             MOVE_TO_POSE_SERVICE,
+            callback_group=self.callback_group,
+        )
+        self.move_relative_client = self.create_client(
+            MoveRelative,
+            MOVE_RELATIVE_SERVICE,
             callback_group=self.callback_group,
         )
         self.lift_client = self.create_client(
@@ -705,6 +712,7 @@ class StageTwoPointTwoController(Node):
             dependency_timeout_sec = self.dependency_timeout_sec
         dependencies = [
             (self.move_client, 'MoveToPose'),
+            (self.move_relative_client, 'MoveRelative'),
             (self.traverse_client, 'TraverseStep'),
             (self.kfs_action_client, 'KfsAction'),
         ]
@@ -749,6 +757,25 @@ class StageTwoPointTwoController(Node):
         )
         if not response.success:
             raise RuntimeError(f'MoveToPose failed: {response.message}')
+
+    def move_relative(self, forward, left=0.0, yaw_delta=0.0):
+        with self.config_lock:
+            move_timeout_sec = self.move_timeout_sec
+        request = MoveRelative.Request()
+        request.pose_source = MoveRelative.Request.ODIN
+        request.forward = float(forward)
+        request.left = float(left)
+        request.yaw_delta = float(yaw_delta)
+        request.position_tolerance = 0.0
+        request.yaw_tolerance = 0.0
+        request.timeout_sec = move_timeout_sec
+        response = self.wait_for_future(
+            self.move_relative_client.call_async(request),
+            move_timeout_sec,
+            'MoveRelative',
+        )
+        if not response.success:
+            raise RuntimeError(f'MoveRelative failed: {response.message}')
 
     def servo_to_initial_cell(self):
         with self.config_lock:
@@ -985,14 +1012,13 @@ class StageTwoPointTwoController(Node):
                 f'KFS at {target_index} has the same height as '
                 f'{current_index}')
 
-        edge_x = current[0] + direction_x * offset
-        edge_y = current[1] + direction_y * offset
         self.get_logger().info(
             f'Picking KFS at {target_index} with {load_mode_name} load')
-        # 在格子中心转向 KFS 方向，先视觉对齐，再进装载边缘。
+        # 在格子中心转向并视觉对齐，再从对齐后的实际位姿相对前进。
+        # 不能伺服到基于标称格心计算的绝对边缘坐标，否则会撤销横向对齐。
         self.move_to_pose(current[0], current[1], direction_yaw)
         self.align_kfs()
-        self.move_to_pose(edge_x, edge_y, direction_yaw)
+        self.move_relative(offset)
 
         if self.loaded_count == 3:
             if self.arrival_direction is None:
@@ -1002,18 +1028,24 @@ class StageTwoPointTwoController(Node):
             came_from_y = -self.arrival_direction[1]
             with self.config_lock:
                 release_edge_offset = self.release_edge_offset
-            release_x = current[0] + (
-                came_from_x * release_edge_offset)
-            release_y = current[1] + (
-                came_from_y * release_edge_offset)
             release_yaw = math.atan2(came_from_y, came_from_x)
-            self.move_to_pose(release_x, release_y, release_yaw)
+            # 先沿装载方向退回对齐后的格心，再转向来路并前往释放边缘。
+            # 释放后按相反路径回到同一个对齐后的装载位置。
+            self.move_relative(
+                -offset,
+                yaw_delta=release_yaw - direction_yaw,
+            )
+            self.move_relative(release_edge_offset)
             self.release_kfs()
-            self.move_to_pose(edge_x, edge_y, direction_yaw)
+            self.move_relative(
+                -release_edge_offset,
+                yaw_delta=direction_yaw - release_yaw,
+            )
+            self.move_relative(offset)
 
         self.load_kfs(load_modes[self.loaded_count])
         if return_to_center:
-            self.move_to_pose(current[0], current[1], direction_yaw)
+            self.move_relative(-offset)
 
     def detect_directions(self, current_index, arrival_delta):
         """One fused detection; return {delta: class_name} for 3 directions."""

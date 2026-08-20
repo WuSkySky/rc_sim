@@ -6,7 +6,7 @@
   ros__parameters:
     # Video device node. Install udev/90-yahboom-camera.rules for a stable
     # /dev/yahboom_front alias, or use the by-id path under /dev/v4l/by-id/.
-    device: /dev/video2
+    device: /dev/yahboom_front
 
     # MJPG (Motion-JPEG, 30 fps at full HD) or YUYV (raw, lower framerate).
     pixel_format: MJPG

@@ -33,6 +33,8 @@ gui_control:
     stage_one_relocalization_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     # Step2 红方（负 Y）测试重定位基准；蓝方运行时仅将 Y 取反。
+    # 完整 Step2 路线测试从 (5,2) 格心开始，yaw=pi 朝向 -X 出口。
+    stage_two_relocalization_pose: [3.4, -3.0, 0.0, 0.0, 0.0, 3.141592653589793]
     # 2.1 蓝方 Y 为 (4,3) 格心 +1.8 再增加 0.4 m；此处填写红方基准。
     stage_two_point_one_relocalization_pose: [5.568, -2.2, 0.0, 0.0, 0.0, 3.141592653589793]
     stage_two_point_two_relocalization_pose: [3.4, -3.0, 0.0, 0.0, 0.0, 3.141592653589793]

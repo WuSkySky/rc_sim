@@ -10,6 +10,7 @@ from robot_r2_interfaces.srv import (
     MoveRelative,
     MoveToPose,
     SetJointPosition,
+    SetLift,
     StageThree,
 )
 
@@ -51,16 +52,21 @@ def default_config():
         'relocalization_timeout_sec': 5.0,
         'move_timeout_sec': 35.0,
         'pop_timeout_sec': 70.0,
-        'kfs_lift_timeout_sec': 15.0,
+        'kfs_lift_timeout_sec': 30.0,
+        'chassis_lift_timeout_sec': 15.0,
         'stage_two_exit_endpoint_x': -5.5,
         'first_target_x_offset': 0.21,
         'target_x_spacing': 0.54,
         'target_y_offset': 4.63,
+        'first_move_linear_speed_limit': 1.125,
+        'placement_forward_distance': 0.25,
         'intermediate_backoff_distance': 0.25,
         'standard_final_backoff_distance': 3.0,
         'single_final_backoff_distance': 2.0,
-        'kfs_lift_height': 0.35,
+        'kfs_lift_height': 0.25,
         'kfs_lift_tolerance': 0.005,
+        'chassis_lift_height': 0.23,
+        'chassis_lift_tolerance': 0.002,
     }
 
 
@@ -81,7 +87,9 @@ def make_controller():
     controller.kfs_action_client = FakeClient(
         'pop', controller.actions)
     controller.kfs_lift_client = FakeClient(
-        'lift', controller.actions)
+        'kfs_lift', controller.actions)
+    controller.chassis_lift_client = FakeClient(
+        'chassis_lift', controller.actions)
     return controller
 
 
@@ -166,9 +174,11 @@ def test_invalid_team_is_rejected_before_relocalization():
             3,
             (
                 'relocalize',
-                'move_to', 'pop', 'move_relative',
-                'move_to', 'pop', 'move_relative',
-                'move_to', 'lift', 'pop', 'move_relative',
+                'move_to', 'chassis_lift', 'pop',
+                'move_relative', 'move_relative',
+                'move_to', 'pop', 'move_relative', 'move_relative',
+                'move_to', 'kfs_lift', 'pop',
+                'move_relative', 'move_relative',
             ),
             (1, 2, 2),
             (-0.25, -0.25, -3.0),
@@ -177,15 +187,20 @@ def test_invalid_team_is_rejected_before_relocalization():
             2,
             (
                 'relocalize',
-                'move_to', 'pop', 'move_relative',
-                'move_to', 'lift', 'pop', 'move_relative',
+                'move_to', 'chassis_lift', 'pop',
+                'move_relative', 'move_relative',
+                'move_to', 'kfs_lift', 'pop',
+                'move_relative', 'move_relative',
             ),
             (2, 2),
             (-0.25, -3.0),
         ),
         (
             1,
-            ('relocalize', 'move_to', 'lift', 'pop', 'move_relative'),
+            (
+                'relocalize', 'move_to', 'chassis_lift', 'kfs_lift', 'pop',
+                'move_relative', 'move_relative',
+            ),
             (2,),
             (-2.0,),
         ),
@@ -211,24 +226,46 @@ def test_service_executes_expected_action_sequence(
         request.action == KfsAction.Request.POP
         for request in controller.kfs_action_client.requests
     )
-    assert tuple(
+    relative_distances = tuple(
         request.forward
         for request in controller.move_relative_client.requests
-    ) == expected_backoffs
+    )
+    assert relative_distances[::2] == pytest.approx(
+        (0.25,) * loaded_count)
+    assert relative_distances[1::2] == expected_backoffs
     assert all(
-        request.pose_source == MoveRelative.Request.ODIN
+        request.pose_source == MoveRelative.Request.SERIAL
         for request in controller.move_relative_client.requests
     )
     assert all(
         request.pose_source == MoveToPose.Request.ODIN
         for request in controller.move_to_pose_client.requests
     )
+    assert controller.move_to_pose_client.requests[0].linear_speed_limit == (
+        pytest.approx(1.125))
+    assert all(
+        request.linear_speed_limit == pytest.approx(0.0)
+        for request in controller.move_to_pose_client.requests[1:]
+    )
+    assert all(
+        request.linear_speed_limit == pytest.approx(0.0)
+        for request in controller.move_relative_client.requests
+    )
+
+    assert len(controller.chassis_lift_client.requests) == 1
+    chassis_request = controller.chassis_lift_client.requests[0]
+    assert isinstance(chassis_request, SetLift.Request)
+    assert chassis_request.front_lift == pytest.approx(0.23)
+    assert chassis_request.rear_lift == pytest.approx(0.23)
+    assert chassis_request.tolerance == pytest.approx(0.002)
+    assert chassis_request.timeout_sec == pytest.approx(15.0)
 
     if controller.kfs_lift_client.requests:
         lift_request = controller.kfs_lift_client.requests[0]
         assert isinstance(lift_request, SetJointPosition.Request)
-        assert lift_request.position == pytest.approx(0.35)
+        assert lift_request.position == pytest.approx(0.25)
         assert lift_request.tolerance == pytest.approx(0.005)
+        assert lift_request.timeout_sec == pytest.approx(30.0)
 
 
 def test_service_uses_only_first_two_absolute_targets_for_two_kfs():
@@ -284,22 +321,99 @@ def test_pop_failure_stops_remaining_actions():
         'relocalize', 'move_to', 'pop')
 
 
+def test_forward_failure_stops_before_backoff_and_remaining_actions():
+    controller = make_controller()
+    controller.move_relative_client.success = False
+    response = SimpleNamespace(success=None, message='')
+
+    result = controller.handle_task(SimpleNamespace(
+        team=StageThree.Request.BLUE,
+        loaded_count=3,
+    ), response)
+
+    assert not result.success
+    assert result.message == 'MoveRelative failed: failed'
+    assert tuple(action[0] for action in controller.actions) == (
+        'relocalize', 'move_to', 'pop', 'move_relative')
+    assert len(controller.move_relative_client.requests) == 1
+    assert controller.move_relative_client.requests[0].forward == (
+        pytest.approx(0.25))
+
+
+def test_chassis_lift_failure_stops_before_first_pop():
+    controller = make_controller()
+    controller.chassis_lift_client.success = False
+    response = SimpleNamespace(success=None, message='')
+
+    result = controller.handle_task(SimpleNamespace(
+        team=StageThree.Request.BLUE,
+        loaded_count=1,
+    ), response)
+
+    assert not result.success
+    assert result.message == 'SetLift failed: failed'
+    assert tuple(action[0] for action in controller.actions) == (
+        'relocalize', 'move_to', 'chassis_lift')
+    assert controller.kfs_lift_client.requests == []
+    assert controller.kfs_action_client.requests == []
+
+
 def test_dynamic_parameter_update_is_atomic_and_validated():
     controller = make_controller()
 
     result = controller._on_parameters_changed([
         SimpleNamespace(name='target_x_spacing', value=0.6),
         SimpleNamespace(name='kfs_lift_height', value=0.36),
+        SimpleNamespace(name='chassis_lift_height', value=0.04),
+        SimpleNamespace(name='first_move_linear_speed_limit', value=0.8),
+        SimpleNamespace(name='placement_forward_distance', value=0.4),
     ])
 
     assert result.successful
     assert controller.config['target_x_spacing'] == pytest.approx(0.6)
     assert controller.config['kfs_lift_height'] == pytest.approx(0.36)
+    assert controller.config['chassis_lift_height'] == pytest.approx(0.04)
+    assert controller.config['first_move_linear_speed_limit'] == (
+        pytest.approx(0.8))
+    assert controller.config['placement_forward_distance'] == (
+        pytest.approx(0.4))
 
     original = dict(controller.config)
     result = controller._on_parameters_changed([
         SimpleNamespace(name='target_x_spacing', value=-0.1),
         SimpleNamespace(name='kfs_lift_height', value=0.37),
     ])
+    assert not result.successful
+    assert controller.config == original
+
+
+@pytest.mark.parametrize(
+    'value',
+    [0.0, -0.1, math.inf, -math.inf, math.nan],
+)
+def test_invalid_placement_forward_distance_is_rejected(value):
+    controller = make_controller()
+    original = dict(controller.config)
+
+    result = controller._on_parameters_changed([
+        SimpleNamespace(name='placement_forward_distance', value=value),
+    ])
+
+    assert not result.successful
+    assert controller.config == original
+
+
+@pytest.mark.parametrize(
+    'value',
+    [0.0, -0.1, math.inf, -math.inf, math.nan],
+)
+def test_invalid_first_move_linear_speed_limit_is_rejected(value):
+    controller = make_controller()
+    original = dict(controller.config)
+
+    result = controller._on_parameters_changed([
+        SimpleNamespace(name='first_move_linear_speed_limit', value=value),
+    ])
+
     assert not result.successful
     assert controller.config == original

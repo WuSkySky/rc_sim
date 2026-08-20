@@ -94,9 +94,10 @@ source install/setup.bash
 ros2 launch bringup real1.launch.py
 ```
 
-real2 只使用端头 MIPI 相机，负责 KFS 识别、KFS ROI 和端头 YOLO 目标检测。
-原左右 MIPI 相机已移除，不使用 Yahboom USB 相机。端头相机发布自定义
-`/r2/tip_camera/image_raw`，KFS 融合节点的 front 输入和 ROI 节点都 remap 到该话题。
+real2 使用 Yahboom USB 前相机和端头 MIPI 相机，负责 KFS 识别、KFS ROI 和
+端头 YOLO 目标检测。原左右 MIPI 相机已移除。前相机发布自定义
+`/r2/front_camera/image_raw`，供 KFS 融合节点的 front 输入和 ROI 节点使用；
+端头相机发布 `/r2/tip_camera/image_raw`，供端头 YOLO 使用。
 KFS 和端头检测的调试图均默认关闭，可通过对应
 动态参数开启。融合节点不会等待未接入的相机，因此只有部分相机
 在线时也能正常推理：
@@ -162,11 +163,12 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向。转向完成后调用
 `/r2/led_detection/detect`，只有 LED 状态连续稳定匹配请求目标并返回成功，才会
 松开武器夹爪；检测失败、服务不可用或等待超时时保持夹持并令 Step1 返回失败。
-武器旋转到最终角度
-前，底盘会先抬升到 `action_8_pre_lift_height_m`（默认 `0.21 m`），旋转完成后
-再降回
-`0.01 m`，随后前移 `0.20 m`。动作 2 的左右/前后位移在同一个位置伺服请求中
-完成，动作 5 的武器旋转和夹爪张开并行执行。
+初始左右/前后位置伺服与端头旋转、夹爪张开同时执行，三者全部完成后才继续。
+夹爪闭合后，底盘会在当前工作高度基础上再向上抬升
+`action_8_lift_increment_m`（默认 `0.03 m`）并将武器旋转到最终角度，再使用
+下位机相对位置伺服前进
+`action_9_pre_lower_forward_m`（默认 `0.05 m`）。随后底盘降回 `0.01 m`，继续
+前移 `0.20 m`。
 
 ```bash
 ros2 service call /r2/stage_one robot_r2_interfaces/srv/StageOne \
@@ -212,6 +214,8 @@ ros2 service call /r2/stage_two robot_r2_interfaces/srv/StageTwo \
 `lateral_index=1..3`。`move_cells` 仅作为 2.2 的移动路线；`kfs_cells` 是无序的
 真实 KFS 占用集合。第 4 行入口侧的 KFS 按 `3,1,2` 过滤顺序交给 2.1，其他
 三行交给 2.2。入口侧没有 KFS 时跳过 2.1，直接从 `loaded_count=0` 执行 2.2。
+蓝方入口侧 KFS 在交给 2.1 时单独镜像横向格号，使 GUI 左右与机器人视角一致；
+该转换不修改交给 2.2 的移动路线和 KFS 格号。
 每次 2.2 服务开始都会先位置伺服到 `(5,2)` 格心，再执行第一段上台阶动作。
 
 ```bash
@@ -240,7 +244,7 @@ ros2 service call /r2/stage_two_point_one \
 阶段 2.1 的 `mode`：`0=标准识别`、`1=skip 识别`、`2=路线`。标准和 skip
 模式固定访问 `[3, 1, 2]`；路线模式通过 `route_cells` 指定第 5 列中的横向格子
 编号，数组必须非空、不能重复且只能包含 `1`、`2`、`3`。路线模式不调用 KFS
-类型识别和视觉对齐，到达每个格子并调整底盘高度后直接装载。例如依次到达
+类型识别，但到达每个格子并调整底盘高度后仍会先执行视觉对齐再装载。例如依次到达
 `(5,1)`、`(5,3)` 并装载：
 
 ```bash
@@ -313,12 +317,17 @@ ros2 service call /r2/stage_two_point_two_exit \
 `stage_two_point_two.yaml` 中的 `exit_cell_0_0_pose`、`exit_x_offset`
 动态修改。
 
-GUI 使用 Step1、Step2、Step3 共用的红/蓝方选择器，默认红方；2.1 提供正常识别、
-skip 识别以及路线直接装载，2.2 提供正常识别和 skip 识别。2.1 路线输入使用逗号
-分隔，例如 `3,1,2`。GUI 会先按所选队伍调用 Odin 重定位，成功后
-再把相同的 `team` 传给阶段服务。红方重定位基准位姿配置在
-`gui_control.yaml` 的 `stage_two_point_one_relocalization_pose` 和
-`stage_two_point_two_relocalization_pose`，蓝方自动镜像其中的 Y。2.1 默认 X
+GUI 使用 Step1、Step2、Step3 共用的红/蓝方选择器，默认红方。调试 GUI 提供与
+正式 GUI 相同的完整 Step2 双矩阵路线测试：矩阵上方为出口、下方为入口，不显示
+内部格子坐标；启动后以 ROUTE 模式调用 `/r2/stage_two`。执行前先重定位到 `(5,2)`
+格心，红方为 `(3.4,-3.0,π)`、蓝方为 `(3.4,3.0,π)`，两方均朝世界 `-X` 的
+出口方向。该位姿由 `gui_control.yaml` 的 `stage_two_relocalization_pose` 配置。
+
+原有分段测试继续保留：2.1 提供正常识别、skip 识别以及路线直接装载，2.2 提供
+正常识别和 skip 识别。2.1 路线输入使用逗号分隔，例如 `3,1,2`。GUI 会先按所选
+队伍调用 Odin 重定位，成功后再把相同的 `team` 传给阶段服务。红方分段重定位
+基准位姿配置在 `gui_control.yaml` 的 `stage_two_point_one_relocalization_pose`
+和 `stage_two_point_two_relocalization_pose`，蓝方自动镜像其中的 Y。2.1 默认 X
 保持 `5.568`；蓝方默认 Y 为 `(4,3)` 格心的 `+1.8` 再增加 `0.4 m`，即
 `+2.2`，红方对称为 `-2.2`。Step2.2 区域的
 “2.2 后续动作（重定位后执行）”按钮会先按队伍重定位到 `(0,3)` 格心（红方默认
@@ -335,24 +344,28 @@ skip 识别以及路线直接装载，2.2 提供正常识别和 skip 识别。2.
 
 蓝方三段放置位置依次为 `(-5.29, 10.16, π/2)`、
 `(-4.75, 10.16, π/2)`、`(-4.21, 10.16, π/2)`；红方镜像 Y 和 yaw。
-每段先进行 Odin 绝对位置伺服，再 POP，最后进行 Odin 相对后退：
+每段先进行 Odin 绝对位置伺服，再 POP，随后使用下位机相对位置伺服前进
+`0.25 m`，最后使用下位机相对位置伺服执行原有后退：
 
-- 已有 3 个 KFS：依次使用 POP 模式 1、模式 2、抬升后模式 2；前两段各后退
+- 重定位后前往第一个放置点时使用 `1.125 m/s` 线速度上限，即位置伺服默认
+  `0.45 m/s` 上限的 `2.5` 倍；后续移动不覆盖默认速度。
+- 每种数量都只在第一次 POP 前将前后底盘抬升到 `0.23 m`，后续 POP 不重复设置。
+- 已有 3 个 KFS：依次使用 POP 模式 1、模式 2、夹爪抬升后模式 2；前两段各后退
   `0.25 m`，最后后退 `3 m`。
-- 已有 2 个 KFS：执行上述 POP 序列的后两项；第一段后退 `0.25 m`，最后后退
-  `3 m`。
-- 已有 1 个 KFS：夹爪升降先绝对抬升到 `0.35 m`，再使用 POP 模式 2，最后后退
-  `2 m`。
+- 已有 2 个 KFS：依次使用 POP 模式 2、夹爪抬升后模式 2；第一段后退 `0.25 m`，
+  最后后退 `3 m`。
+- 已有 1 个 KFS：第一次 POP 同时也是最后一次，因此先抬升底盘到 `0.23 m`，再将
+  夹爪升降到 `0.25 m`，使用 POP 模式 2，最后后退 `2 m`。
 
 ```bash
 ros2 service call /r2/stage_three robot_r2_interfaces/srv/StageThree \
   "{team: blue, loaded_count: 3}"
 ```
 
-重定位基准、位置偏移、段间距、后退距离、KFS 抬升目标和各动作超时集中在
-`robot_r2_control/config/stage_three.yaml`，均支持运行时动态修改。GUI 的 Step3
-区域提供“已有 1 个 KFS”“已有 2 个 KFS”“已有 3 个 KFS”三个按钮，并使用顶部
-共用的比赛队伍选择。
+重定位基准、位置偏移、段间距、放置后前进距离、后退距离、KFS 与底盘抬升目标和
+各动作超时集中在 `robot_r2_control/config/stage_three.yaml`，均支持运行时动态修改。
+GUI 的 Step3 区域提供“已有 1 个 KFS”“已有 2 个 KFS”“已有 3 个 KFS”三个按钮，
+并使用顶部共用的比赛队伍选择。
 
 ### 底盘、里程计与抬升
 
@@ -366,7 +379,9 @@ ros2 topic pub -r 20 /r2/cmd_vel geometry_msgs/msg/Twist \
 
 底盘位置伺服的坐标单位为米，偏航角单位为弧度。`pose_source` 必须显式填写
 `serial` 或 `odin`；前者使用 `/r2/pose_feedback`，后者使用
-`/r2/pose_feedback_odin`。绝对移动目标位于所选来源的 `map` 坐标下：
+`/r2/pose_feedback_odin`。`linear_speed_limit` 可为单次请求覆盖 X/Y 线速度上限；
+省略或填写 `0.0` 时继续使用 `chassis_pose_servo.yaml` 中当前的 PID 输出上限。
+绝对移动目标位于所选来源的 `map` 坐标下：
 
 ```bash
 ros2 service call /r2/move_to_pose robot_r2_interfaces/srv/MoveToPose \
@@ -437,8 +452,8 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 ### KFS 与视觉
 
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
-前相机；实机的端头 MIPI 相机和 ROI 节点都由 real2 启动，ROI 默认使用
-`/r2/tip_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
+前相机；实机的 Yahboom USB 前相机和 ROI 节点都由 real2 启动，ROI 默认使用
+`/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
 `/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、左右边界、左右
 边界列的最下方掩膜点和横向中心偏差，不包含图像像素：
 

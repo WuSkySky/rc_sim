@@ -4,7 +4,8 @@
     relocalization_timeout_sec: 5.0
     move_timeout_sec: 35.0
     pop_timeout_sec: 70.0
-    kfs_lift_timeout_sec: 15.0
+    kfs_lift_timeout_sec: 30.0
+    chassis_lift_timeout_sec: 15.0
 
     # 蓝方阶段 2 后续动作终点为 (-5.5, 5.4, pi)。阶段 3 首先将其
     # X 减小 0.19 m、Y 增大 0.13 m，并顺时针转 90 度朝向最高格子所在的
@@ -20,11 +21,21 @@
     target_x_spacing: 0.54
     target_y_offset: 4.63
 
-    # 每段 POP 后均用 Odin 相对位置伺服后退。最后一段替换中间后退距离。
+    # 重定位后前往第一个放置点的线速度上限。当前默认 0.45 m/s 的 2.5 倍。
+    # 后续绝对移动不覆盖速度，继续使用 chassis_pose_servo 的默认上限。
+    first_move_linear_speed_limit: 1.125
+
+    # 每段 POP 后先用下位机相对位置伺服前进，再执行原有后退动作。
+    placement_forward_distance: 0.25
+
+    # 每段前进后均用下位机相对位置伺服后退。最后一段替换中间后退距离。
     intermediate_backoff_distance: 0.25
     standard_final_backoff_distance: 3.0
     single_final_backoff_distance: 2.0
 
-    # 最后一个 KFS 在 POP 模式 2 前，将夹爪升降绝对抬升至 0.35 m。
-    kfs_lift_height: 0.35
+    # 第一次 POP 前将前后底盘绝对抬升至 0.23 m，后续 POP 不重复设置。
+    # 最后一个 KFS 在 POP 模式 2 前，将夹爪升降绝对抬升至 0.25 m。
+    kfs_lift_height: 0.25
     kfs_lift_tolerance: 0.005
+    chassis_lift_height: 0.23
+    chassis_lift_tolerance: 0.002

@@ -12,6 +12,7 @@ from robot_r2_interfaces.srv import (
     MoveToPose,
     SetBasePose,
     SetJointPosition,
+    SetLift,
     StageThree,
 )
 
@@ -22,6 +23,7 @@ MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
 MOVE_RELATIVE_SERVICE = '/r2/move_relative'
 KFS_ACTION_SERVICE = '/r2/kfs/action'
 KFS_LIFT_SERVICE = '/r2/kfs_lift'
+SET_LIFT_SERVICE = '/r2/lift/set'
 
 
 class StageThreeController(Node):
@@ -31,16 +33,23 @@ class StageThreeController(Node):
         'move_timeout_sec',
         'pop_timeout_sec',
         'kfs_lift_timeout_sec',
+        'chassis_lift_timeout_sec',
         'first_target_x_offset',
         'target_x_spacing',
         'target_y_offset',
+        'first_move_linear_speed_limit',
+        'placement_forward_distance',
         'intermediate_backoff_distance',
         'standard_final_backoff_distance',
         'single_final_backoff_distance',
         'kfs_lift_tolerance',
+        'chassis_lift_tolerance',
     )
     FINITE_PARAMETERS = ('stage_two_exit_endpoint_x',)
-    NON_NEGATIVE_PARAMETERS = ('kfs_lift_height',)
+    NON_NEGATIVE_PARAMETERS = (
+        'kfs_lift_height',
+        'chassis_lift_height',
+    )
 
     def __init__(self):
         super().__init__('stage_three')
@@ -52,7 +61,8 @@ class StageThreeController(Node):
         self.declare_parameter('relocalization_timeout_sec', 5.0)
         self.declare_parameter('move_timeout_sec', 35.0)
         self.declare_parameter('pop_timeout_sec', 70.0)
-        self.declare_parameter('kfs_lift_timeout_sec', 15.0)
+        self.declare_parameter('kfs_lift_timeout_sec', 30.0)
+        self.declare_parameter('chassis_lift_timeout_sec', 15.0)
         self.declare_parameter(
             'blue_relocalization_pose',
             [-5.69, 5.53, 0.0, 0.0, 0.0, math.pi / 2.0],
@@ -61,11 +71,15 @@ class StageThreeController(Node):
         self.declare_parameter('first_target_x_offset', 0.21)
         self.declare_parameter('target_x_spacing', 0.54)
         self.declare_parameter('target_y_offset', 4.63)
+        self.declare_parameter('first_move_linear_speed_limit', 1.125)
+        self.declare_parameter('placement_forward_distance', 0.25)
         self.declare_parameter('intermediate_backoff_distance', 0.25)
         self.declare_parameter('standard_final_backoff_distance', 3.0)
         self.declare_parameter('single_final_backoff_distance', 2.0)
-        self.declare_parameter('kfs_lift_height', 0.35)
+        self.declare_parameter('kfs_lift_height', 0.25)
         self.declare_parameter('kfs_lift_tolerance', 0.005)
+        self.declare_parameter('chassis_lift_height', 0.23)
+        self.declare_parameter('chassis_lift_tolerance', 0.002)
 
         self.config = {
             name: self.validate_positive(
@@ -110,6 +124,11 @@ class StageThreeController(Node):
         self.kfs_lift_client = self.create_client(
             SetJointPosition,
             KFS_LIFT_SERVICE,
+            callback_group=self.callback_group,
+        )
+        self.chassis_lift_client = self.create_client(
+            SetLift,
+            SET_LIFT_SERVICE,
             callback_group=self.callback_group,
         )
         self.task_service = self.create_service(
@@ -309,10 +328,11 @@ class StageThreeController(Node):
         if not response.success:
             raise RuntimeError(f'SetBasePose failed: {response.message}')
 
-    def move_to_pose(self, target, timeout_sec):
+    def move_to_pose(self, target, timeout_sec, linear_speed_limit=0.0):
         request = MoveToPose.Request()
         request.pose_source = MoveToPose.Request.ODIN
         request.x, request.y, request.yaw = target
+        request.linear_speed_limit = float(linear_speed_limit)
         request.position_tolerance = 0.0
         request.yaw_tolerance = 0.0
         request.timeout_sec = timeout_sec
@@ -326,10 +346,29 @@ class StageThreeController(Node):
 
     def move_backward(self, distance, timeout_sec):
         request = MoveRelative.Request()
-        request.pose_source = MoveRelative.Request.ODIN
+        request.pose_source = MoveRelative.Request.SERIAL
         request.forward = -float(distance)
         request.left = 0.0
         request.yaw_delta = 0.0
+        request.linear_speed_limit = 0.0
+        request.position_tolerance = 0.0
+        request.yaw_tolerance = 0.0
+        request.timeout_sec = timeout_sec
+        response = self.wait_for_future(
+            self.move_relative_client.call_async(request),
+            timeout_sec,
+            'MoveRelative',
+        )
+        if not response.success:
+            raise RuntimeError(f'MoveRelative failed: {response.message}')
+
+    def move_forward(self, distance, timeout_sec):
+        request = MoveRelative.Request()
+        request.pose_source = MoveRelative.Request.SERIAL
+        request.forward = float(distance)
+        request.left = 0.0
+        request.yaw_delta = 0.0
+        request.linear_speed_limit = 0.0
         request.position_tolerance = 0.0
         request.yaw_tolerance = 0.0
         request.timeout_sec = timeout_sec
@@ -366,12 +405,27 @@ class StageThreeController(Node):
         if not response.success:
             raise RuntimeError(f'KfsLift failed: {response.message}')
 
+    def lift_chassis(self, height, tolerance, timeout_sec):
+        request = SetLift.Request()
+        request.front_lift = float(height)
+        request.rear_lift = float(height)
+        request.tolerance = float(tolerance)
+        request.timeout_sec = float(timeout_sec)
+        response = self.wait_for_future(
+            self.chassis_lift_client.call_async(request),
+            timeout_sec,
+            'SetLift',
+        )
+        if not response.success:
+            raise RuntimeError(f'SetLift failed: {response.message}')
+
     def wait_for_action_dependencies(self, timeout_sec):
         dependencies = (
             (self.move_to_pose_client, 'MoveToPose'),
             (self.move_relative_client, 'MoveRelative'),
             (self.kfs_action_client, 'KfsAction'),
             (self.kfs_lift_client, 'KfsLift'),
+            (self.chassis_lift_client, 'SetLift'),
         )
         for client, description in dependencies:
             self.wait_for_service(client, timeout_sec, description)
@@ -393,13 +447,32 @@ class StageThreeController(Node):
                 )
                 self.wait_for_action_dependencies(dependency_timeout)
 
-                for target, pop_step, backoff_distance in zip(
+                for placement_index, (
+                    target,
+                    pop_step,
+                    backoff_distance,
+                ) in enumerate(zip(
                     config['targets'],
                     config['pop_plan'],
                     config['backoff_distances'],
-                ):
+                )):
                     pop_mode, lift_before_pop = pop_step
-                    self.move_to_pose(target, config['move_timeout_sec'])
+                    first_move_speed_limit = (
+                        config['first_move_linear_speed_limit']
+                        if placement_index == 0
+                        else 0.0
+                    )
+                    self.move_to_pose(
+                        target,
+                        config['move_timeout_sec'],
+                        first_move_speed_limit,
+                    )
+                    if placement_index == 0:
+                        self.lift_chassis(
+                            config['chassis_lift_height'],
+                            config['chassis_lift_tolerance'],
+                            config['chassis_lift_timeout_sec'],
+                        )
                     if lift_before_pop:
                         self.lift_kfs(
                             config['kfs_lift_height'],
@@ -407,6 +480,10 @@ class StageThreeController(Node):
                             config['kfs_lift_timeout_sec'],
                         )
                     self.pop_kfs(pop_mode, config['pop_timeout_sec'])
+                    self.move_forward(
+                        config['placement_forward_distance'],
+                        config['move_timeout_sec'],
+                    )
                     self.move_backward(
                         backoff_distance, config['move_timeout_sec'])
             except Exception as exc:

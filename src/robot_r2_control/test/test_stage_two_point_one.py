@@ -143,12 +143,8 @@ def test_standard_mode_waits_for_visual_dependencies():
     assert controller.align_client.wait_timeouts == [2.0]
 
 
-@pytest.mark.parametrize(
-    'mode',
-    [StageTwoPointOne.Request.SKIP, StageTwoPointOne.Request.ROUTE],
-)
-def test_non_visual_modes_do_not_wait_for_visual_dependencies(mode):
-    controller = make_dependency_controller(mode)
+def test_skip_mode_does_not_wait_for_visual_dependencies():
+    controller = make_dependency_controller(StageTwoPointOne.Request.SKIP)
     visual_waits = []
     controller.detection_client.wait_for_service = (
         lambda timeout_sec: visual_waits.append('detect'))
@@ -158,6 +154,15 @@ def test_non_visual_modes_do_not_wait_for_visual_dependencies(mode):
     controller.wait_for_dependencies()
 
     assert visual_waits == []
+
+
+def test_route_mode_waits_for_alignment_but_not_detection():
+    controller = make_dependency_controller(StageTwoPointOne.Request.ROUTE)
+
+    controller.wait_for_dependencies()
+
+    assert controller.detection_client.wait_timeouts == []
+    assert controller.align_client.wait_timeouts == [2.0]
 
 
 def make_execute_controller(route):
@@ -228,7 +233,7 @@ def test_process_cell_behaviors_are_mode_specific():
     controller.process_cell((3.0, 0.0, 0.0))
 
     assert calls == [
-        ((2.0, 0.0, 0.0), False),
+        ((2.0, 0.0, 0.0), True),
         ((3.0, 0.0, 0.0), True),
     ]
 

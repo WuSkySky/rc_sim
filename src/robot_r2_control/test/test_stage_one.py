@@ -71,6 +71,10 @@ def make_sequence_controller():
     controller.set_weapon_pair = (
         lambda rotate, grip, _config: controller.calls.append(
             ('weapon_pair', rotate, grip)))
+    controller.move_and_set_weapon_pair = (
+        lambda forward, left, yaw, rotate, grip, _config:
+        controller.calls.append(
+            ('move_and_weapon_pair', forward, left, yaw, rotate, grip)))
     controller.set_weapon_joint = (
         lambda client, _description, position, tolerance, _config:
         controller.calls.append(
@@ -88,19 +92,26 @@ def test_red_team_runs_all_numbered_actions_in_order():
 
     assert controller.calls == [
         ('lift', 0.01),
-        ('move', -0.887, 0.781, 0.0),
+        (
+            'move_and_weapon_pair',
+            -0.887,
+            0.781,
+            0.0,
+            math.pi / 2.0,
+            0.028,
+        ),
         ('lift', 0.14),
         ('align',),
-        ('weapon_pair', math.pi / 2.0, 0.028),
         ('move', -0.10, 0.0, 0.0),
         ('weapon_joint', 'grip_client', 0.0, 0.001),
-        ('lift', 0.21),
+        ('lift', 0.17),
         (
             'weapon_joint',
             'rotate_client',
             math.radians(142.0),
             0.01,
         ),
+        ('move', 0.05, 0.0, 0.0),
         ('lift', 0.01),
         ('move', 0.20, 0.0, 0.0),
         ('move', 0.0, 0.0, math.pi),
@@ -128,7 +139,14 @@ def test_action_failure_stops_later_actions_and_reports_number():
 
     assert controller.calls == [
         ('lift', 0.01),
-        ('move', -0.887, 0.781, 0.0),
+        (
+            'move_and_weapon_pair',
+            -0.887,
+            0.781,
+            0.0,
+            math.pi / 2.0,
+            0.028,
+        ),
         ('lift', 0.14),
     ]
 
@@ -150,12 +168,39 @@ def test_weapon_pair_dispatches_both_requests_before_waiting():
     assert grip_request.tolerance == pytest.approx(0.001)
 
 
+def test_initial_move_and_weapon_pair_dispatch_all_requests_together():
+    controller = StageOneController.__new__(StageOneController)
+    call_order = []
+    controller.move_client = FakeClient('move', call_order)
+    controller.weapon_rotate_client = FakeClient('rotate', call_order)
+    controller.weapon_grip_client = FakeClient('grip', call_order)
+
+    controller.move_and_set_weapon_pair(
+        -0.887,
+        0.781,
+        0.0,
+        math.pi / 2.0,
+        0.028,
+        default_config(),
+    )
+
+    assert call_order == ['move', 'rotate', 'grip']
+    move_request = controller.move_client.requests[0]
+    assert move_request.pose_source == MoveRelative.Request.SERIAL
+    assert move_request.forward == pytest.approx(-0.887)
+    assert move_request.left == pytest.approx(0.781)
+    assert controller.weapon_rotate_client.requests[0].position == (
+        pytest.approx(math.pi / 2.0))
+    assert controller.weapon_grip_client.requests[0].position == (
+        pytest.approx(0.028))
+
+
 @pytest.mark.parametrize(
     'name,value',
     [
         ('action_2_left_m', -0.1),
         ('action_4_pixel_tolerance_px', 0.0),
-        ('action_8_pre_lift_height_m', -0.1),
+        ('action_8_lift_increment_m', -0.1),
         ('weapon_timeout_sec', math.inf),
         ('led_target_states', []),
     ],
@@ -250,8 +295,16 @@ def test_blue_team_reverses_only_lateral_translation():
 
     controller.execute_task(default_config(), StageOne.Request.BLUE)
 
-    assert controller.calls[1] == ('move', -0.887, -0.781, 0.0)
-    assert controller.calls[5] == ('move', -0.10, 0.0, 0.0)
+    assert controller.calls[1] == (
+        'move_and_weapon_pair',
+        -0.887,
+        -0.781,
+        0.0,
+        math.pi / 2.0,
+        0.028,
+    )
+    assert controller.calls[4] == ('move', -0.10, 0.0, 0.0)
+    assert controller.calls[8] == ('move', 0.05, 0.0, 0.0)
     assert controller.calls[10] == ('move', 0.20, 0.0, 0.0)
     assert controller.calls[11] == ('move', 0.0, 0.0, math.pi)
 

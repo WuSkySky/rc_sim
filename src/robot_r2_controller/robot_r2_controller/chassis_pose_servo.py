@@ -56,7 +56,13 @@ class PidAxis:
         self.last_error = 0.0
         self.has_last_error = False
 
-    def update(self, error, dt, proportional_gain_multiplier=1.0):
+    def update(
+        self,
+        error,
+        dt,
+        proportional_gain_multiplier=1.0,
+        output_limit=None,
+    ):
         if dt <= 0.0:
             return 0.0
 
@@ -79,8 +85,16 @@ class PidAxis:
         self.last_error = error
         self.has_last_error = True
 
-        if self.output_limit > 0.0:
-            output = max(-self.output_limit, min(output, self.output_limit))
+        effective_output_limit = (
+            self.output_limit
+            if output_limit is None
+            else abs(float(output_limit))
+        )
+        if effective_output_limit > 0.0:
+            output = max(
+                -effective_output_limit,
+                min(output, effective_output_limit),
+            )
         return output
 
     def configure(self, kp, ki, kd, integral_limit, output_limit):
@@ -109,13 +123,13 @@ class PoseServo(Node):
         self.declare_parameter('x_ki', 0.0)
         self.declare_parameter('x_kd', 0.2)
         self.declare_parameter('x_integral_limit', 0.5)
-        self.declare_parameter('x_output_limit', 2.0)
+        self.declare_parameter('x_output_limit', 0.45)
 
         self.declare_parameter('y_kp', 2.5)
         self.declare_parameter('y_ki', 0.0)
         self.declare_parameter('y_kd', 0.2)
         self.declare_parameter('y_integral_limit', 0.5)
-        self.declare_parameter('y_output_limit', 2.0)
+        self.declare_parameter('y_output_limit', 0.45)
 
         self.declare_parameter('yaw_kp', 3.0)
         self.declare_parameter('yaw_ki', 0.0)
@@ -260,11 +274,21 @@ class PoseServo(Node):
             raise ValueError('motion request values must be finite')
 
     def _request_settings(self, request):
+        linear_speed_limit_value = float(request.linear_speed_limit)
+        if not math.isfinite(linear_speed_limit_value):
+            raise ValueError('linear_speed_limit must be finite')
+        if linear_speed_limit_value < 0.0:
+            raise ValueError('linear_speed_limit must be non-negative')
         self._validate_finite_request((
             request.position_tolerance,
             request.yaw_tolerance,
             request.timeout_sec,
         ))
+        linear_speed_limit = (
+            linear_speed_limit_value
+            if linear_speed_limit_value > 0.0
+            else None
+        )
         position_tolerance = (
             request.position_tolerance
             if request.position_tolerance > 0.0
@@ -280,17 +304,27 @@ class PoseServo(Node):
             if request.timeout_sec > 0.0
             else self.default_timeout_sec
         )
-        return position_tolerance, yaw_tolerance, timeout_sec
+        return (
+            linear_speed_limit,
+            position_tolerance,
+            yaw_tolerance,
+            timeout_sec,
+        )
 
     def _absolute_goal(self, request, pose_source):
         self._validate_finite_request((request.x, request.y, request.yaw))
-        position_tolerance, yaw_tolerance, timeout_sec = (
-            self._request_settings(request))
+        (
+            linear_speed_limit,
+            position_tolerance,
+            yaw_tolerance,
+            timeout_sec,
+        ) = self._request_settings(request)
         return {
             'pose_source': pose_source,
             'x': float(request.x),
             'y': float(request.y),
             'yaw': normalize_angle(float(request.yaw)),
+            'linear_speed_limit': linear_speed_limit,
             'position_tolerance': position_tolerance,
             'yaw_tolerance': yaw_tolerance,
         }, timeout_sec
@@ -298,8 +332,12 @@ class PoseServo(Node):
     def _relative_goal(self, request, pose_source, current_pose_message):
         self._validate_finite_request(
             (request.forward, request.left, request.yaw_delta))
-        position_tolerance, yaw_tolerance, timeout_sec = (
-            self._request_settings(request))
+        (
+            linear_speed_limit,
+            position_tolerance,
+            yaw_tolerance,
+            timeout_sec,
+        ) = self._request_settings(request)
         pose = current_pose_message.pose
         current_pose = (
             float(pose.position.x),
@@ -317,6 +355,7 @@ class PoseServo(Node):
             'x': target_x,
             'y': target_y,
             'yaw': target_yaw,
+            'linear_speed_limit': linear_speed_limit,
             'position_tolerance': position_tolerance,
             'yaw_tolerance': yaw_tolerance,
         }, timeout_sec
@@ -451,8 +490,17 @@ class PoseServo(Node):
                 completed = True
             else:
                 command = Twist()
-                command.linear.x = self.x_pid.update(body_error_x, dt)
-                command.linear.y = self.y_pid.update(body_error_y, dt)
+                linear_speed_limit = goal.get('linear_speed_limit')
+                command.linear.x = self.x_pid.update(
+                    body_error_x,
+                    dt,
+                    output_limit=linear_speed_limit,
+                )
+                command.linear.y = self.y_pid.update(
+                    body_error_y,
+                    dt,
+                    output_limit=linear_speed_limit,
+                )
                 command.angular.z = self.yaw_pid.update(
                     yaw_error,
                     dt,

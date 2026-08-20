@@ -7,11 +7,13 @@
     action_4_pixel_tolerance_px: 5.0
     action_5_weapon_rotate_rad: 1.4312
     action_5_weapon_grip_m: 0.028
-    action_6_backward_m: 0.40
+    action_6_backward_m: 0.43
     action_7_weapon_grip_m: 0.0
-    # 武器旋转到最终角度前，先抬升底盘。
-    action_8_pre_lift_height_m: 0.21
+    # 夹爪闭合后，在当前工作高度基础上再向上抬升 3 cm。
+    action_8_lift_increment_m: 0.03
     action_8_weapon_rotate_rad: 3.054
+    # 底盘下降前使用下位机相对位置伺服前进 5 cm。
+    action_9_pre_lower_forward_m: 0.05
     action_9_lift_height_m: 0.01
     action_10_forward_m: 0.20
     action_11_yaw_delta_rad: 3.141592653589793

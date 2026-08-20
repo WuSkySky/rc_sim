@@ -52,6 +52,7 @@ def make_request(**overrides):
         'forward': 0.0,
         'left': 0.0,
         'yaw_delta': 0.0,
+        'linear_speed_limit': 0.0,
         'position_tolerance': 0.0,
         'yaw_tolerance': 0.0,
         'timeout_sec': 0.0,
@@ -108,9 +109,35 @@ def test_relative_goal_uses_only_selected_source_pose():
     )
 
     assert goal['pose_source'] == SERIAL_SOURCE
+    assert goal['linear_speed_limit'] is None
     assert (goal['x'], goal['y'], goal['yaw']) == pytest.approx(
         (1.0, 2.1, math.pi / 2.0))
     assert timeout_sec == pytest.approx(20.0)
+
+
+def test_request_linear_speed_limit_is_saved_in_goal():
+    controller = make_controller_state()
+    request = make_request(linear_speed_limit=0.75)
+
+    goal, _ = controller._relative_goal(
+        request,
+        SERIAL_SOURCE,
+        make_pose(0.0, 0.0, 0.0),
+    )
+
+    assert goal['linear_speed_limit'] == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize('value', [-0.1, math.inf, -math.inf, math.nan])
+def test_invalid_request_linear_speed_limit_is_rejected(value):
+    controller = make_controller_state()
+
+    with pytest.raises(ValueError, match='linear_speed_limit'):
+        controller._relative_goal(
+            make_request(linear_speed_limit=value),
+            SERIAL_SOURCE,
+            make_pose(0.0, 0.0, 0.0),
+        )
 
 
 def test_serial_relative_then_odin_absolute_requires_no_continuity():
@@ -179,8 +206,8 @@ def add_control_state(controller):
     controller.yaw_stable_cycles_required = 10
     controller.yaw_stable_cycle_count = 0
     controller.yaw_small_error_gain_multiplier = 11.0
-    controller.x_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.3)
-    controller.y_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.3)
+    controller.x_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.45)
+    controller.y_pid = PidAxis(1.0, 0.0, 0.03, 0.3, 0.45)
     controller.yaw_pid = PidAxis(0.3, 0.0, 0.02, 10.0, 0.6)
     controller.cmd_vel_publisher = FakePublisher()
 
@@ -203,7 +230,30 @@ def test_control_loop_ignores_unselected_pose_source():
 
     controller.control_loop()
 
-    assert controller.cmd_vel_publisher.messages[-1].linear.x > 0.0
+    assert controller.cmd_vel_publisher.messages[-1].linear.x == (
+        pytest.approx(0.45))
+
+
+def test_control_loop_uses_request_linear_speed_limit():
+    controller = make_controller_state()
+    add_control_state(controller)
+    controller.current_poses[SERIAL_SOURCE] = make_pose(0.0, 0.0, 0.0)
+    controller.active_goal = {
+        'pose_source': SERIAL_SOURCE,
+        'x': 2.0,
+        'y': 0.0,
+        'yaw': 0.0,
+        'linear_speed_limit': 0.75,
+        'position_tolerance': 0.005,
+        'yaw_tolerance': 0.01,
+    }
+    controller.goal_completed = False
+    controller.last_tick = time.monotonic() - 0.1
+
+    controller.control_loop()
+
+    command = controller.cmd_vel_publisher.messages[-1]
+    assert command.linear.x == pytest.approx(0.75)
 
 
 def test_execute_goal_stops_at_request_timeout(monkeypatch):

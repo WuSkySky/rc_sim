@@ -12,16 +12,16 @@ led_detect:
 
     aruco_dictionary: DICT_4X4_50
     # Set to -1 to accept the detected marker with the largest image area.
-    target_marker_id: 4
+    target_marker_id: 1
     # Outer edge length of the ArUco marker.
     marker_size_mm: 100.0
 
     # LED positions are relative to the marker's top-left outer corner.
     # Request and response state arrays use this same index order.
     led_count: 1
-    led_positions_x_mm: [0.0]
-    led_positions_y_mm: [170.0]
-    led_radius_mm: 10.0
+    led_positions_x_mm: [50.0]
+    led_positions_y_mm: [-50.0]
+    led_radius_mm: 30.0
     brightness_threshold: 200.0
 
     # Actual processing cap. Values above 15 Hz are rejected.

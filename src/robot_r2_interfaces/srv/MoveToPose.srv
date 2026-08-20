@@ -4,6 +4,8 @@ string pose_source
 float64 x
 float64 y
 float64 yaw
+# 0 uses the chassis_pose_servo configured linear output limits.
+float64 linear_speed_limit
 float64 position_tolerance
 float64 yaw_tolerance
 float64 timeout_sec

@@ -197,6 +197,17 @@ class StageTwoController(Node):
         ))
         return move_cells, point_one_route, point_two_loads
 
+    @classmethod
+    def point_one_route_for_team(cls, route_cells, team):
+        cls.validate_team(team)
+        if team == StageTwo.Request.RED:
+            return tuple(route_cells)
+        mirrored_lanes = {4 - lane for lane in route_cells}
+        return tuple(
+            lane for lane in cls.POINT_ONE_ORDER
+            if lane in mirrored_lanes
+        )
+
     def wait_for_dependencies(self, timeout_sec, include_point_one=True):
         dependencies = [(self.point_two_client, 'StageTwoPointTwo')]
         if include_point_one:
@@ -271,6 +282,8 @@ class StageTwoController(Node):
                 move_cells, point_one_route, point_two_loads = (
                     self.validate_and_split_request(
                         mode, request.move_cells, request.kfs_cells))
+                point_one_route = self.point_one_route_for_team(
+                    point_one_route, request.team)
                 if mode != StageTwo.Request.ROUTE:
                     self.validate_decision(request.fake_kfs_decision)
 

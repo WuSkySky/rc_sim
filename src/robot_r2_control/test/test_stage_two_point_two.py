@@ -5,7 +5,12 @@ from types import SimpleNamespace
 import pytest
 
 from robot_r2_control.stage_two_point_two import StageTwoPointTwoController
-from robot_r2_interfaces.srv import MoveToPose, SetLift, StageTwoPointTwo
+from robot_r2_interfaces.srv import (
+    MoveRelative,
+    MoveToPose,
+    SetLift,
+    StageTwoPointTwo,
+)
 
 
 class ImmediateFuture:
@@ -67,6 +72,7 @@ def make_controller():
         for _ in controller.forward_x
     ]
     controller.move_client = FakeClient()
+    controller.move_relative_client = FakeClient()
     controller.lift_client = FakeClient()
     controller.traverse_client = FakeClient()
     controller.kfs_action_client = FakeClient()
@@ -390,6 +396,39 @@ def test_route_pickup_preserves_alignment_and_load_modes(
     assert load_modes == [expected_mode]
 
 
+@pytest.mark.parametrize(
+    'current, target, expected_offset',
+    [
+        ((4, 2), (4, 1), 0.2),
+        ((3, 2), (3, 1), 0.4),
+    ],
+)
+def test_pickup_approaches_high_and_low_kfs_relative_to_aligned_pose(
+        current, target, expected_offset):
+    controller = make_controller()
+    controller.get_logger = lambda: FakeLogger()
+    absolute_moves = []
+    controller.move_to_pose = lambda *pose: absolute_moves.append(pose)
+    controller.align_kfs = lambda: None
+    controller.load_kfs = lambda _mode: None
+    controller.loaded_count = 0
+
+    controller.pickup_kfs(current, target)
+
+    current_cell = controller.get_cell(current)
+    assert len(absolute_moves) == 1
+    assert absolute_moves[0][:2] == pytest.approx(current_cell[:2])
+    assert absolute_moves[0][2] == pytest.approx(-math.pi / 2.0)
+    assert [
+        request.forward
+        for request in controller.move_relative_client.requests
+    ] == pytest.approx([expected_offset, -expected_offset])
+    assert all(
+        request.pose_source == MoveRelative.Request.ODIN
+        for request in controller.move_relative_client.requests
+    )
+
+
 def test_route_pickup_preserves_full_load_release_behavior():
     controller = make_controller()
     controller.get_logger = lambda: FakeLogger()
@@ -411,6 +450,21 @@ def test_route_pickup_preserves_full_load_release_behavior():
 
     assert releases == [True]
     assert load_modes == [2]
+    assert [
+        request.forward
+        for request in controller.move_relative_client.requests
+    ] == pytest.approx([0.2, -0.2, 0.2, -0.2, 0.2, -0.2])
+    assert [
+        request.yaw_delta
+        for request in controller.move_relative_client.requests
+    ] == pytest.approx([
+        0.0,
+        math.pi / 2.0,
+        0.0,
+        -math.pi / 2.0,
+        0.0,
+        0.0,
+    ])
 
 
 def test_move_to_pose_uses_odin_source_and_absolute_values():
@@ -423,6 +477,21 @@ def test_move_to_pose_uses_odin_source_and_absolute_values():
     assert request.x == pytest.approx(1.5)
     assert request.y == pytest.approx(-2.0)
     assert request.yaw == pytest.approx(math.pi)
+    assert request.position_tolerance == pytest.approx(0.0)
+    assert request.yaw_tolerance == pytest.approx(0.0)
+    assert request.timeout_sec == pytest.approx(35.0)
+
+
+def test_move_relative_uses_odin_source_and_relative_values():
+    controller = make_controller()
+
+    controller.move_relative(0.2, -0.1, math.pi / 2.0)
+
+    request = controller.move_relative_client.requests[0]
+    assert request.pose_source == MoveRelative.Request.ODIN
+    assert request.forward == pytest.approx(0.2)
+    assert request.left == pytest.approx(-0.1)
+    assert request.yaw_delta == pytest.approx(math.pi / 2.0)
     assert request.position_tolerance == pytest.approx(0.0)
     assert request.yaw_tolerance == pytest.approx(0.0)
     assert request.timeout_sec == pytest.approx(35.0)

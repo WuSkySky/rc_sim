@@ -80,8 +80,8 @@ ros2 run yahboom_camera yahboom_camera \
   --ros-args -p device:=/dev/video2 -p mode:=[1280,720,30]
 ```
 
-The current real-hardware bringup does not start this USB camera. The package
-is retained for standalone testing and possible future hardware changes.
+`bringup real2.launch.py` starts the HD USB camera as
+`front_yahboom_camera` and remaps its topics to `/r2/front_camera/*`.
 
 ## Parameters
 
@@ -89,7 +89,7 @@ All parameters are declared from `config/yahboom_camera.yaml`.
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `device` | string | `/dev/video2` | Video device node or stable udev alias. |
+| `device` | string | `/dev/video2` (old) / `/dev/yahboom_front` (HD) | Video device node or stable udev alias. |
 | `pixel_format` | string | `MJPG` | `MJPG` or `YUYV`. |
 | `mode` | int array | `[1280, 720, 30]` (`yahboom_camera.yaml`) / `[1920, 1080, 30]` (`yahboom_camera_hd.yaml`) | `[width, height, framerate]`. |
 | `visualization_enabled` | bool | `false` | Publish the `/debug` image. Dynamic. |

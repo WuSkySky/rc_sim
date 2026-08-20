@@ -39,8 +39,9 @@ class StageOneConfig:
     action_5_weapon_grip_m: float
     action_6_backward_m: float
     action_7_weapon_grip_m: float
-    action_8_pre_lift_height_m: float
+    action_8_lift_increment_m: float
     action_8_weapon_rotate_rad: float
+    action_9_pre_lower_forward_m: float
     action_9_lift_height_m: float
     action_10_forward_m: float
     action_11_yaw_delta_rad: float
@@ -69,8 +70,9 @@ PARAMETER_DEFAULTS = {
     'action_5_weapon_grip_m': 0.028,
     'action_6_backward_m': 0.10,
     'action_7_weapon_grip_m': 0.0,
-    'action_8_pre_lift_height_m': 0.21,
+    'action_8_lift_increment_m': 0.03,
     'action_8_weapon_rotate_rad': math.radians(142.0),
+    'action_9_pre_lower_forward_m': 0.05,
     'action_9_lift_height_m': 0.01,
     'action_10_forward_m': 0.20,
     'action_11_yaw_delta_rad': math.pi,
@@ -163,8 +165,9 @@ class StageOneController(Node):
             'action_5_weapon_grip_m',
             'action_6_backward_m',
             'action_7_weapon_grip_m',
-            'action_8_pre_lift_height_m',
+            'action_8_lift_increment_m',
             'action_8_weapon_rotate_rad',
+            'action_9_pre_lower_forward_m',
             'action_9_lift_height_m',
             'action_10_forward_m',
             'final_weapon_grip_m',
@@ -324,6 +327,18 @@ class StageOneController(Node):
             raise RuntimeError(f'SetLift failed: {response.message}')
 
     def move_relative(self, forward, left, yaw_delta, config):
+        request = self.move_relative_request(
+            forward, left, yaw_delta, config)
+        response = self.wait_for_future(
+            self.move_client.call_async(request),
+            config.move_timeout_sec,
+            'MoveRelative',
+        )
+        if not response.success:
+            raise RuntimeError(f'MoveRelative failed: {response.message}')
+
+    @staticmethod
+    def move_relative_request(forward, left, yaw_delta, config):
         request = MoveRelative.Request()
         request.pose_source = MoveRelative.Request.SERIAL
         request.forward = float(forward)
@@ -332,13 +347,7 @@ class StageOneController(Node):
         request.position_tolerance = config.position_tolerance_m
         request.yaw_tolerance = config.yaw_tolerance_rad
         request.timeout_sec = config.move_timeout_sec
-        response = self.wait_for_future(
-            self.move_client.call_async(request),
-            config.move_timeout_sec,
-            'MoveRelative',
-        )
-        if not response.success:
-            raise RuntimeError(f'MoveRelative failed: {response.message}')
+        return request
 
     def align_tip(self, config):
         request = Align.Request()
@@ -396,6 +405,35 @@ class StageOneController(Node):
         self.wait_for_parallel_futures(
             futures, config.weapon_timeout_sec)
 
+    def move_and_set_weapon_pair(
+        self, forward, left, yaw_delta, rotate_position, grip_position, config
+    ):
+        move_request = self.move_relative_request(
+            forward, left, yaw_delta, config)
+        rotate_request = self.weapon_request(
+            rotate_position,
+            config.weapon_rotate_tolerance_rad,
+            config.weapon_timeout_sec,
+        )
+        grip_request = self.weapon_request(
+            grip_position,
+            config.weapon_grip_tolerance_m,
+            config.weapon_timeout_sec,
+        )
+        futures = (
+            ('MoveRelative', self.move_client.call_async(move_request)),
+            (
+                'WeaponRotate',
+                self.weapon_rotate_client.call_async(rotate_request),
+            ),
+            (
+                'WeaponGrip',
+                self.weapon_grip_client.call_async(grip_request),
+            ),
+        )
+        self.wait_for_parallel_futures(
+            futures, max(config.move_timeout_sec, config.weapon_timeout_sec))
+
     def detect_led(self, config):
         request = DetectLed.Request()
         request.target_states = list(config.led_target_states)
@@ -428,11 +466,13 @@ class StageOneController(Node):
         )
         self.run_action(
             2,
-            f'move {lateral_direction} and backward',
-            lambda: self.move_relative(
+            f'move {lateral_direction} and backward while preparing weapon',
+            lambda: self.move_and_set_weapon_pair(
                 -config.action_2_backward_m,
                 lateral_sign * config.action_2_left_m,
                 0.0,
+                config.action_5_weapon_rotate_rad,
+                config.action_5_weapon_grip_m,
                 config,
             ),
         )
@@ -444,21 +484,12 @@ class StageOneController(Node):
         self.run_action(4, 'align weapon tip', lambda: self.align_tip(config))
         self.run_action(
             5,
-            'rotate and open weapon gripper',
-            lambda: self.set_weapon_pair(
-                config.action_5_weapon_rotate_rad,
-                config.action_5_weapon_grip_m,
-                config,
-            ),
-        )
-        self.run_action(
-            6,
             'move backward',
             lambda: self.move_relative(
                 -config.action_6_backward_m, 0.0, 0.0, config),
         )
         self.run_action(
-            7,
+            6,
             'close weapon gripper',
             lambda: self.set_weapon_joint(
                 self.weapon_grip_client,
@@ -469,13 +500,16 @@ class StageOneController(Node):
             ),
         )
         self.run_action(
-            8,
+            7,
             'lift chassis before final weapon rotate',
             lambda: self.set_lift(
-                config.action_8_pre_lift_height_m, config),
+                config.action_3_lift_height_m
+                + config.action_8_lift_increment_m,
+                config,
+            ),
         )
         self.run_action(
-            9,
+            8,
             'rotate weapon to final angle',
             lambda: self.set_weapon_joint(
                 self.weapon_rotate_client,
@@ -484,6 +518,12 @@ class StageOneController(Node):
                 config.weapon_rotate_tolerance_rad,
                 config,
             ),
+        )
+        self.run_action(
+            9,
+            'move forward before lowering chassis',
+            lambda: self.move_relative(
+                config.action_9_pre_lower_forward_m, 0.0, 0.0, config),
         )
         self.run_action(
             10,

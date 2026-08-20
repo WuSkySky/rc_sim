@@ -8,7 +8,10 @@ from robot_r2_control.competition_gui import (
     CompetitionGuiApp,
     CompetitionGuiEvent,
     CompetitionGuiNode,
+)
+from robot_r2_control.stage_two_grid_gui import (
     GRID_CELLS,
+    StageTwoGridEditor,
     StageTwoGridModel,
     gui_cell_to_service_cell,
     grid_display_row,
@@ -189,35 +192,35 @@ def test_route_and_kfs_are_independent_and_clear_independently():
 
 
 def test_route_button_labels_show_only_current_sequence():
-    app = CompetitionGuiApp.__new__(CompetitionGuiApp)
-    app.grid_model = StageTwoGridModel()
-    app.grid_model.route_cells = [(4, 2), (3, 2)]
-    app.route_buttons = {
+    editor = StageTwoGridEditor.__new__(StageTwoGridEditor)
+    editor.model = StageTwoGridModel()
+    editor.model.route_cells = [(4, 2), (3, 2)]
+    editor.route_buttons = {
         (4, 2): FakeWidget(),
         (3, 2): FakeWidget(),
         (2, 2): FakeWidget(),
     }
 
-    app._refresh_route_buttons()
+    editor.refresh_route_buttons()
 
-    assert app.route_buttons[(4, 2)].states[-1]['text'] == '第 1 步'
-    assert app.route_buttons[(3, 2)].states[-1]['text'] == '第 2 步'
-    assert app.route_buttons[(2, 2)].states[-1]['text'] == ''
+    assert editor.route_buttons[(4, 2)].states[-1]['text'] == '第 1 步'
+    assert editor.route_buttons[(3, 2)].states[-1]['text'] == '第 2 步'
+    assert editor.route_buttons[(2, 2)].states[-1]['text'] == ''
 
 
 def test_kfs_button_labels_do_not_expose_cell_coordinates():
-    app = CompetitionGuiApp.__new__(CompetitionGuiApp)
-    app.grid_model = StageTwoGridModel()
-    app.grid_model.kfs_cells = {(4, 2)}
-    app.kfs_buttons = {
+    editor = StageTwoGridEditor.__new__(StageTwoGridEditor)
+    editor.model = StageTwoGridModel()
+    editor.model.kfs_cells = {(4, 2)}
+    editor.kfs_buttons = {
         (4, 2): FakeWidget(),
         (3, 2): FakeWidget(),
     }
 
-    app._refresh_kfs_buttons()
+    editor.refresh_kfs_buttons()
 
-    assert app.kfs_buttons[(4, 2)].states[-1]['text'] == 'KFS'
-    assert app.kfs_buttons[(3, 2)].states[-1]['text'] == ''
+    assert editor.kfs_buttons[(4, 2)].states[-1]['text'] == 'KFS'
+    assert editor.kfs_buttons[(3, 2)].states[-1]['text'] == ''
 
 
 @pytest.mark.parametrize(
@@ -226,7 +229,7 @@ def test_kfs_button_labels_do_not_expose_cell_coordinates():
         ((), '不能为空'),
         (((3, 2), (2, 2), (1, 1)), '必须从'),
         (((4, 2), (3, 2), (2, 2), (1, 2)), '结束'),
-        (((4, 2), (2, 2), (1, 2), (1, 1)), '不是四邻接'),
+        (((4, 2), (2, 2), (1, 2), (1, 1)), '必须共边'),
     ],
 )
 def test_route_validation_rejects_invalid_sequences(route, message):
@@ -246,7 +249,7 @@ def test_route_validation_accepts_stage_two_route():
 
 def test_invalid_route_does_not_call_stage_two_service():
     app = CompetitionGuiApp.__new__(CompetitionGuiApp)
-    app.grid_model = StageTwoGridModel()
+    app.stage_two_grid_editor = SimpleNamespace(model=StageTwoGridModel())
     app.team_value = FakeVariable(StageTwo.Request.RED)
     app.status_text = FakeVariable('')
     app.node = SimpleNamespace(
@@ -324,10 +327,10 @@ def test_blue_stage_two_request_keeps_gui_coordinates():
     assert message_indices(request.kfs_cells) == [(1, 3), (4, 2)]
 
 
-def test_red_gui_entry_kfs_is_routed_to_mirrored_point_one_lane():
+def test_blue_gui_left_entry_kfs_is_routed_to_left_point_one_lane():
     node = make_node()
     node.request_stage_two(
-        StageTwo.Request.RED,
+        StageTwo.Request.BLUE,
         valid_route(),
         ((4, 1),),
     )
@@ -341,6 +344,8 @@ def test_red_gui_entry_kfs_is_routed_to_mirrored_point_one_lane():
             request.kfs_cells,
         ))
 
+    point_one_route = StageTwoController.point_one_route_for_team(
+        point_one_route, StageTwo.Request.BLUE)
     assert point_one_route == (3,)
     assert point_two_loads == ()
 

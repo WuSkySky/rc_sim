@@ -18,6 +18,10 @@ from robot_r2_control.joint_control_gui import (
     JointControlGuiMixin,
     JointControlNodeMixin,
 )
+from robot_r2_control.stage_two_grid_gui import (
+    StageTwoGridEditor,
+    make_stage_two_route_request,
+)
 from robot_r2_interfaces.msg import LiftCommand
 from robot_r2_interfaces.srv import (
     Align,
@@ -25,6 +29,7 @@ from robot_r2_interfaces.srv import (
     MoveRelative,
     SetBasePose,
     StageOne,
+    StageTwo,
     StageTwoPointOne,
     StageTwoPointTwo,
     StageTwoPointTwoExit,
@@ -58,8 +63,9 @@ STAGE_ONE_PARAMETER_NAMES = {
     'action_5_weapon_grip_m',
     'action_6_backward_m',
     'action_7_weapon_grip_m',
-    'action_8_pre_lift_height_m',
+    'action_8_lift_increment_m',
     'action_8_weapon_rotate_rad',
+    'action_9_pre_lower_forward_m',
     'action_9_lift_height_m',
     'action_10_forward_m',
     'action_11_yaw_delta_rad',
@@ -393,6 +399,7 @@ class GuiControlNode(JointControlNodeMixin, Node):
     SET_BASE_POSE_ODIN_SERVICE = '/r2/set_base_pose_odin'
     STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
     STAGE_ONE_SERVICE = '/r2/stage_one'
+    STAGE_TWO_SERVICE = '/r2/stage_two'
     STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
     STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
     STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
@@ -405,6 +412,9 @@ class GuiControlNode(JointControlNodeMixin, Node):
     # (4,3) 格心 Y=+1.8 的基础上再增加 0.4 m。原有 X 保持不变。
     STEP_TWO_POINT_ONE_RELOCALIZATION_DEFAULT = (
         5.568, -2.2, 0.0, 0.0, 0.0, math.pi)
+    # 完整 Step2 路线测试从 (5,2) 格心开始，并朝 -x 出口方向。
+    STEP_TWO_RELOCALIZATION_DEFAULT = (
+        3.4, -3.0, 0.0, 0.0, 0.0, math.pi)
     # 2.2：(5,2) 格心 (3.4, -3.0)，该格为最低高度层（cell_heights=0.0），
     # 同时也是 2.2 的 initial_index 起点。
     STEP_TWO_POINT_TWO_RELOCALIZATION_DEFAULT = (
@@ -475,6 +485,8 @@ class GuiControlNode(JointControlNodeMixin, Node):
         self.step_test_direction = None
         self.stage_one_request_in_flight = False
         self.stage_one_team = None
+        self.stage_two_request_in_flight = False
+        self.stage_two_team = None
         self.stage_two_point_one_request_in_flight = False
         self.stage_two_point_one_mode = None
         self.stage_two_point_one_route = ()
@@ -521,6 +533,10 @@ class GuiControlNode(JointControlNodeMixin, Node):
             list(self.STAGE_ONE_RELOCALIZATION_DEFAULT),
         )
         self.declare_parameter(
+            'stage_two_relocalization_pose',
+            list(self.STEP_TWO_RELOCALIZATION_DEFAULT),
+        )
+        self.declare_parameter(
             'stage_two_point_one_relocalization_pose',
             list(self.STEP_TWO_POINT_ONE_RELOCALIZATION_DEFAULT),
         )
@@ -555,6 +571,8 @@ class GuiControlNode(JointControlNodeMixin, Node):
             raise ValueError(error)
         self.stage_one_relocalization_pose = parse_relocalization_values(
             self.get_parameter('stage_one_relocalization_pose').value)
+        self.stage_two_relocalization_pose = parse_relocalization_values(
+            self.get_parameter('stage_two_relocalization_pose').value)
         self.stage_two_point_one_relocalization_pose = (
             parse_relocalization_values(self.get_parameter(
                 'stage_two_point_one_relocalization_pose').value))
@@ -599,6 +617,8 @@ class GuiControlNode(JointControlNodeMixin, Node):
             TraverseStep, self.STEP_TRAVERSE_SERVICE)
         self.stage_one_client = self.create_client(
             StageOne, self.STAGE_ONE_SERVICE)
+        self.stage_two_client = self.create_client(
+            StageTwo, self.STAGE_TWO_SERVICE)
         self.stage_two_point_one_client = self.create_client(
             StageTwoPointOne, self.STAGE_TWO_POINT_ONE_SERVICE)
         self.stage_two_point_two_client = self.create_client(
@@ -662,6 +682,8 @@ class GuiControlNode(JointControlNodeMixin, Node):
         with self.state_lock:
             stage_one_relocalization_pose = (
                 self.stage_one_relocalization_pose)
+            stage_two_relocalization_pose = (
+                self.stage_two_relocalization_pose)
             stage_two_point_one_relocalization_pose = (
                 self.stage_two_point_one_relocalization_pose)
             stage_two_point_two_relocalization_pose = (
@@ -670,6 +692,7 @@ class GuiControlNode(JointControlNodeMixin, Node):
                 self.stage_two_point_two_exit_relocalization_pose)
             relocalization_names = (
                 'stage_one_relocalization_pose',
+                'stage_two_relocalization_pose',
                 'stage_two_point_one_relocalization_pose',
                 'stage_two_point_two_relocalization_pose',
                 'stage_two_point_two_exit_relocalization_pose',
@@ -677,6 +700,8 @@ class GuiControlNode(JointControlNodeMixin, Node):
             parsed_relocalization = {
                 'stage_one_relocalization_pose': (
                     stage_one_relocalization_pose),
+                'stage_two_relocalization_pose': (
+                    stage_two_relocalization_pose),
                 'stage_two_point_one_relocalization_pose': (
                     stage_two_point_one_relocalization_pose),
                 'stage_two_point_two_relocalization_pose': (
@@ -734,6 +759,8 @@ class GuiControlNode(JointControlNodeMixin, Node):
             self.motion_config = new_motion_config
             self.stage_one_relocalization_pose = (
                 parsed_relocalization['stage_one_relocalization_pose'])
+            self.stage_two_relocalization_pose = (
+                parsed_relocalization['stage_two_relocalization_pose'])
             self.stage_two_point_one_relocalization_pose = (
                 parsed_relocalization[
                     'stage_two_point_one_relocalization_pose'])
@@ -1304,6 +1331,102 @@ class GuiControlNode(JointControlNodeMixin, Node):
             self.stage_one_team = None
         self._queue_status(message)
 
+    def request_stage_two(self, team, move_cells, kfs_cells):
+        try:
+            team_label = self._stage_two_team_label(team)
+            request = make_stage_two_route_request(
+                team, move_cells, kfs_cells)
+        except ValueError as exc:
+            return False, str(exc)
+
+        with self.state_lock:
+            if self._chassis_service_in_flight_locked():
+                return False, '底盘操作正在执行'
+            if not self.set_base_pose_odin_client.service_is_ready():
+                return False, '/r2/set_base_pose_odin 服务不可用'
+            if not self.stage_two_client.service_is_ready():
+                return False, '/r2/stage_two 服务不可用'
+            self.active_manual_keys.clear()
+            self.velocity_test_kind = None
+            self.velocity_test_deadline = None
+            self.stage_two_request_in_flight = True
+            self.stage_two_team = team
+            relocalization_pose = self._stage_two_relocalization_pose(
+                self.stage_two_relocalization_pose, team)
+
+        self.cmd_vel_publisher.publish(Twist())
+        pose_request = self._make_set_base_pose_request(
+            relocalization_pose)
+        try:
+            future = self.set_base_pose_odin_client.call_async(pose_request)
+        except Exception as exc:
+            with self.state_lock:
+                self.stage_two_request_in_flight = False
+                self.stage_two_team = None
+            return False, (
+                f'完整 Step2 {team_label}重定位请求发送失败：{exc}')
+        future.add_done_callback(partial(
+            self._on_stage_two_relocalization_complete,
+            stage_request=request,
+        ))
+        return True, f'完整 Step2 {team_label}：正在重定位到 (5,2) 格心'
+
+    def _on_stage_two_relocalization_complete(self, future, stage_request):
+        with self.state_lock:
+            team = self.stage_two_team
+        team_label = self._stage_two_team_label(team)
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}重定位调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}重定位失败：无响应')
+            return
+        if not response.success:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}重定位失败：{response.message}')
+            return
+
+        self._queue_status(
+            f'完整 Step2 {team_label}：重定位完成，正在调用阶段服务')
+        try:
+            stage_future = self.stage_two_client.call_async(stage_request)
+        except Exception as exc:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}请求发送失败：{exc}')
+            return
+        stage_future.add_done_callback(self._on_stage_two_complete)
+
+    def _on_stage_two_complete(self, future):
+        with self.state_lock:
+            team = self.stage_two_team
+        team_label = self._stage_two_team_label(team)
+        try:
+            response = future.result()
+        except Exception as exc:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}调用异常：{exc}')
+            return
+        if response is None:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}失败：无响应')
+        elif response.success:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}完成：{response.message}；'
+                f'已装载 {int(response.loaded_count)} 个 KFS')
+        else:
+            self._finish_stage_two(
+                f'完整 Step2 {team_label}失败：{response.message}')
+
+    def _finish_stage_two(self, message):
+        with self.state_lock:
+            self.stage_two_request_in_flight = False
+            self.stage_two_team = None
+        self._queue_status(message)
+
     @staticmethod
     def _stage_two_point_one_mode_label(mode, route_cells=()):
         if mode == StageTwoPointOne.Request.STANDARD:
@@ -1799,6 +1922,7 @@ class GuiControlNode(JointControlNodeMixin, Node):
             self.relocalization_request_in_flight or
             self.step_test_request_in_flight or
             self.stage_one_request_in_flight or
+            self.stage_two_request_in_flight or
             self.stage_two_point_one_request_in_flight or
             self.stage_two_point_two_request_in_flight or
             self.stage_two_point_two_exit_request_in_flight or
@@ -2046,6 +2170,8 @@ class GuiControlApp(JointControlGuiMixin):
         self.up_step_test_button = None
         self.down_step_test_button = None
         self.stage_one_button = None
+        self.stage_two_button = None
+        self.stage_two_grid_editor = None
         self.stage_one_parameter_load_button = None
         self.step_traverse_parameter_load_button = None
         self.stage_two_point_one_parameter_load_button = None
@@ -2191,18 +2317,22 @@ class GuiControlApp(JointControlGuiMixin):
         team_frame = ttk.LabelFrame(
             task_column, text='比赛队伍（Step1 / Step2 / Step3）', padding=12)
         team_frame.grid(row=0, column=0, sticky='ew')
-        ttk.Radiobutton(
+        red_team_button = ttk.Radiobutton(
             team_frame,
             text='红方（负 Y）',
             variable=self.team_value,
             value=StageOne.Request.RED,
-        ).grid(row=0, column=0, sticky='w')
-        ttk.Radiobutton(
+        )
+        red_team_button.grid(row=0, column=0, sticky='w')
+        blue_team_button = ttk.Radiobutton(
             team_frame,
             text='蓝方（正 Y）',
             variable=self.team_value,
             value=StageOne.Request.BLUE,
-        ).grid(row=0, column=1, sticky='w', padx=(8, 0))
+        )
+        blue_team_button.grid(
+            row=0, column=1, sticky='w', padx=(8, 0))
+        self.chassis_buttons.extend((red_team_button, blue_team_button))
 
         stage_one_frame = ttk.LabelFrame(
             task_column, text='Step1', padding=12)
@@ -2229,10 +2359,34 @@ class GuiControlApp(JointControlGuiMixin):
             pady=(8, 0),
         )
 
-        stage_two_point_one_frame = ttk.LabelFrame(
-            task_column, text='Step2.1 测试', padding=12)
-        stage_two_point_one_frame.grid(
+        stage_two_frame = ttk.LabelFrame(
+            task_column, text='完整 Step2 路线测试', padding=12)
+        stage_two_frame.grid(
             row=2, column=0, sticky='ew', pady=(8, 0))
+        self.stage_two_grid_editor = StageTwoGridEditor(
+            stage_two_frame,
+            compact=True,
+            status_callback=self.status_text.set,
+        )
+        self.stage_two_grid_editor.grid(row=0, column=0, sticky='n')
+        self.chassis_buttons.extend(
+            self.stage_two_grid_editor.interactive_widgets)
+        self.stage_two_button = ttk.Button(
+            stage_two_frame,
+            text='完整 Step2 测试（从 (5,2) 格心朝出口）',
+            command=self._start_stage_two,
+        )
+        self.stage_two_button.grid(
+            row=1, column=0, sticky='ew', pady=(8, 0))
+        self.chassis_buttons.append(self.stage_two_button)
+
+        stage_two_partial_frame = ttk.Frame(task_column)
+        stage_two_partial_frame.grid(
+            row=3, column=0, sticky='ew', pady=(8, 0))
+        stage_two_point_one_frame = ttk.LabelFrame(
+            stage_two_partial_frame, text='Step2.1 测试', padding=12)
+        stage_two_point_one_frame.grid(
+            row=0, column=0, sticky='new', padx=(0, 8))
         self.stage_two_point_one_skip_button = ttk.Button(
             stage_two_point_one_frame,
             text='2.1 测试（skip 识别）',
@@ -2275,9 +2429,9 @@ class GuiControlApp(JointControlGuiMixin):
             row=3, column=0, columnspan=2, sticky='ew', pady=(8, 0))
 
         stage_two_point_two_frame = ttk.LabelFrame(
-            task_column, text='Step2.2 测试', padding=12)
+            stage_two_partial_frame, text='Step2.2 测试', padding=12)
         stage_two_point_two_frame.grid(
-            row=3, column=0, sticky='ew', pady=(8, 0))
+            row=0, column=1, sticky='new')
         self.stage_two_point_two_skip_button = ttk.Button(
             stage_two_point_two_frame,
             text='2.2 测试（skip 识别）',
@@ -2505,6 +2659,19 @@ class GuiControlApp(JointControlGuiMixin):
 
     def _start_stage_one(self):
         _, message = self.node.request_stage_one(self.team_value.get())
+        self.status_text.set(message)
+
+    def _start_stage_two(self):
+        try:
+            route = self.stage_two_grid_editor.model.validated_route()
+        except ValueError as exc:
+            self.status_text.set(str(exc))
+            return
+        _, message = self.node.request_stage_two(
+            self.team_value.get(),
+            route,
+            self.stage_two_grid_editor.model.sorted_kfs_cells(),
+        )
         self.status_text.set(message)
 
     def _start_stage_two_point_one_skip(self):

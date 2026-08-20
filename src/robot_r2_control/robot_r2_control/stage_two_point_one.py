@@ -309,6 +309,10 @@ class StageTwoPointOneController(Node):
         ]
         if self.mode == StageTwoPointOne.Request.STANDARD:
             dependencies.append((self.detection_client, 'GetKfsType'))
+        if self.mode in (
+            StageTwoPointOne.Request.STANDARD,
+            StageTwoPointOne.Request.ROUTE,
+        ):
             dependencies.append((self.align_client, 'AlignToKfs'))
         for client, name in dependencies:
             if not client.wait_for_service(
@@ -496,7 +500,7 @@ class StageTwoPointOneController(Node):
         if self.mode == StageTwoPointOne.Request.SKIP:
             return
         if self.mode == StageTwoPointOne.Request.ROUTE:
-            self.load_at_cell(loading_edge_pose, align=False)
+            self.load_at_cell(loading_edge_pose, align=True)
             return
         if self.detect_kfs_type() == self.KFS_TRUE_CLASS:
             self.load_at_cell(loading_edge_pose, align=True)

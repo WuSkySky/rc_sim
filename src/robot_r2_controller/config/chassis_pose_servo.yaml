@@ -12,13 +12,13 @@ chassis_pose_servo:
     x_ki: 0.0
     x_kd: 0.03
     x_integral_limit: 0.3
-    x_output_limit: 0.3
+    x_output_limit: 0.45
 
     y_kp: 1.0
     y_ki: 0.0
     y_kd: 0.03
     y_integral_limit: 0.3
-    y_output_limit: 0.3
+    y_output_limit: 0.45
 
     yaw_kp: 0.3
     yaw_ki: 0.0

@@ -138,6 +138,34 @@ def test_route_without_entry_kfs_has_empty_point_one_route():
     assert point_two_loads == ((2, 3),)
 
 
+def test_only_blue_point_one_route_is_mirrored():
+    assert StageTwoController.point_one_route_for_team(
+        (1,), StageTwo.Request.RED) == (1,)
+    assert StageTwoController.point_one_route_for_team(
+        (1,), StageTwo.Request.BLUE) == (3,)
+
+
+def test_blue_point_one_fix_keeps_point_two_route_and_load_cells_unchanged():
+    controller = make_controller()
+    request = SimpleNamespace(
+        team=StageTwo.Request.BLUE,
+        fake_kfs_decision=0,
+        mode=StageTwo.Request.ROUTE,
+        move_cells=default_move_cells(),
+        kfs_cells=[cell(4, 1), cell(2, 3)],
+    )
+    response = SimpleNamespace(success=None, message='', loaded_count=0)
+
+    result = controller.handle_stage_two(request, response)
+
+    assert result.success
+    assert list(controller.point_one_client.requests[0].route_cells) == [3]
+    point_two_request = controller.point_two_client.requests[0]
+    assert indices(point_two_request.move_cells) == indices(
+        default_move_cells())
+    assert indices(point_two_request.load_cells) == [(2, 3)]
+
+
 @pytest.mark.parametrize(
     'mode, moves, loads, message',
     [

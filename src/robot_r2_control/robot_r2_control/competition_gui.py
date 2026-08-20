@@ -13,92 +13,16 @@ from robot_r2_control.joint_control_gui import (
     JointControlGuiMixin,
     JointControlNodeMixin,
 )
-from robot_r2_interfaces.msg import CellIndex
+from robot_r2_control.stage_two_grid_gui import (
+    StageTwoGridEditor,
+    make_stage_two_route_request,
+)
 from robot_r2_interfaces.srv import (
     SetBasePose,
     StageOne,
     StageThree,
     StageTwo,
 )
-
-
-GRID_CELLS = tuple(
-    (forward_index, lateral_index)
-    for forward_index in range(1, 5)
-    for lateral_index in range(1, 4)
-)
-
-
-def grid_display_row(forward_index):
-    return forward_index
-
-
-def gui_cell_to_service_cell(team, cell):
-    if team not in (StageTwo.Request.RED, StageTwo.Request.BLUE):
-        raise ValueError(f'team must be red or blue, got {team!r}')
-    if cell not in GRID_CELLS:
-        raise ValueError(
-            f'cell {cell} must be inside forward rows 1..4 and '
-            'lateral lanes 1..3')
-    if team == StageTwo.Request.RED:
-        return cell[0], 4 - cell[1]
-    return cell
-
-
-class StageTwoGridModel:
-    def __init__(self):
-        self.route_cells = []
-        self.kfs_cells = set()
-
-    def toggle_route(self, cell):
-        self.validate_cell(cell)
-        if cell in self.route_cells:
-            self.route_cells.remove(cell)
-        else:
-            self.route_cells.append(cell)
-        return tuple(self.route_cells)
-
-    def toggle_kfs(self, cell):
-        self.validate_cell(cell)
-        if cell in self.kfs_cells:
-            self.kfs_cells.remove(cell)
-        else:
-            self.kfs_cells.add(cell)
-        return self.sorted_kfs_cells()
-
-    def clear_route(self):
-        self.route_cells.clear()
-
-    def clear_kfs(self):
-        self.kfs_cells.clear()
-
-    def sorted_kfs_cells(self):
-        return tuple(sorted(self.kfs_cells))
-
-    @staticmethod
-    def validate_cell(cell):
-        if cell not in GRID_CELLS:
-            raise ValueError(
-                f'cell {cell} must be inside forward rows 1..4 and '
-                'lateral lanes 1..3')
-
-    def validated_route(self):
-        route = tuple(self.route_cells)
-        if not route:
-            raise ValueError('Step2 路线不能为空')
-        if route[0] != (4, 2):
-            raise ValueError('Step2 路线必须从 (4,2) 开始')
-        if route[-1] not in ((1, 1), (1, 3)):
-            raise ValueError('Step2 路线必须在 (1,1) 或 (1,3) 结束')
-        for source, target in zip(route, route[1:]):
-            distance = (
-                abs(target[0] - source[0]) +
-                abs(target[1] - source[1])
-            )
-            if distance != 1:
-                raise ValueError(
-                    f'Step2 路线 {source} → {target} 不是四邻接移动')
-        return route
 
 
 @dataclass(frozen=True)
@@ -207,13 +131,6 @@ class CompetitionGuiNode(JointControlNodeMixin, Node):
             self.stage_one_relocalization_pose = stage_one_pose
             self.stage_two_relocalization_pose = stage_two_pose
         return SetParametersResult(successful=True)
-
-    @staticmethod
-    def cell_message(index):
-        return CellIndex(
-            forward_index=index[0],
-            lateral_index=index[1],
-        )
 
     @staticmethod
     def base_pose_request(pose):
@@ -328,22 +245,8 @@ class CompetitionGuiNode(JointControlNodeMixin, Node):
             self.validate_team(team)
         except ValueError as exc:
             return False, str(exc)
-        service_move_cells = tuple(
-            gui_cell_to_service_cell(team, index)
-            for index in move_cells
-        )
-        service_kfs_cells = tuple(sorted(
-            gui_cell_to_service_cell(team, index)
-            for index in kfs_cells
-        ))
-        request = StageTwo.Request()
-        request.team = team
-        request.fake_kfs_decision = 0
-        request.mode = StageTwo.Request.ROUTE
-        request.move_cells = [
-            self.cell_message(index) for index in service_move_cells]
-        request.kfs_cells = [
-            self.cell_message(index) for index in service_kfs_cells]
+        request = make_stage_two_route_request(
+            team, move_cells, kfs_cells)
         relocalization_pose = self.stage_two_relocalization_for_team(team)
         return self._begin_relocalized_stage_request(
             2,
@@ -451,9 +354,6 @@ class CompetitionGuiNode(JointControlNodeMixin, Node):
 
 
 class CompetitionGuiApp(JointControlGuiMixin):
-    ROUTE_SELECT_COLOR = '#4f83cc'
-    KFS_SELECT_COLOR = '#e09f3e'
-
     def __init__(self, node):
         self.node = node
         self.root = tk.Tk()
@@ -461,18 +361,9 @@ class CompetitionGuiApp(JointControlGuiMixin):
         self.root.resizable(False, False)
         self.root.protocol('WM_DELETE_WINDOW', self.close)
 
-        self.grid_model = StageTwoGridModel()
         self.team_value = tk.StringVar(value=StageOne.Request.RED)
         self.stage_three_count = tk.IntVar(value=3)
         self.status_text = tk.StringVar(value='已就绪')
-        self.route_variables = {
-            cell: tk.BooleanVar(value=False) for cell in GRID_CELLS
-        }
-        self.kfs_variables = {
-            cell: tk.BooleanVar(value=False) for cell in GRID_CELLS
-        }
-        self.route_buttons = {}
-        self.kfs_buttons = {}
         self.interactive_widgets = []
         self.last_stage_busy = None
         self._closed = False
@@ -543,12 +434,14 @@ class CompetitionGuiApp(JointControlGuiMixin):
     def _build_stage_two_controls(self, parent):
         frame = ttk.LabelFrame(parent, text='Step2 路线模式', padding=10)
         frame.grid(row=2, column=0, sticky='ew', pady=(8, 0))
-        route_frame = ttk.LabelFrame(frame, text='移动路线（按点击顺序）')
-        route_frame.grid(row=0, column=0, sticky='n', padx=(0, 8))
-        kfs_frame = ttk.LabelFrame(frame, text='需要 Load 的 KFS')
-        kfs_frame.grid(row=0, column=1, sticky='n')
-        self._build_toggle_grid(route_frame, route=True)
-        self._build_toggle_grid(kfs_frame, route=False)
+        self.stage_two_grid_editor = StageTwoGridEditor(
+            frame,
+            status_callback=self.status_text.set,
+        )
+        self.stage_two_grid_editor.grid(
+            row=0, column=0, columnspan=2, sticky='n')
+        self.interactive_widgets.extend(
+            self.stage_two_grid_editor.interactive_widgets)
 
         self.stage_two_button = ttk.Button(
             frame,
@@ -558,62 +451,6 @@ class CompetitionGuiApp(JointControlGuiMixin):
         self.stage_two_button.grid(
             row=1, column=0, columnspan=2, sticky='ew', pady=(8, 0))
         self.interactive_widgets.append(self.stage_two_button)
-
-    def _build_toggle_grid(self, parent, route):
-        variables = self.route_variables if route else self.kfs_variables
-        buttons = self.route_buttons if route else self.kfs_buttons
-        color = self.ROUTE_SELECT_COLOR if route else self.KFS_SELECT_COLOR
-        callback = self._toggle_route if route else self._toggle_kfs
-        clear_callback = self._clear_route if route else self._clear_kfs
-
-        ttk.Label(parent, text='出口').grid(
-            row=0,
-            column=0,
-            columnspan=3,
-            sticky='ew',
-            pady=(2, 5),
-        )
-        for forward_index in range(1, 5):
-            display_row = grid_display_row(forward_index)
-            for lateral_index in range(1, 4):
-                cell = (forward_index, lateral_index)
-                button = tk.Checkbutton(
-                    parent,
-                    text='',
-                    variable=variables[cell],
-                    command=partial(callback, cell),
-                    indicatoron=False,
-                    selectcolor=color,
-                    activebackground=color,
-                    width=8,
-                    height=2,
-                    relief=tk.RAISED,
-                    offrelief=tk.RAISED,
-                )
-                button.grid(
-                    row=display_row,
-                    column=lateral_index - 1,
-                    padx=2,
-                    pady=2,
-                    sticky='nsew',
-                )
-                buttons[cell] = button
-                self.interactive_widgets.append(button)
-        ttk.Label(parent, text='入口').grid(
-            row=5,
-            column=0,
-            columnspan=3,
-            sticky='ew',
-            pady=(5, 2),
-        )
-        clear_button = ttk.Button(
-            parent,
-            text='清空',
-            command=clear_callback,
-        )
-        clear_button.grid(
-            row=6, column=0, columnspan=3, sticky='ew', pady=(5, 2))
-        self.interactive_widgets.append(clear_button)
 
     def _build_stage_three_controls(self, parent):
         frame = ttk.LabelFrame(parent, text='Step3 KFS 数量', padding=10)
@@ -636,56 +473,20 @@ class CompetitionGuiApp(JointControlGuiMixin):
             row=1, column=0, columnspan=3, sticky='ew', pady=(8, 0))
         self.interactive_widgets.append(self.stage_three_button)
 
-    def _toggle_route(self, cell):
-        self.grid_model.toggle_route(cell)
-        self._refresh_route_buttons()
-
-    def _toggle_kfs(self, cell):
-        self.grid_model.toggle_kfs(cell)
-        self._refresh_kfs_buttons()
-
-    def _clear_route(self):
-        self.grid_model.clear_route()
-        for variable in self.route_variables.values():
-            variable.set(False)
-        self._refresh_route_buttons()
-        self.status_text.set('已清空 Step2 路线')
-
-    def _clear_kfs(self):
-        self.grid_model.clear_kfs()
-        for variable in self.kfs_variables.values():
-            variable.set(False)
-        self._refresh_kfs_buttons()
-        self.status_text.set('已清空 Step2 KFS 标记')
-
-    def _refresh_route_buttons(self):
-        orders = {
-            cell: index
-            for index, cell in enumerate(self.grid_model.route_cells, start=1)
-        }
-        for cell, button in self.route_buttons.items():
-            text = f'第 {orders[cell]} 步' if cell in orders else ''
-            button.configure(text=text)
-
-    def _refresh_kfs_buttons(self):
-        for cell, button in self.kfs_buttons.items():
-            text = 'KFS' if cell in self.grid_model.kfs_cells else ''
-            button.configure(text=text)
-
     def _start_stage_one(self):
         self._handle_start_result(
             self.node.request_stage_one(self.team_value.get()))
 
     def _start_stage_two(self):
         try:
-            route = self.grid_model.validated_route()
+            route = self.stage_two_grid_editor.model.validated_route()
         except ValueError as exc:
             self.status_text.set(str(exc))
             return
         self._handle_start_result(self.node.request_stage_two(
             self.team_value.get(),
             route,
-            self.grid_model.sorted_kfs_cells(),
+            self.stage_two_grid_editor.model.sorted_kfs_cells(),
         ))
 
     def _start_stage_three(self):
