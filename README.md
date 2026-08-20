@@ -68,10 +68,10 @@ source install/setup.bash
 ros2 launch bringup real1.launch.py
 ```
 
-real2 负责前置 Yahboom USB 相机、端头 MIPI 相机、KFS 识别、KFS ROI 和
-端头 YOLO 目标检测。原左右 MIPI 相机已移除。前置 Yahboom 相机默认发布自定义
-`/r2/front_camera/image_raw`，ROI 节点默认直接使用该话题。KFS 和端头检测的
-调试图均默认关闭，可通过对应
+real2 只使用端头 MIPI 相机，负责 KFS 识别、KFS ROI 和端头 YOLO 目标检测。
+原左右 MIPI 相机已移除，不使用 Yahboom USB 相机。端头相机发布自定义
+`/r2/tip_camera/image_raw`，KFS 融合节点的 front 输入和 ROI 节点都 remap 到该话题。
+KFS 和端头检测的调试图均默认关闭，可通过对应
 动态参数开启。融合节点不会等待未接入的相机，因此只有部分相机
 在线时也能正常推理：
 
@@ -80,8 +80,8 @@ source install/setup.bash
 ros2 launch bringup real2.launch.py
 ```
 
-real2 的 ROI 默认使用前置 Yahboom 相机，real1 的阶段任务默认使用前置 KFS
-识别服务 `/r2/detection/front/get_type`。
+real2 的 ROI 默认使用端头 MIPI 相机，real1 的阶段任务默认使用融合
+KFS 识别服务 `/r2/detection/get_type`。
 
 ## ROS 2 服务
 
@@ -304,8 +304,8 @@ ros2 service call /r2/step_traverse robot_r2_interfaces/srv/TraverseStep \
 ### KFS 与视觉
 
 KFS 视觉对齐会根据 `/r2/kfs/roi` 中的红蓝区域横向移动底盘。仿真 ROI 使用
-前相机；实机的前置 Yahboom 相机和 ROI 节点都由 real2 启动，ROI 默认使用
-`/r2/front_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
+前相机；实机的端头 MIPI 相机和 ROI 节点都由 real2 启动，ROI 默认使用
+`/r2/tip_camera/image_raw`。real1 不处理该图像链路，只有对齐节点订阅
 `/r2/kfs/roi`。该话题只携带时间戳、源帧序号、有效性、左右边界、左右
 边界列的最下方掩膜点和横向中心偏差，不包含图像像素：
 
@@ -372,7 +372,6 @@ ros2 param set /kfs_detect_fused visualization_enabled_front true
 ros2 param set /kfs_detect_fused visualization_enabled_left true
 ros2 param set /kfs_detect_fused visualization_enabled_right true
 ros2 param set /r2/front_camera_controller visualization_enabled true
-ros2 param set /front_yahboom_camera visualization_enabled true
 ros2 param set /tip_mipi_camera visualization_enabled true
 ros2 param set /r2/target_alignment/yolo_target_detector \
   visualization.enabled true
@@ -382,19 +381,19 @@ ros2 param set /r2/target_alignment/yolo_target_detector \
 `/r2/kfs/roi/debug`；当前实机 KFS 检测图像为 `/r2/detection/front/debug`；
 端头 YOLO 检测调试图为
 `/r2/target_alignment/debug_image`。
-仿真前相机、前置 Yahboom 相机以及端头 MIPI 相机也使用同一个动态参数控制各自的
+仿真前相机和实机端头 MIPI 相机也使用同一个动态参数控制各自的
 `/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
 
-实机 KFS 类型检测，以前相机为例：
+实机 KFS 类型检测：
 
 ```bash
-ros2 service call /r2/detection/front/get_type \
+ros2 service call /r2/detection/get_type \
   robot_r2_interfaces/srv/GetKfsType \
   "{sample_count: 10, timeout_sec: 10.0}"
 ```
 
-当前实机仅前置相机提供 KFS 图像输入。
+当前实机仅端头 MIPI 相机提供 KFS 图像输入，在融合节点中作为 front 路。
 仿真启动文件不再启动 KFS 类型检测节点。
 
 LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：

@@ -12,7 +12,7 @@ version intentionally does not use the ROS loaned-message API.
 
 The stable device alias describes the physical Jetson MIPI connector:
 
-- `/dev/mipi_tip`: weapon-tip camera on CSI-A (`imx219 9-0010`, real2)
+- `/dev/mipi_tip`: the single weapon-tip camera on real2 CSI-A or CSI-B
 
 The configured device is resolved from its udev symlink to the current
 `/dev/videoN` target, then mapped to Argus `sensor-id=N`.
@@ -39,8 +39,8 @@ The real2 bringup remaps them to:
 - `/r2/tip_camera/image_raw/debug`
 - `/r2/tip_camera/camera_info`
 
-The tip camera is wired to the `9-0010` connector on real2 (Jetson2). It
-publishes `CameraFrame` on
+The tip camera is wired to one CSI connector on real2 (Jetson2). It publishes
+`CameraFrame` on
 `/r2/tip_camera/image_raw` for the tip-detection upstream (`/r2/tip/roi`).
 `real1.launch.py` does not start a MIPI camera.
 
@@ -67,8 +67,10 @@ Normal processing nodes subscribe to the bounded topic.
 
 ## udev aliases
 
-The `udev/99-mipi-cameras.rules` reference file maps real2 CSI-A (`9-0010`) to
-`/dev/mipi_tip`. real1 no longer has a MIPI camera and does not need this rule.
+The `udev/99-mipi-cameras.rules` reference file maps either real2 CSI connector
+(`9-0010` or `10-0010`) to `/dev/mipi_tip`. This is unambiguous because real2
+has only one MIPI camera. real1 no longer has a MIPI camera and does not need
+this rule.
 
 Install the rule on real2 and reload udev:
 

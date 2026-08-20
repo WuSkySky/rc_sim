@@ -5,8 +5,8 @@ GStreamer `v4l2src`, so the driver works on both the x86_64 development
 machine and the Jetson hosts. Two camera generations are supported with one
 config file each:
 
-- Old model: Sunplus `SDYH-8P0P` (USB `1bcf:0b09`) — `config/yahboom_camera.yaml`,
-  used by the robots' `real2.launch.py` (720p@30 default).
+- Old model: Sunplus `SDYH-8P0P` (USB `1bcf:0b09`) — `config/yahboom_camera.yaml`
+  (720p@30 default).
 - New model: HD USB Camera (USB `05a3:9230`) — `config/yahboom_camera_hd.yaml`,
   selected by the standalone `yahboom_camera.launch.py` (1080p@30 default).
 
@@ -80,9 +80,8 @@ ros2 run yahboom_camera yahboom_camera \
   --ros-args -p device:=/dev/video2 -p mode:=[1280,720,30]
 ```
 
-`bringup real2.launch.py` starts this node as `front_yahboom_camera` and remaps
-its three topics to `/r2/front_camera/*`, replacing the retired HIKROBOT front
-camera.
+The current real-hardware bringup does not start this USB camera. The package
+is retained for standalone testing and possible future hardware changes.
 
 ## Parameters
 

@@ -209,7 +209,7 @@ def generate_launch_description():
             'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         DeclareLaunchArgument(
             'kfs_get_type_service',
-            default_value='/r2/detection/front/get_type',
+            default_value='/r2/detection/get_type',
             description='Remote KFS detection service used by control',
         ),
         # 与 ArUco 识别对接配套的开关，停用期间一并注释：

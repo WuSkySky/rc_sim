@@ -23,7 +23,7 @@
     p2: 0.0
     k3: 0.0
 
-# Weapon-tip camera on real2 (Jetson2), wired to CSI-A (9-0010).
+# Weapon-tip camera on real2 (Jetson2), using the stable CSI-A/B alias.
 tip_mipi_camera:
   ros__parameters:
     device: /dev/mipi_tip
