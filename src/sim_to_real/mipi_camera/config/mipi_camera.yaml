@@ -23,17 +23,7 @@
     p2: 0.0
     k3: 0.0
 
-# Stable aliases bind each node to one physical Jetson MIPI connector.
-left_mipi_camera:
-  ros__parameters:
-    device: /dev/mipi_left
-
-right_mipi_camera:
-  ros__parameters:
-    device: /dev/mipi_right
-
-# Weapon-tip camera on real1 (Jetson1). Same IMX219 model as left/right,
-# wired to the 9-0010 connector on that host.
+# Weapon-tip camera on real2 (Jetson2), wired to CSI-A (9-0010).
 tip_mipi_camera:
   ros__parameters:
     device: /dev/mipi_tip

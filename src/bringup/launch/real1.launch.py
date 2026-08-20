@@ -21,12 +21,9 @@ def generate_launch_description():
         'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
     control_pkg = get_package_share_directory('robot_r2_control')
-    mipi_camera_pkg = get_package_share_directory('mipi_camera')
     # ArUco 识别对接当前不在 real1 启动，以下变量保留待恢复：
     # aruco_pkg = get_package_share_directory('robot_r2_aruco')
     # controller_pkg = get_package_share_directory('robot_r2_controller')
-    target_alignment_pkg = get_package_share_directory(
-        'robot_r2_target_alignment')
     fastdds_profile = os.path.join(
         interfaces_pkg,
         'config',
@@ -144,48 +141,6 @@ def generate_launch_description():
         output='screen',
     )
 
-    # Weapon-tip MIPI camera (IMX219, same model as left/right). Its CameraFrame
-    # is published on /r2/tip_camera/image_raw for the tip-detection upstream.
-    mipi_camera_config = os.path.join(
-        mipi_camera_pkg,
-        'config',
-        'mipi_camera.yaml',
-    )
-    tip_mipi_camera = Node(
-        package='mipi_camera',
-        executable='mipi_camera',
-        name='tip_mipi_camera',
-        parameters=[mipi_camera_config],
-        remappings=[
-            ('/r2/mipi_camera/image_raw', '/r2/tip_camera/image_raw'),
-            (
-                '/r2/mipi_camera/image_raw/debug',
-                '/r2/tip_camera/image_raw/debug',
-            ),
-            ('/r2/mipi_camera/camera_info', '/r2/tip_camera/camera_info'),
-        ],
-        output='screen',
-    )
-
-    # Tip YOLO detector: subscribes the tip camera and publishes
-    # AlignmentDetection to /r2/tip/roi (consumed by tip_alignment above).
-    detector_config = os.path.join(
-        target_alignment_pkg,
-        'config',
-        'yolo_target_detector.yaml',
-    )
-    yolo_target_detector = Node(
-        package='robot_r2_target_alignment',
-        executable='yolo_target_detector',
-        namespace='r2/target_alignment',
-        name='yolo_target_detector',
-        parameters=[
-            detector_config,
-            {'input_video_topic': '/r2/tip_camera/image_raw'},
-        ],
-        output='screen',
-    )
-
     # ==================================================================
     # ArUco 二维码检测与专用底盘伺服（基于端头 MIPI 相机）均已注释停用，
     # 不在 real1 启动。需要恢复时取消本段及下方 LaunchDescription 中两行引用
@@ -254,7 +209,7 @@ def generate_launch_description():
             'FASTRTPS_DEFAULT_PROFILES_FILE', fastdds_profile),
         DeclareLaunchArgument(
             'kfs_get_type_service',
-            default_value='/r2/detection/left/get_type',
+            default_value='/r2/detection/front/get_type',
             description='Remote KFS detection service used by control',
         ),
         # 与 ArUco 识别对接配套的开关，停用期间一并注释：
@@ -271,8 +226,6 @@ def generate_launch_description():
         odometry_tf,
         kfs_alignment,
         tip_alignment,
-        tip_mipi_camera,
-        yolo_target_detector,
         # ArUco 识别对接（当前停用）：
         # aruco_pipeline,
         # aruco_chassis_pose_servo,

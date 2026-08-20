@@ -23,6 +23,7 @@
   <exec_depend>robot_r2_description</exec_depend>
   <exec_depend>robot_r2_interfaces</exec_depend>
   <exec_depend>robot_r2_kfs_roi</exec_depend>
+  <exec_depend>robot_r2_target_alignment</exec_depend>
   <exec_depend>serial_pkg</exec_depend>
   <exec_depend>yahboom_camera</exec_depend>
 
