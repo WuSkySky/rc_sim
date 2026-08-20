@@ -36,6 +36,7 @@ def make_controller():
     controller.a2 = 0.42
     controller.a2_backoff = 0.015
     controller.a3 = 0.35
+    controller.a3_linear_speed_limit = 1.125
     controller.b1 = 0.22
     controller.b1_linear_speed_limit = 0.27
     controller.b2 = 0.44
@@ -50,23 +51,24 @@ def make_controller():
 def test_up_step_prepositions_before_lifting_and_moves_relative_segments():
     controller = make_controller()
     calls = []
-    controller.move_relative = lambda distance: calls.append(
-        ('move', distance))
+    controller.move_relative = (
+        lambda distance, linear_speed_limit=0.0: calls.append(
+            ('move', distance, linear_speed_limit)))
     controller.set_lift = lambda positions: calls.append(
         ('lift', positions))
 
     controller.run_up_step(0.20)
 
     assert calls == [
-        ('move', pytest.approx(0.15)),
+        ('move', pytest.approx(0.15), 0.0),
         ('lift', controller.lift_all),
-        ('move', pytest.approx(0.05)),
-        ('move', pytest.approx(-0.015)),
+        ('move', pytest.approx(0.05), 0.0),
+        ('move', pytest.approx(-0.015), 0.0),
         ('lift', controller.lift_rear_only),
-        ('move', pytest.approx(0.42)),
-        ('move', pytest.approx(-0.015)),
+        ('move', pytest.approx(0.42), 0.0),
+        ('move', pytest.approx(-0.015), 0.0),
         ('lift', controller.lift_down),
-        ('move', pytest.approx(0.35)),
+        ('move', pytest.approx(0.35), 1.125),
     ]
 
 
@@ -93,7 +95,8 @@ def test_down_step_moves_relative_segments_with_lifts_between():
 def test_up_step_reverses_to_clearance_when_already_too_close():
     controller = make_controller()
     moves = []
-    controller.move_relative = lambda distance: moves.append(distance)
+    controller.move_relative = (
+        lambda distance, linear_speed_limit=0.0: moves.append(distance))
     controller.set_lift = lambda positions: None
 
     controller.run_up_step(0.03)
@@ -221,7 +224,7 @@ def test_b1_linear_speed_limit_updates_at_runtime():
 
 
 @pytest.mark.parametrize(
-    'value', [0.0, -0.01, float('inf'), float('nan'), True])
+    'value', [-0.01, float('inf'), float('nan'), True])
 def test_invalid_b1_linear_speed_limit_is_rejected(value):
     controller = make_controller()
 
@@ -231,6 +234,29 @@ def test_invalid_b1_linear_speed_limit_is_rejected(value):
 
     assert not result.successful
     assert controller.b1_linear_speed_limit == pytest.approx(0.27)
+
+
+def test_a3_linear_speed_limit_updates_at_runtime():
+    controller = make_controller()
+
+    result = controller.on_parameters_changed([
+        SimpleNamespace(name='a3_linear_speed_limit', value=0.9),
+    ])
+
+    assert result.successful
+    assert controller.a3_linear_speed_limit == 0.9
+
+
+@pytest.mark.parametrize('value', [-0.01, float('inf'), float('nan'), True])
+def test_invalid_a3_linear_speed_limit_is_rejected(value):
+    controller = make_controller()
+
+    result = controller.on_parameters_changed([
+        SimpleNamespace(name='a3_linear_speed_limit', value=value),
+    ])
+
+    assert not result.successful
+    assert controller.a3_linear_speed_limit == 1.125
 
 
 def test_lift_pair_parameters_update_at_runtime():

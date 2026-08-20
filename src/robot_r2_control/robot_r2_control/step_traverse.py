@@ -16,7 +16,7 @@ SET_LIFT_SERVICE = '/r2/lift/set'
 
 class StepTraverseController(Node):
     # 支持运行时动态修改（ros2 param set）的参数：
-    # 移动距离（非负）、分段速度（正数）与抬升位置（有限）。
+    # 移动距离与线速度上限（非负）与抬升位置（有限）。
     DISTANCE_PARAMETER_NAMES = (
         'a1', 'a1_backoff',
         'a2', 'a2_backoff',
@@ -24,7 +24,11 @@ class StepTraverseController(Node):
         'b1', 'b2', 'b3',
         'up_pre_lift_clearance',
     )
-    SPEED_PARAMETER_NAMES = ('b1_linear_speed_limit',)
+    # 0 表示沿用位置伺服默认线速度上限；正值按 m/s 覆盖。
+    SPEED_LIMIT_PARAMETER_NAMES = (
+        'a3_linear_speed_limit',
+        'b1_linear_speed_limit',
+    )
     LIFT_PAIR_NAMES = (
         'lift_all',
         'lift_front_only',
@@ -52,6 +56,7 @@ class StepTraverseController(Node):
         self.declare_parameter('a2', 0.2)
         self.declare_parameter('a2_backoff', 0.015)
         self.declare_parameter('a3', 0.2)
+        self.declare_parameter('a3_linear_speed_limit', 1.125)
         self.declare_parameter('up_pre_lift_clearance', 0.05)
         self.declare_parameter('b1', 0.2)
         self.declare_parameter('b1_linear_speed_limit', 0.27)
@@ -80,10 +85,12 @@ class StepTraverseController(Node):
         self.a2 = self._distance_parameter('a2')
         self.a2_backoff = self._distance_parameter('a2_backoff')
         self.a3 = self._distance_parameter('a3')
+        self.a3_linear_speed_limit = self._distance_parameter(
+            'a3_linear_speed_limit')
         self.up_pre_lift_clearance = self._distance_parameter(
             'up_pre_lift_clearance')
         self.b1 = self._distance_parameter('b1')
-        self.b1_linear_speed_limit = self._positive_parameter(
+        self.b1_linear_speed_limit = self._distance_parameter(
             'b1_linear_speed_limit')
         self.b2 = self._distance_parameter('b2')
         self.b3 = self._distance_parameter('b3')
@@ -133,11 +140,12 @@ class StepTraverseController(Node):
     def on_parameters_changed(self, parameters):
         # 距离参数：有限且非负（移动距离，允许 0；向上预靠近可为负后退
         # 由 distance_to_step - clearance 在调用时产生，参数本身非负）。
+        # 线速度上限同为非负，0 表示沿用位置伺服默认线速度上限。
         distance_updates = {}
-        speed_updates = {}
         lift_updates = {}
         for parameter in parameters:
-            if parameter.name in self.DISTANCE_PARAMETER_NAMES:
+            if (parameter.name in self.DISTANCE_PARAMETER_NAMES or
+                    parameter.name in self.SPEED_LIMIT_PARAMETER_NAMES):
                 value = parameter.value
                 if (
                     isinstance(value, bool) or
@@ -157,25 +165,6 @@ class StepTraverseController(Node):
                         ),
                     )
                 distance_updates[parameter.name] = distance
-            elif parameter.name in self.SPEED_PARAMETER_NAMES:
-                value = parameter.value
-                if (
-                    isinstance(value, bool) or
-                    not isinstance(value, (int, float))
-                ):
-                    return SetParametersResult(
-                        successful=False,
-                        reason=f'{parameter.name} must be numeric',
-                    )
-                speed = float(value)
-                if not math.isfinite(speed) or speed <= 0.0:
-                    return SetParametersResult(
-                        successful=False,
-                        reason=(
-                            f'{parameter.name} must be finite and positive'
-                        ),
-                    )
-                speed_updates[parameter.name] = speed
             elif parameter.name in self.LIFT_PARAMETER_NAMES:
                 value = parameter.value
                 if (
@@ -194,15 +183,13 @@ class StepTraverseController(Node):
                     )
                 lift_updates[parameter.name] = lift_value
 
-        if not distance_updates and not speed_updates and not lift_updates:
+        if not distance_updates and not lift_updates:
             return SetParametersResult(successful=True)
 
         # 全部校验通过后一次性原子更新；运行中的台阶跨越使用锁内快照，
         # 不会观察到部分更新。
         with self.config_lock:
             for name, value in distance_updates.items():
-                setattr(self, name, value)
-            for name, value in speed_updates.items():
                 setattr(self, name, value)
             for prefix in self.LIFT_PAIR_NAMES:
                 current = getattr(self, prefix)
@@ -307,6 +294,7 @@ class StepTraverseController(Node):
             a2 = self.a2
             a2_backoff = self.a2_backoff
             a3 = self.a3
+            a3_linear_speed_limit = self.a3_linear_speed_limit
             pre_lift_clearance = self.up_pre_lift_clearance
             lift_all = self.lift_all
             lift_rear_only = self.lift_rear_only
@@ -324,7 +312,7 @@ class StepTraverseController(Node):
         self.move_relative(-a2_backoff)
         self.set_lift(lift_down)
 
-        self.move_relative(a3)
+        self.move_relative(a3, a3_linear_speed_limit)
 
     def run_down_step(self, distance_to_step):
         with self.config_lock:
