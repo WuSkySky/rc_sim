@@ -94,6 +94,7 @@ STEP_TRAVERSE_PARAMETER_NAMES = {
     'a2',
     'a2_backoff',
     'a3',
+    'a3_linear_speed_limit',
     'up_pre_lift_clearance',
     'b1',
     'b2',

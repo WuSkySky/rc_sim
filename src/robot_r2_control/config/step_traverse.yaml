@@ -6,9 +6,10 @@
 
     a1: 0.1
     a1_backoff: 0.01
-    a2: 0.5
+    a2: 0.4
     a2_backoff: 0.01
-    a3: 0.38
+    a3: 0.5
+    a3_linear_speed_limit: 1.4
     up_pre_lift_clearance: 0.05
     b1: 0.22
     b2: 0.44
