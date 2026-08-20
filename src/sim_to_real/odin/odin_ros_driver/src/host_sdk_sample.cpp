@@ -1469,11 +1469,13 @@ static void lidar_device_callback(const lidar_device_info_t* device, bool attach
                 break;
             case LIDAR_DEVICE_STREAM_STOPPED:
                 need_open_device = false;
-                get_calib_file = false;
                 #ifdef ROS2
-                    RCLCPP_INFO(rclcpp::get_logger("device_cb"), "Device state: stream stopped, resume streaming");
+                    RCLCPP_INFO(
+                        rclcpp::get_logger("device_cb"),
+                        "Device state: stream stopped, refresh calibration and resume streaming");
                 #else
-                    ROS_INFO("Device state: stream stopped, resume streaming");
+                    ROS_INFO(
+                        "Device state: stream stopped, refresh calibration and resume streaming");
                 #endif
                 break;
             default:

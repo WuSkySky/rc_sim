@@ -33,8 +33,11 @@ from .led_detection import (
 )
 
 
-STABLE_MATCH_FRAMES = 5
-SERVICE_TIMEOUT_SEC = 60.0
+INPUT_IMAGE_TOPIC = "/r2/led_detection/image"
+SERVICE_NAME = "/r2/led_detection/detect"
+RESULT_TOPIC = "/r2/led_detection/result"
+VISUALIZATION_TOPIC = "/r2/led_detection/debug"
+MAX_PROCESSING_RATE_HZ = 15.0
 
 
 def _advance_rate_limit(
@@ -46,6 +49,15 @@ def _advance_rate_limit(
     return True, now + period
 
 
+def _image_work_needed(
+    continuous_detection: bool,
+    visualization_enabled: bool,
+    service_active: bool,
+) -> bool:
+    """Return whether the node must keep and process an image reader."""
+    return continuous_detection or visualization_enabled or service_active
+
+
 class LedDetectNode(Node):
     """Detect configurable LEDs and wait for a requested target state."""
 
@@ -53,6 +65,7 @@ class LedDetectNode(Node):
         super().__init__("led_detect")
         self._state_condition = threading.Condition()
         self._service_lock = threading.Lock()
+        self._subscription_lock = threading.Lock()
         self._image_callback_group = MutuallyExclusiveCallbackGroup()
         self._service_callback_group = MutuallyExclusiveCallbackGroup()
 
@@ -63,47 +76,33 @@ class LedDetectNode(Node):
         self._service_last_reason = ""
         self._tracker: TargetMatchTracker | None = None
         self._next_processing_at = 0.0
+        self._image_subscription = None
 
         self._declare_parameters()
         self._load_parameters()
         image_qos = camera_qos()
 
-        self._image_subscription = self.create_subscription(
-            CameraFrame,
-            self._image_topic,
-            self._on_image,
-            image_qos,
-            callback_group=self._image_callback_group,
-        )
+        self._image_qos = image_qos
         self._visualization_publisher = self.create_publisher(
-            Image, self._visualization_topic, image_qos
+            Image, VISUALIZATION_TOPIC, image_qos
         )
         self._result_publisher = self.create_publisher(
-            LedDetection, self._result_topic, 10
+            LedDetection, RESULT_TOPIC, 10
         )
         self._service = self.create_service(
             DetectLed,
-            self._service_name,
+            SERVICE_NAME,
             self._handle_detect_led,
             callback_group=self._service_callback_group,
         )
         self.add_on_set_parameters_callback(self._on_parameters_changed)
+        self._sync_image_subscription()
 
     def _declare_parameters(self) -> None:
-        self.declare_parameter(
-            "image_topic", "/r2/left_camera/image_raw"
-        )
-        self.declare_parameter(
-            "service_name", "/r2/led_detection/detect"
-        )
-        self.declare_parameter(
-            "result_topic", "/r2/led_detection/result"
-        )
-        self.declare_parameter(
-            "visualization_topic", "/r2/led_detection/debug"
-        )
         self.declare_parameter("visualization_enabled", False)
         self.declare_parameter("continuous_detection", False)
+        self.declare_parameter("stable_match_frames", 5)
+        self.declare_parameter("service_timeout_sec", 30.0)
         self.declare_parameter("aruco_dictionary", "DICT_4X4_50")
         self.declare_parameter("target_marker_id", 4)
         self.declare_parameter("marker_size_mm", 100.0)
@@ -116,26 +115,20 @@ class LedDetectNode(Node):
         )
         self.declare_parameter("led_radius_mm", 10.0)
         self.declare_parameter("brightness_threshold", 200.0)
-        self.declare_parameter("target_processing_rate", 5.0)
+        self.declare_parameter("target_processing_rate", 15.0)
 
     def _load_parameters(self) -> None:
-        self._image_topic = str(
-            self.get_parameter("image_topic").value
-        )
-        self._service_name = str(
-            self.get_parameter("service_name").value
-        )
-        self._result_topic = str(
-            self.get_parameter("result_topic").value
-        )
-        self._visualization_topic = str(
-            self.get_parameter("visualization_topic").value
-        )
         self._visualization_enabled = bool(
             self.get_parameter("visualization_enabled").value
         )
         self._continuous_detection = bool(
             self.get_parameter("continuous_detection").value
+        )
+        stable_match_frames = int(
+            self.get_parameter("stable_match_frames").value
+        )
+        service_timeout_sec = float(
+            self.get_parameter("service_timeout_sec").value
         )
         aruco_dictionary = str(
             self.get_parameter("aruco_dictionary").value
@@ -169,14 +162,10 @@ class LedDetectNode(Node):
             self.get_parameter("target_processing_rate").value
         )
 
-        if not self._image_topic:
-            raise ValueError("image_topic must not be empty")
-        if not self._service_name:
-            raise ValueError("service_name must not be empty")
-        if not self._result_topic:
-            raise ValueError("result_topic must not be empty")
-        if not self._visualization_topic:
-            raise ValueError("visualization_topic must not be empty")
+        if stable_match_frames <= 0:
+            raise ValueError("stable_match_frames must be positive")
+        if not math.isfinite(service_timeout_sec) or service_timeout_sec <= 0:
+            raise ValueError("service_timeout_sec must be finite and positive")
         if not aruco_dictionary:
             raise ValueError("aruco_dictionary must not be empty")
         if target_marker_id < -1:
@@ -196,10 +185,10 @@ class LedDetectNode(Node):
             raise ValueError("LED positions must be finite")
         if (
             not math.isfinite(target_processing_rate)
-            or target_processing_rate <= 0.0
+            or not 0.0 < target_processing_rate <= MAX_PROCESSING_RATE_HZ
         ):
             raise ValueError(
-                "target_processing_rate must be finite and positive"
+                "target_processing_rate must be finite and in (0, 15]"
             )
 
         mapper = ArucoLedMapper(
@@ -208,6 +197,8 @@ class LedDetectNode(Node):
             led_radius_mm=led_radius_mm,
         )
         self._led_count = led_count
+        self._stable_match_frames = stable_match_frames
+        self._service_timeout_sec = service_timeout_sec
         self._target_processing_rate = target_processing_rate
         self._processing_deadline_sec = 1.0 / target_processing_rate
         self._processing_period_sec = 1.0 / target_processing_rate
@@ -224,6 +215,8 @@ class LedDetectNode(Node):
         continuous_detection = None
         visualization_enabled = None
         processing_rate = None
+        stable_match_frames = None
+        service_timeout_sec = None
         for parameter in parameters:
             if parameter.name == "target_processing_rate":
                 if isinstance(parameter.value, bool) or not isinstance(
@@ -234,11 +227,50 @@ class LedDetectNode(Node):
                         reason="target_processing_rate must be a number",
                     )
                 processing_rate = float(parameter.value)
-                if not math.isfinite(processing_rate) or processing_rate <= 0:
+                if (
+                    not math.isfinite(processing_rate)
+                    or not 0.0 < processing_rate <= MAX_PROCESSING_RATE_HZ
+                ):
                     return SetParametersResult(
                         successful=False,
                         reason=(
-                            "target_processing_rate must be finite and positive"
+                            "target_processing_rate must be finite and in "
+                            "(0, 15]"
+                        ),
+                    )
+                continue
+            if parameter.name == "stable_match_frames":
+                if isinstance(parameter.value, bool) or not isinstance(
+                    parameter.value, int
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason="stable_match_frames must be an integer",
+                    )
+                stable_match_frames = parameter.value
+                if stable_match_frames <= 0:
+                    return SetParametersResult(
+                        successful=False,
+                        reason="stable_match_frames must be positive",
+                    )
+                continue
+            if parameter.name == "service_timeout_sec":
+                if isinstance(parameter.value, bool) or not isinstance(
+                    parameter.value, (int, float)
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason="service_timeout_sec must be a number",
+                    )
+                service_timeout_sec = float(parameter.value)
+                if (
+                    not math.isfinite(service_timeout_sec)
+                    or service_timeout_sec <= 0.0
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            "service_timeout_sec must be finite and positive"
                         ),
                     )
                 continue
@@ -259,6 +291,7 @@ class LedDetectNode(Node):
         if continuous_detection is not None:
             with self._state_condition:
                 self._continuous_detection = continuous_detection
+            self._sync_image_subscription()
             state = "enabled" if continuous_detection else "disabled"
             self.get_logger().info(
                 f"continuous LED detection {state}"
@@ -266,6 +299,7 @@ class LedDetectNode(Node):
         if visualization_enabled is not None:
             with self._state_condition:
                 self._visualization_enabled = visualization_enabled
+            self._sync_image_subscription()
             state = "enabled" if visualization_enabled else "disabled"
             self.get_logger().info(f"LED visualization {state}")
         if processing_rate is not None:
@@ -278,13 +312,60 @@ class LedDetectNode(Node):
                 "LED processing rate limit changed to "
                 f"{processing_rate:g} Hz"
             )
+        if stable_match_frames is not None:
+            with self._state_condition:
+                self._stable_match_frames = stable_match_frames
+            self.get_logger().info(
+                "LED stable match requirement changed to "
+                f"{stable_match_frames} frames"
+            )
+        if service_timeout_sec is not None:
+            with self._state_condition:
+                self._service_timeout_sec = service_timeout_sec
+            self.get_logger().info(
+                "LED service timeout changed to "
+                f"{service_timeout_sec:g} seconds"
+            )
         return SetParametersResult(successful=True)
+
+    def _sync_image_subscription(self) -> None:
+        """Match the image reader lifetime to detection or visualization."""
+        with self._subscription_lock:
+            with self._state_condition:
+                needed = _image_work_needed(
+                    self._continuous_detection,
+                    self._visualization_enabled,
+                    self._service_active,
+                )
+            if needed:
+                if self._image_subscription is None:
+                    self._image_subscription = self.create_subscription(
+                        CameraFrame,
+                        INPUT_IMAGE_TOPIC,
+                        self._on_image,
+                        self._image_qos,
+                        callback_group=self._image_callback_group,
+                    )
+                    self.get_logger().info(
+                        "LED image subscription enabled on "
+                        f"{INPUT_IMAGE_TOPIC}"
+                    )
+                return
+            if self._image_subscription is not None:
+                subscription = self._image_subscription
+                self._image_subscription = None
+                self.destroy_subscription(subscription)
+                self.get_logger().info(
+                    "LED image subscription disabled while idle"
+                )
 
     def _on_image(self, message: CameraFrame) -> None:
         started_at = time.monotonic()
         with self._state_condition:
-            should_process = (
-                self._continuous_detection or self._service_active
+            should_process = _image_work_needed(
+                self._continuous_detection,
+                self._visualization_enabled,
+                self._service_active,
             )
             allowed, next_processing_at = _advance_rate_limit(
                 started_at,
@@ -330,6 +411,11 @@ class LedDetectNode(Node):
             match_count = (
                 self._tracker.count if self._tracker is not None else 0
             )
+            required_frames = (
+                self._tracker.required_frames
+                if self._tracker is not None
+                else self._stable_match_frames
+            )
             self._state_condition.notify_all()
 
         if not result.valid:
@@ -344,7 +430,7 @@ class LedDetectNode(Node):
 
         if visualization_enabled and image is not None:
             visualization = self._make_visualization(
-                image, result, target, match_count
+                image, result, target, match_count, required_frames
             )
             visualization_message = bgr_to_image_message(
                 visualization,
@@ -379,25 +465,28 @@ class LedDetectNode(Node):
 
         with self._service_lock:
             started_at = time.monotonic()
-            deadline = started_at + SERVICE_TIMEOUT_SEC
             last_states: tuple[bool, ...] | None = None
             last_reason = ""
             stable_count = 0
             with self._state_condition:
+                required_frames = self._stable_match_frames
+                timeout_sec = self._service_timeout_sec
+                deadline = started_at + timeout_sec
                 handled_sequence = self._frame_sequence
                 self._service_started_at = started_at
                 self._service_last_valid_states = None
                 self._service_last_reason = ""
                 self._tracker = TargetMatchTracker(
                     target_states,
-                    required_frames=STABLE_MATCH_FRAMES,
+                    required_frames=required_frames,
                 )
                 self._service_active = True
-                # Let a newly-started request consume the next arriving frame
-                # immediately instead of waiting for a previous rate-limit slot.
+                # Let a new request consume the next arriving frame instead of
+                # waiting for a previous rate-limit slot.
                 self._next_processing_at = started_at
 
             try:
+                self._sync_image_subscription()
                 while rclpy.ok():
                     with self._state_condition:
                         while (
@@ -416,7 +505,7 @@ class LedDetectNode(Node):
                         matched = (
                             self._tracker is not None
                             and self._tracker.count
-                            >= STABLE_MATCH_FRAMES
+                            >= required_frames
                         )
                         last_states = self._service_last_valid_states
                         last_reason = self._service_last_reason
@@ -430,7 +519,7 @@ class LedDetectNode(Node):
                         response.success = True
                         response.message = (
                             "target LED states matched for "
-                            f"{STABLE_MATCH_FRAMES} consecutive frames"
+                            f"{required_frames} consecutive frames"
                         )
                         response.led_states = list(target_states)
                         return response
@@ -445,7 +534,7 @@ class LedDetectNode(Node):
                             )
                             response.message = (
                                 "LED target detection timed out after "
-                                f"{SERVICE_TIMEOUT_SEC:g} seconds without "
+                                f"{timeout_sec:g} seconds without "
                                 f"a complete LED detection{detail}"
                             )
                         else:
@@ -458,11 +547,11 @@ class LedDetectNode(Node):
                             )
                             response.message = (
                                 "LED target detection timed out after "
-                                f"{SERVICE_TIMEOUT_SEC:g} seconds: "
+                                f"{timeout_sec:g} seconds: "
                                 f"target={target_text}, "
                                 f"last={states_text}, "
                                 f"stable={stable_count}/"
-                                f"{STABLE_MATCH_FRAMES}{detail}"
+                                f"{required_frames}{detail}"
                             )
                         response.led_states = (
                             list(last_states)
@@ -485,6 +574,7 @@ class LedDetectNode(Node):
                     self._service_last_valid_states = None
                     self._service_last_reason = ""
                     self._state_condition.notify_all()
+                self._sync_image_subscription()
 
     @staticmethod
     def _format_states(states) -> str:
@@ -515,6 +605,7 @@ class LedDetectNode(Node):
         result: LedDetectionResult,
         target: tuple[bool, ...] | None,
         match_count: int,
+        required_frames: int,
     ) -> np.ndarray:
         visualization = image.copy()
 
@@ -562,12 +653,12 @@ class LedDetectNode(Node):
             )
 
         if target is None:
-            status = "continuous detection"
+            status = "visualization active"
         else:
             target_text = "".join("1" if state else "0" for state in target)
             status = (
                 f"target={target_text} "
-                f"stable={match_count}/{STABLE_MATCH_FRAMES}"
+                f"stable={match_count}/{required_frames}"
             )
         if not result.valid:
             status = f"{status} | {result.reason}"
@@ -596,6 +687,7 @@ class LedDetectNode(Node):
             2,
             cv2.LINE_AA,
         )
+
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)

@@ -66,6 +66,7 @@ sync_host() {
         --exclude='.DS_Store' \
         --filter='P /src/rc2026_field/COLCON_IGNORE' \
         --filter='P /src/robot_r2_description/COLCON_IGNORE' \
+        --filter='P /src/sim_to_real/odin/odin_ros_driver/config/calib.yaml' \
         -e "ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" \
         "${LOCAL_WS}/" \
         "${ROBOT_USER}@${robot_host}:${REMOTE_WS}/"

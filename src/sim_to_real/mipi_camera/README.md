@@ -49,7 +49,8 @@ matrix until the cameras have been calibrated.
 
 `real2.launch.py` selects `rmw_fastrtps_cpp`, loads the shared Fast DDS profile
 installed by `robot_r2_interfaces`, and directly starts the camera driver.
-Image QoS is Best Effort, Keep Last 1, Volatile; Data Sharing is `AUTOMATIC`.
+The bounded `CameraFrame` stream and optional `sensor_msgs/Image` debug stream
+both use Best Effort, Keep Last 1, Volatile QoS. Data Sharing is `AUTOMATIC`.
 
 ```bash
 ros2 launch bringup real2.launch.py

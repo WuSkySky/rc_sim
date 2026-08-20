@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import math
+import threading
+import time
+
 import rclpy
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
@@ -18,6 +22,7 @@ from sensor_msgs.msg import Image
 INPUT_IMAGE_TOPIC = '/odin1/image/undistorted'
 OUTPUT_IMAGE_TOPIC = '/r2/rear_camera/image_raw'
 DEBUG_IMAGE_TOPIC = '/r2/rear_camera/image_raw/debug'
+MAX_OUTPUT_RATE_HZ = 15.0
 
 
 def image_qos() -> QoSProfile:
@@ -34,10 +39,23 @@ class CameraFramePostprocess(Node):
 
     def __init__(self) -> None:
         super().__init__('camera_frame_postprocess')
+        self._config_lock = threading.Lock()
         self.declare_parameter('visualization_enabled', False)
+        self.declare_parameter('max_publish_rate', 15.0)
 
         self._visualization_enabled = bool(
             self.get_parameter('visualization_enabled').value)
+        max_publish_rate = float(
+            self.get_parameter('max_publish_rate').value)
+        if (
+            not math.isfinite(max_publish_rate)
+            or not 0.0 < max_publish_rate <= MAX_OUTPUT_RATE_HZ
+        ):
+            raise ValueError(
+                'max_publish_rate must be finite and in (0, 15]')
+        self._max_publish_rate = max_publish_rate
+        self._publish_period_sec = 1.0 / max_publish_rate
+        self._next_publish_at = 0.0
 
         qos = image_qos()
         self._frame = CameraFrame()
@@ -66,7 +84,29 @@ class CameraFramePostprocess(Node):
             f'to {OUTPUT_IMAGE_TOPIC}')
 
     def _on_parameters_changed(self, parameters) -> SetParametersResult:
+        visualization_enabled = None
+        max_publish_rate = None
         for parameter in parameters:
+            if parameter.name == 'max_publish_rate':
+                if isinstance(parameter.value, bool) or not isinstance(
+                    parameter.value, (int, float)
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason='max_publish_rate must be a number',
+                    )
+                max_publish_rate = float(parameter.value)
+                if (
+                    not math.isfinite(max_publish_rate)
+                    or not 0.0 < max_publish_rate <= MAX_OUTPUT_RATE_HZ
+                ):
+                    return SetParametersResult(
+                        successful=False,
+                        reason=(
+                            'max_publish_rate must be finite and in (0, 15]'
+                        ),
+                    )
+                continue
             if parameter.name != 'visualization_enabled':
                 continue
             if not isinstance(parameter.value, bool):
@@ -74,13 +114,40 @@ class CameraFramePostprocess(Node):
                     successful=False,
                     reason='visualization_enabled must be a boolean',
                 )
-            self._visualization_enabled = parameter.value
-            state = 'enabled' if parameter.value else 'disabled'
+            visualization_enabled = parameter.value
+
+        if visualization_enabled is not None:
+            with self._config_lock:
+                self._visualization_enabled = visualization_enabled
+            state = 'enabled' if visualization_enabled else 'disabled'
             self.get_logger().info(
                 f'Odin postprocess debug image publication {state}')
+        if max_publish_rate is not None:
+            with self._config_lock:
+                self._max_publish_rate = max_publish_rate
+                self._publish_period_sec = 1.0 / max_publish_rate
+                self._next_publish_at = 0.0
+            self.get_logger().info(
+                'Odin rear CameraFrame rate limit changed to '
+                f'{max_publish_rate:g} Hz')
         return SetParametersResult(successful=True)
 
     def _on_image(self, source: Image) -> None:
+        now = time.monotonic()
+        with self._config_lock:
+            if now < self._next_publish_at:
+                return
+            visualization_enabled = self._visualization_enabled
+            self._next_publish_at = now + self._publish_period_sec
+
+        # Avoid packing the large bounded sample while neither LED detection
+        # nor another CameraFrame reader is active.
+        if (
+            self._publisher.get_subscription_count() == 0
+            and not visualization_enabled
+        ):
+            return
+
         try:
             encoding, channels = self._encoding(source.encoding)
             width = int(source.width)
@@ -131,7 +198,7 @@ class CameraFramePostprocess(Node):
             return
 
         self._publisher.publish(frame)
-        if self._visualization_enabled:
+        if visualization_enabled:
             self._standard_publisher.publish(source)
         self._sequence += 1
 

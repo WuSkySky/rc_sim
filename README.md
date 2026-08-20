@@ -132,7 +132,10 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 
 阶段一仅由 `real1.launch.py` 启动。请求中的 `team` 只接受 `red` 或 `blue`；当前
 动作参数按红方定义，蓝方执行时仅反转左右平移方向。服务会依次执行底盘升降、
-斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向；武器旋转到最终角度
+斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向。转向完成后调用
+`/r2/led_detection/detect`，只有 LED 状态连续稳定匹配请求目标并返回成功，才会
+松开武器夹爪；检测失败、服务不可用或等待超时时保持夹持并令 Step1 返回失败。
+武器旋转到最终角度
 前，底盘会先抬升到 `action_8_pre_lift_height_m`（默认 `0.21 m`），旋转完成后
 再降回
 `0.01 m`，随后前移 `0.20 m`。动作 2 的左右/前后位移在同一个位置伺服请求中
@@ -159,6 +162,8 @@ Step1 参数”按钮。执行按钮会先调用
 ```bash
 ros2 param set /stage_one action_2_left_m 0.790
 ros2 param set /stage_one weapon_grip_tolerance_m 0.0015
+ros2 param set /stage_one led_target_states "[true]"
+ros2 param set /stage_one final_weapon_grip_m 0.028
 ```
 
 
@@ -384,6 +389,8 @@ ros2 param set /r2/target_alignment/yolo_target_detector \
 仿真前相机和实机端头 MIPI 相机也使用同一个动态参数控制各自的
 `/debug` 图像。
 这些调试话题均使用 `sensor_msgs/msg/Image`。
+图像主链路和所有调试图统一使用 Best Effort、Keep Last 1、Volatile QoS。
+查看端必须使用兼容的 Best Effort 订阅 QoS。
 
 实机 KFS 类型检测：
 
@@ -397,6 +404,13 @@ ros2 service call /r2/detection/get_type \
 仿真启动文件不再启动 KFS 类型检测节点。
 
 LED 状态检测。示例表示等待三个 LED 的状态稳定匹配“亮、灭、亮”：
+
+实机 `real1.launch.py` 使用 Odin 后摄像头
+`/r2/rear_camera/image_raw`。开启 `visualization_enabled` 时节点持续订阅图像并
+发布 `/r2/led_detection/debug`；关闭可视化后，仅在服务调用期间或持续检测模式
+下保留订阅。服务连续 5 帧与请求状态一致时返回成功，30 秒内未满足则返回失败。rear
+`CameraFrame` 发布和 LED 处理频率都限制为最高 15 Hz（当前 Odin 设备配置
+实际为 10 Hz）。可视化图像使用 Best Effort QoS。
 
 ```bash
 ros2 service call /r2/led_detection/detect \

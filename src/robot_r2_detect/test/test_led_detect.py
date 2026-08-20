@@ -3,7 +3,11 @@
 import numpy as np
 import pytest
 
-from robot_r2_detect.led_detect import LedDetectNode, _advance_rate_limit
+from robot_r2_detect.led_detect import (
+    LedDetectNode,
+    _advance_rate_limit,
+    _image_work_needed,
+)
 from robot_r2_detect.led_detection import LedDetectionResult
 from robot_r2_interfaces.msg import CameraFrame
 
@@ -79,3 +83,25 @@ def test_rate_limit_drops_frames_until_period_elapsed():
     allowed, following = _advance_rate_limit(10.2, next_allowed, 0.2)
     assert allowed
     assert following == pytest.approx(10.4)
+
+
+@pytest.mark.parametrize(
+    ("continuous", "visualization", "service", "expected"),
+    [
+        (False, False, False, False),
+        (True, False, False, True),
+        (False, True, False, True),
+        (False, False, True, True),
+    ],
+)
+def test_image_work_stays_active_for_visualization_or_detection(
+    continuous,
+    visualization,
+    service,
+    expected,
+):
+    assert _image_work_needed(
+        continuous,
+        visualization,
+        service,
+    ) is expected

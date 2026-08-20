@@ -8,7 +8,6 @@ from launch.actions import (
     SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -21,6 +20,7 @@ def generate_launch_description():
         'odin_data_postprocess')
     serial_pkg = get_package_share_directory('serial_pkg')
     control_pkg = get_package_share_directory('robot_r2_control')
+    detect_pkg = get_package_share_directory('robot_r2_detect')
     # ArUco 识别对接当前不在 real1 启动，以下变量保留待恢复：
     # aruco_pkg = get_package_share_directory('robot_r2_aruco')
     # controller_pkg = get_package_share_directory('robot_r2_controller')
@@ -55,18 +55,33 @@ def generate_launch_description():
         )
     )
 
-    # Odin 图像后处理当前停用；real1 直接使用驱动发布的去畸变图像。
-    # camera_frame_config = os.path.join(
-    #     odin_data_postprocess_pkg,
-    #     'config',
-    #     'camera_frame_postprocess.yaml',
-    # )
-    # camera_frame_postprocess = Node(
-    #     package='odin_data_postprocess',
-    #     executable='camera_frame_postprocess',
-    #     parameters=[camera_frame_config],
-    #     output='screen',
-    # )
+    camera_frame_config = os.path.join(
+        odin_data_postprocess_pkg,
+        'config',
+        'camera_frame_postprocess.yaml',
+    )
+    camera_frame_postprocess = Node(
+        package='odin_data_postprocess',
+        executable='camera_frame_postprocess',
+        parameters=[camera_frame_config],
+        output='screen',
+    )
+
+    led_detect_config = os.path.join(
+        detect_pkg,
+        'config',
+        'led_detect.yaml',
+    )
+    led_detect = Node(
+        package='robot_r2_detect',
+        executable='led_detect',
+        name='led_detect',
+        parameters=[led_detect_config],
+        remappings=[
+            ('/r2/led_detection/image', '/r2/rear_camera/image_raw'),
+        ],
+        output='screen',
+    )
 
     odin_odometry_config = os.path.join(
         odin_data_postprocess_pkg,
@@ -219,7 +234,8 @@ def generate_launch_description():
         #     description='Start tip-camera ArUco detection and chassis servo',
         # ),
         odin_launch,
-        # camera_frame_postprocess,
+        camera_frame_postprocess,
+        led_detect,
         odin_odometry_postprocess,
         control_launch,
         serial_bridge,
