@@ -13,6 +13,7 @@ from robot_r2_interfaces.srv import (
     GetKfsType,
     KfsAction,
     MoveToPose,
+    SetLift,
     StageTwoPointTwo,
     StageTwoPointTwoExit,
     TraverseStep,
@@ -23,6 +24,7 @@ STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
 STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
 POSE_FEEDBACK_TOPIC = '/r2/pose_feedback_odin'
 MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
+SET_LIFT_SERVICE = '/r2/lift/set'
 STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
 GET_KFS_TYPE_SERVICE = '/r2/detection/get_type'
 ALIGN_TO_KFS_SERVICE = '/r2/align_to_kfs'
@@ -71,6 +73,8 @@ class StageTwoPointTwoController(Node):
         self.declare_parameter(
             'exit_cell_0_0_pose', [-2.6, -5.4, math.pi])
         self.declare_parameter('exit_x_offset', 2.9)
+        self.declare_parameter('exit_lift_height', 0.03)
+        self.declare_parameter('lift_timeout_sec', 15.0)
 
         self.dependency_timeout_sec = self._positive_parameter(
             'dependency_timeout_sec')
@@ -126,6 +130,10 @@ class StageTwoPointTwoController(Node):
         self.exit_cell_0_0_pose = self._pose_parameter(
             'exit_cell_0_0_pose')
         self.exit_x_offset = self._non_negative_parameter('exit_x_offset')
+        self.exit_lift_height = self._non_negative_parameter(
+            'exit_lift_height')
+        self.lift_timeout_sec = self._positive_parameter(
+            'lift_timeout_sec')
         self._validate_exit_config(
             self.exit_cell_0_0_pose, self.exit_x_offset)
 
@@ -143,6 +151,11 @@ class StageTwoPointTwoController(Node):
         self.move_client = self.create_client(
             MoveToPose,
             MOVE_TO_POSE_SERVICE,
+            callback_group=self.callback_group,
+        )
+        self.lift_client = self.create_client(
+            SetLift,
+            SET_LIFT_SERVICE,
             callback_group=self.callback_group,
         )
         self.traverse_client = self.create_client(
@@ -214,6 +227,8 @@ class StageTwoPointTwoController(Node):
         updates = {parameter.name: parameter.value for parameter in parameters}
         new_pose = None
         new_offset = None
+        new_lift_height = None
+        new_lift_timeout = None
 
         if 'exit_cell_0_0_pose' in updates:
             value = updates['exit_cell_0_0_pose']
@@ -255,11 +270,52 @@ class StageTwoPointTwoController(Node):
                     reason='exit_x_offset must be finite and non-negative',
                 )
 
+        if 'exit_lift_height' in updates:
+            value = updates['exit_lift_height']
+            if (
+                isinstance(value, bool) or
+                not isinstance(value, (int, float))
+            ):
+                return SetParametersResult(
+                    successful=False,
+                    reason='exit_lift_height must be numeric',
+                )
+            new_lift_height = float(value)
+            if not math.isfinite(new_lift_height) or new_lift_height < 0.0:
+                return SetParametersResult(
+                    successful=False,
+                    reason=(
+                        'exit_lift_height must be finite and non-negative'),
+                )
+
+        if 'lift_timeout_sec' in updates:
+            value = updates['lift_timeout_sec']
+            if (
+                isinstance(value, bool) or
+                not isinstance(value, (int, float))
+            ):
+                return SetParametersResult(
+                    successful=False,
+                    reason='lift_timeout_sec must be numeric',
+                )
+            new_lift_timeout = float(value)
+            if not math.isfinite(new_lift_timeout) or new_lift_timeout <= 0.0:
+                return SetParametersResult(
+                    successful=False,
+                    reason='lift_timeout_sec must be finite and positive',
+                )
+
         with self.config_lock:
             candidate_pose = (
                 self.exit_cell_0_0_pose if new_pose is None else new_pose)
             candidate_offset = (
                 self.exit_x_offset if new_offset is None else new_offset)
+            candidate_lift_height = (
+                self.exit_lift_height
+                if new_lift_height is None else new_lift_height)
+            candidate_lift_timeout = (
+                self.lift_timeout_sec
+                if new_lift_timeout is None else new_lift_timeout)
             try:
                 self._validate_exit_config(candidate_pose, candidate_offset)
             except ValueError as exc:
@@ -267,6 +323,8 @@ class StageTwoPointTwoController(Node):
                     successful=False, reason=str(exc))
             self.exit_cell_0_0_pose = candidate_pose
             self.exit_x_offset = candidate_offset
+            self.exit_lift_height = candidate_lift_height
+            self.lift_timeout_sec = candidate_lift_timeout
         return SetParametersResult(successful=True)
 
     def get_cell(self, index):
@@ -349,14 +407,31 @@ class StageTwoPointTwoController(Node):
         y = red_y if team == StageTwoPointTwo.Request.RED else -red_y
         return (x, y, yaw), (x - x_offset, y, yaw)
 
+    def exit_config(self, team):
+        self.validate_team(team)
+        with self.config_lock:
+            x, red_y, yaw = self.exit_cell_0_0_pose
+            x_offset = self.exit_x_offset
+            lift_height = self.exit_lift_height
+            lift_timeout_sec = self.lift_timeout_sec
+        y = red_y if team == StageTwoPointTwo.Request.RED else -red_y
+        targets = ((x, y, yaw), (x - x_offset, y, yaw))
+        return lift_height, lift_timeout_sec, targets
+
     def handle_exit(self, request, response):
         with self.service_lock:
             try:
-                targets = self.exit_targets(request.team)
+                lift_height, lift_timeout_sec, targets = self.exit_config(
+                    request.team)
+                if not self.lift_client.wait_for_service(
+                    timeout_sec=self.dependency_timeout_sec
+                ):
+                    raise RuntimeError('SetLift service unavailable')
                 if not self.move_client.wait_for_service(
                     timeout_sec=self.dependency_timeout_sec
                 ):
                     raise RuntimeError('MoveToPose service unavailable')
+                self.set_lift(lift_height, lift_timeout_sec)
                 for target in targets:
                     self.move_to_pose(*target)
             except Exception as exc:
@@ -370,6 +445,20 @@ class StageTwoPointTwoController(Node):
                 f'({targets[-1][0]:.3f}, {targets[-1][1]:.3f}, '
                 f'{targets[-1][2]:.3f})')
             return response
+
+    def set_lift(self, height, timeout_sec):
+        request = SetLift.Request()
+        request.front_lift = float(height)
+        request.rear_lift = float(height)
+        request.tolerance = 0.0
+        request.timeout_sec = float(timeout_sec)
+        response = self.wait_for_future(
+            self.lift_client.call_async(request),
+            timeout_sec,
+            'SetLift',
+        )
+        if not response.success:
+            raise RuntimeError(f'SetLift failed: {response.message}')
 
     @staticmethod
     def validate_team(team):

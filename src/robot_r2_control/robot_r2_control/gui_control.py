@@ -136,6 +136,8 @@ STAGE_TWO_POINT_TWO_PARAMETER_NAMES = {
     'detection_sample_count',
     'exit_cell_0_0_pose',
     'exit_x_offset',
+    'exit_lift_height',
+    'lift_timeout_sec',
 }
 STEP_TRAVERSE_SOURCE_RELATIVE_PATH = Path(
     'src/robot_r2_control/config/step_traverse.yaml')

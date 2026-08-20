@@ -58,17 +58,18 @@ def generate_launch_description():
         )
     )
 
-    camera_frame_config = os.path.join(
-        odin_data_postprocess_pkg,
-        'config',
-        'camera_frame_postprocess.yaml',
-    )
-    camera_frame_postprocess = Node(
-        package='odin_data_postprocess',
-        executable='camera_frame_postprocess',
-        parameters=[camera_frame_config],
-        output='screen',
-    )
+    # Odin 图像后处理当前停用；real1 直接使用驱动发布的去畸变图像。
+    # camera_frame_config = os.path.join(
+    #     odin_data_postprocess_pkg,
+    #     'config',
+    #     'camera_frame_postprocess.yaml',
+    # )
+    # camera_frame_postprocess = Node(
+    #     package='odin_data_postprocess',
+    #     executable='camera_frame_postprocess',
+    #     parameters=[camera_frame_config],
+    #     output='screen',
+    # )
 
     odin_odometry_config = os.path.join(
         odin_data_postprocess_pkg,
@@ -263,7 +264,7 @@ def generate_launch_description():
         #     description='Start tip-camera ArUco detection and chassis servo',
         # ),
         odin_launch,
-        camera_frame_postprocess,
+        # camera_frame_postprocess,
         odin_odometry_postprocess,
         control_launch,
         serial_bridge,

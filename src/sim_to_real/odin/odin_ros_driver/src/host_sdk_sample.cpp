@@ -137,6 +137,7 @@ int g_enable_imu_smooth = 0;
 int g_imu_smooth_frequency = 400;
 int g_sendcloudslam = 0;
 int g_sendcloudrender = 0;
+int g_sendrgb_decoded = 1;
 int g_sendrgb_compressed = 0;
 int g_sendrgb_undistort = 0;
 int g_record_data = 0;
@@ -2213,6 +2214,7 @@ int main(int argc, char *argv[])
         g_send_odom_baselink_tf = get_key_value("send_odom_baselink_tf", 0);
         g_sendcloudslam = get_key_value("sendcloudslam", 0);
         g_sendcloudrender = get_key_value("sendcloudrender", 1);
+        g_sendrgb_decoded = get_key_value("sendrgbdecoded", 1);
         g_sendrgb_compressed = get_key_value("sendrgbcompressed", 1);
         g_sendrgb_undistort = get_key_value("sendrgbundistort", 0);
         g_record_data = get_key_value("recorddata", 0);

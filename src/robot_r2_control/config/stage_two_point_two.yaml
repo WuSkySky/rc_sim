@@ -32,7 +32,9 @@
     release_edge_offset: 0.20
 
     # 2.2 后续离场动作：红方 (0,0) 外推格心与沿世界负 X 的移动距离。
-    # 蓝方运行时仅将格心 Y 取反。
+    # 动作开始时先将前后底盘绝对抬升到 0.03 m；蓝方仅将格心 Y 取反。
+    exit_lift_height: 0.03
+    lift_timeout_sec: 15.0
     exit_cell_0_0_pose: [-2.6, -5.4, 3.141592653589793]
     exit_x_offset: 2.9
 

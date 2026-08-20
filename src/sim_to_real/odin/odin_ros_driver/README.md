@@ -249,8 +249,9 @@ Internal parameters of the Odin ROS driver are defined in config/control_command
 | Topic               |control_command.yaml  | Detailed Description |
 |---------------------|----------------------|----------------------|
 | odin1/imu                     | sendimu           | Imu Topic |
-| odin1/image                   | sendrgb           | RGB Camera Topic, decoded from original jpeg data from device, bgr8 format |
-| odin1/image_undistort         | sendrgbundistort  | undistorted RGB Camera Topic, processed with calib.yaml from device |
+| Odin RGB stream              | sendrgb           | Master switch required for every RGB output |
+| odin1/image                   | sendrgbdecoded    | RGB Camera Topic, decoded from original jpeg data from device, bgr8 format |
+| odin1/image/undistorted       | sendrgbundistort  | undistorted RGB Camera Topic, processed with calib.yaml from device |
 | odin1/image/compressed        | sendrgbcompressed | RGB Camera compressed Topic, original jpeg data from device |
 | odin1/cloud_raw               | senddtof          | Raw_Cloud Topic |
 | odin1/cloud_render            | sendcloudrender   | Render_Cloud Topic, processed with raw point cloud, rgb image, and calib.yaml from device |

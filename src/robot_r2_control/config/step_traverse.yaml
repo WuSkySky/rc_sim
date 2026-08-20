@@ -5,9 +5,9 @@
     lift_timeout_sec: 15.0
 
     a1: 0.1
-    a1_backoff: 0.015
-    a2: 0.48
-    a2_backoff: 0.015
+    a1_backoff: 0.01
+    a2: 0.5
+    a2_backoff: 0.01
     a3: 0.38
     up_pre_lift_clearance: 0.05
     b1: 0.22

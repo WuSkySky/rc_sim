@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from robot_r2_control.stage_two_point_two import StageTwoPointTwoController
-from robot_r2_interfaces.srv import MoveToPose, StageTwoPointTwo
+from robot_r2_interfaces.srv import MoveToPose, SetLift, StageTwoPointTwo
 
 
 class ImmediateFuture:
@@ -65,12 +65,15 @@ def make_controller():
         for _ in controller.forward_x
     ]
     controller.move_client = FakeClient()
+    controller.lift_client = FakeClient()
     controller.move_timeout_sec = 35.0
     controller.dependency_timeout_sec = 2.0
     controller.service_lock = threading.Lock()
     controller.config_lock = threading.Lock()
     controller.exit_cell_0_0_pose = (-2.6, -5.4, math.pi)
     controller.exit_x_offset = 2.9
+    controller.exit_lift_height = 0.03
+    controller.lift_timeout_sec = 15.0
     return controller
 
 
@@ -135,6 +138,39 @@ def test_exit_targets_mirror_only_y(team, expected_y):
 
 def test_exit_service_runs_both_absolute_targets_in_order():
     controller = make_controller()
+    actions = []
+    controller.set_lift = lambda height, timeout: actions.append(
+        ('lift', height, timeout))
+    controller.move_to_pose = lambda *target: actions.append(
+        ('move', *target))
+    response = SimpleNamespace(success=None, message='')
+
+    result = controller.handle_exit(
+        SimpleNamespace(team=StageTwoPointTwo.Request.RED), response)
+
+    assert result.success
+    assert actions[0] == ('lift', pytest.approx(0.03), pytest.approx(15.0))
+    assert [action[0] for action in actions[1:]] == ['move', 'move']
+    assert actions[1][1:] == pytest.approx((-2.6, -5.4, math.pi))
+    assert actions[2][1:] == pytest.approx((-5.5, -5.4, math.pi))
+
+
+def test_exit_lift_uses_same_absolute_height_for_front_and_rear():
+    controller = make_controller()
+
+    controller.set_lift(0.03, 15.0)
+
+    request = controller.lift_client.requests[0]
+    assert isinstance(request, SetLift.Request)
+    assert request.front_lift == pytest.approx(0.03)
+    assert request.rear_lift == pytest.approx(0.03)
+    assert request.tolerance == pytest.approx(0.0)
+    assert request.timeout_sec == pytest.approx(15.0)
+
+
+def test_exit_service_stops_before_moves_when_lift_fails():
+    controller = make_controller()
+    controller.lift_client = FakeClient(success=False)
     moves = []
     controller.move_to_pose = lambda *target: moves.append(target)
     response = SimpleNamespace(success=None, message='')
@@ -142,11 +178,9 @@ def test_exit_service_runs_both_absolute_targets_in_order():
     result = controller.handle_exit(
         SimpleNamespace(team=StageTwoPointTwo.Request.RED), response)
 
-    assert result.success
-    assert moves == pytest.approx([
-        (-2.6, -5.4, math.pi),
-        (-5.5, -5.4, math.pi),
-    ])
+    assert not result.success
+    assert result.message == 'SetLift failed: failed'
+    assert moves == []
 
 
 def test_exit_service_stops_after_first_move_failure():
@@ -198,6 +232,8 @@ def test_exit_parameters_update_atomically():
         SimpleNamespace(
             name='exit_cell_0_0_pose', value=[-3.0, -6.0, math.pi]),
         SimpleNamespace(name='exit_x_offset', value=1.5),
+        SimpleNamespace(name='exit_lift_height', value=0.04),
+        SimpleNamespace(name='lift_timeout_sec', value=20.0),
     ])
 
     assert result.successful
@@ -205,6 +241,8 @@ def test_exit_parameters_update_atomically():
         pytest.approx((-3.0, -6.0, math.pi)),
         pytest.approx((-4.5, -6.0, math.pi)),
     )
+    assert controller.exit_lift_height == pytest.approx(0.04)
+    assert controller.lift_timeout_sec == pytest.approx(20.0)
 
 
 def test_invalid_exit_parameter_update_keeps_all_previous_values():
@@ -219,6 +257,19 @@ def test_invalid_exit_parameter_update_keeps_all_previous_values():
     assert not result.successful
     assert controller.exit_cell_0_0_pose == (-2.6, -5.4, math.pi)
     assert controller.exit_x_offset == 2.9
+
+
+def test_invalid_exit_lift_parameter_update_keeps_previous_config():
+    controller = make_controller()
+
+    result = controller._on_parameters_changed([
+        SimpleNamespace(name='exit_lift_height', value=-0.01),
+        SimpleNamespace(name='lift_timeout_sec', value=20.0),
+    ])
+
+    assert not result.successful
+    assert controller.exit_lift_height == pytest.approx(0.03)
+    assert controller.lift_timeout_sec == pytest.approx(15.0)
 
 
 def test_exit_parameter_update_rejects_non_finite_derived_target():

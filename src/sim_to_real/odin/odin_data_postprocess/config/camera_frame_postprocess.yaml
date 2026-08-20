@@ -1,3 +1,4 @@
 camera_frame_postprocess:
   ros__parameters:
+    # This node currently exposes only the visualization switch.
     visualization_enabled: false

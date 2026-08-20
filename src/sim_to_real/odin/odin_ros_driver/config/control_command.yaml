@@ -12,17 +12,18 @@ register_keys:
 
   streamctrl: 1           # 0: off; 1: on
 
-  # original rgb data in jpeg format from device
-  sendrgbcompressed: 1    # 0: off; 1: on
-
-  # RGB data, decoded from original jpeg data from device, bgr8 format
-  # Processed on host device
+  # Activate the Odin RGB stream. Decoding is required by undistortion.
   sendrgb: 1              # 0: off; 1: on
+
+  # Publish decoded and compressed intermediate images. real1 only consumes
+  # the undistorted output, so keep both disabled.
+  sendrgbdecoded: 0       # /odin1/image
+  sendrgbcompressed: 0    # /odin1/image/compressed
 
   # undistort rgb image processed from decoded rgb data.
   # depends on sendrgb. Related camera parameters are in this package's config/calib.yaml
   # Processed on host device
-  sendrgbundistort: 1    # 0: off; 1: on.
+  sendrgbundistort: 1     # /odin1/image/undistorted
 
   # IMU data
   sendimu: 0              # 0: off; 1: on

@@ -203,6 +203,10 @@ ros2 service call /r2/stage_two_point_two_exit \
   "{team: red}"
 ```
 
+服务开始后会先通过 `/r2/lift/set` 将前后底盘绝对抬升到 `0.03 m`，成功后才会
+执行两段 Odin 绝对位置伺服。抬升高度和超时可分别通过
+`exit_lift_height`、`lift_timeout_sec` 动态修改；抬升或任一移动失败都会立即停止。
+
 该独立服务不会自动追加到阶段 2.2 或完整阶段二流程。它使用 Odin 绝对位置伺服，
 先到 `(0,0)` 外推格心，再保持 Y 和 yaw 不变，沿世界负 X 移动
 `exit_x_offset`（默认 `2.9 m`）。红方默认两段目标为
