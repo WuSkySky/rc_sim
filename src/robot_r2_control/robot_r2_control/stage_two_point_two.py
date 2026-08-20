@@ -3,6 +3,7 @@ import threading
 import time
 
 from geometry_msgs.msg import PoseStamped
+from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -13,11 +14,13 @@ from robot_r2_interfaces.srv import (
     KfsAction,
     MoveToPose,
     StageTwoPointTwo,
+    StageTwoPointTwoExit,
     TraverseStep,
 )
 
 
 STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
+STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
 POSE_FEEDBACK_TOPIC = '/r2/pose_feedback_odin'
 MOVE_TO_POSE_SERVICE = '/r2/move_to_pose'
 STEP_TRAVERSE_SERVICE = '/r2/step_traverse'
@@ -37,9 +40,11 @@ class StageTwoPointTwoController(Node):
         super().__init__('stage_two_point_two')
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
+        self.config_lock = threading.Lock()
         self.pose_condition = threading.Condition()
         self.current_pose = None
         self.loaded_count = 0
+        self.team = StageTwoPointTwo.Request.RED
         self.arrival_direction = None
         self._skip_kfs_detection = False
 
@@ -63,6 +68,9 @@ class StageTwoPointTwoController(Node):
         self.declare_parameter('lower_kfs_edge_offset', 0.4)
         self.declare_parameter('release_edge_offset', 0.2)
         self.declare_parameter('detection_sample_count', 10)
+        self.declare_parameter(
+            'exit_cell_0_0_pose', [-2.6, -5.4, math.pi])
+        self.declare_parameter('exit_x_offset', 2.9)
 
         self.dependency_timeout_sec = self._positive_parameter(
             'dependency_timeout_sec')
@@ -115,6 +123,11 @@ class StageTwoPointTwoController(Node):
             self.get_parameter('detection_sample_count').value)
         if self.detection_sample_count <= 0:
             raise ValueError('detection_sample_count must be positive')
+        self.exit_cell_0_0_pose = self._pose_parameter(
+            'exit_cell_0_0_pose')
+        self.exit_x_offset = self._non_negative_parameter('exit_x_offset')
+        self._validate_exit_config(
+            self.exit_cell_0_0_pose, self.exit_x_offset)
 
         self.get_cell(self.initial_index)
         if not 0 <= self.terminal_forward_index < len(self.forward_x):
@@ -158,6 +171,13 @@ class StageTwoPointTwoController(Node):
             self.handle_task,
             callback_group=self.callback_group,
         )
+        self.exit_service = self.create_service(
+            StageTwoPointTwoExit,
+            STAGE_TWO_POINT_TWO_EXIT_SERVICE,
+            self.handle_exit,
+            callback_group=self.callback_group,
+        )
+        self.add_on_set_parameters_callback(self._on_parameters_changed)
 
     def _positive_parameter(self, name):
         value = float(self.get_parameter(name).value)
@@ -178,6 +198,77 @@ class StageTwoPointTwoController(Node):
             raise ValueError(f'{name} must contain finite values')
         return values
 
+    def _pose_parameter(self, name):
+        values = self._finite_array_parameter(name)
+        if len(values) != 3:
+            raise ValueError(f'{name} must contain exactly 3 values')
+        return values
+
+    @staticmethod
+    def _validate_exit_config(pose, x_offset):
+        if not math.isfinite(pose[0] - x_offset):
+            raise ValueError(
+                'exit_cell_0_0_pose x minus exit_x_offset must be finite')
+
+    def _on_parameters_changed(self, parameters):
+        updates = {parameter.name: parameter.value for parameter in parameters}
+        new_pose = None
+        new_offset = None
+
+        if 'exit_cell_0_0_pose' in updates:
+            value = updates['exit_cell_0_0_pose']
+            if not isinstance(value, (list, tuple)) or len(value) != 3:
+                return SetParametersResult(
+                    successful=False,
+                    reason='exit_cell_0_0_pose must contain exactly 3 values',
+                )
+            if any(
+                isinstance(item, bool) or
+                not isinstance(item, (int, float))
+                for item in value
+            ):
+                return SetParametersResult(
+                    successful=False,
+                    reason='exit_cell_0_0_pose must contain numeric values',
+                )
+            new_pose = tuple(float(item) for item in value)
+            if not all(math.isfinite(item) for item in new_pose):
+                return SetParametersResult(
+                    successful=False,
+                    reason='exit_cell_0_0_pose must contain finite values',
+                )
+
+        if 'exit_x_offset' in updates:
+            value = updates['exit_x_offset']
+            if (
+                isinstance(value, bool) or
+                not isinstance(value, (int, float))
+            ):
+                return SetParametersResult(
+                    successful=False,
+                    reason='exit_x_offset must be numeric',
+                )
+            new_offset = float(value)
+            if not math.isfinite(new_offset) or new_offset < 0.0:
+                return SetParametersResult(
+                    successful=False,
+                    reason='exit_x_offset must be finite and non-negative',
+                )
+
+        with self.config_lock:
+            candidate_pose = (
+                self.exit_cell_0_0_pose if new_pose is None else new_pose)
+            candidate_offset = (
+                self.exit_x_offset if new_offset is None else new_offset)
+            try:
+                self._validate_exit_config(candidate_pose, candidate_offset)
+            except ValueError as exc:
+                return SetParametersResult(
+                    successful=False, reason=str(exc))
+            self.exit_cell_0_0_pose = candidate_pose
+            self.exit_x_offset = candidate_offset
+        return SetParametersResult(successful=True)
+
     def get_cell(self, index):
         forward_index, lateral_index = index
         if not 0 <= forward_index < len(self.forward_x):
@@ -194,7 +285,11 @@ class StageTwoPointTwoController(Node):
             raise ValueError(f'cell {index} is not traversable')
         return (
             self.forward_x[forward_index],
-            self.lateral_y[lateral_offset],
+            (
+                self.lateral_y[lateral_offset]
+                if self.team == StageTwoPointTwo.Request.RED
+                else -self.lateral_y[lateral_offset]
+            ),
             height,
         )
 
@@ -224,9 +319,11 @@ class StageTwoPointTwoController(Node):
     def handle_task(self, request, response):
         with self.service_lock:
             self.loaded_count = int(request.loaded_count)
+            self.team = request.team
             self._skip_kfs_detection = bool(request.skip_kfs_detection)
             self.arrival_direction = None
             try:
+                self.validate_team(self.team)
                 self.validate_decision(request.fake_kfs_decision)
                 self.validate_loaded_count(self.loaded_count)
                 self.wait_for_dependencies()
@@ -239,9 +336,48 @@ class StageTwoPointTwoController(Node):
                 return response
 
             response.success = True
-            response.message = f'Stage 2.2 completed at {final_index}'
+            response.message = (
+                f'Stage 2.2 completed for {self.team} team at {final_index}')
             response.loaded_count = self.loaded_count
             return response
+
+    def exit_targets(self, team):
+        self.validate_team(team)
+        with self.config_lock:
+            x, red_y, yaw = self.exit_cell_0_0_pose
+            x_offset = self.exit_x_offset
+        y = red_y if team == StageTwoPointTwo.Request.RED else -red_y
+        return (x, y, yaw), (x - x_offset, y, yaw)
+
+    def handle_exit(self, request, response):
+        with self.service_lock:
+            try:
+                targets = self.exit_targets(request.team)
+                if not self.move_client.wait_for_service(
+                    timeout_sec=self.dependency_timeout_sec
+                ):
+                    raise RuntimeError('MoveToPose service unavailable')
+                for target in targets:
+                    self.move_to_pose(*target)
+            except Exception as exc:
+                response.success = False
+                response.message = str(exc)
+                return response
+
+            response.success = True
+            response.message = (
+                f'Stage 2.2 exit completed for {request.team} team at '
+                f'({targets[-1][0]:.3f}, {targets[-1][1]:.3f}, '
+                f'{targets[-1][2]:.3f})')
+            return response
+
+    @staticmethod
+    def validate_team(team):
+        if team not in (
+            StageTwoPointTwo.Request.RED,
+            StageTwoPointTwo.Request.BLUE,
+        ):
+            raise ValueError(f'team must be red or blue, got {team!r}')
 
     @staticmethod
     def validate_decision(decision):

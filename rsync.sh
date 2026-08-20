@@ -27,7 +27,10 @@ sync_host() {
         "${ROBOT_USER}@${robot_host}" \
         "mkdir -p '${REMOTE_WS}'"
 
-    sshpass -e rsync -a \
+    # 双系统可能让本地文件时间早于实车端 install 文件。使用内容校验判断
+    # 是否需要传输，并让已传输文件采用实车端时间，避免后续 Python 包构建
+    # 因时间戳误判而跳过 launch/config 等 data_files 的安装。
+    sshpass -e rsync -a --checksum --no-times \
         --itemize-changes \
         --delete-delay \
         --partial \

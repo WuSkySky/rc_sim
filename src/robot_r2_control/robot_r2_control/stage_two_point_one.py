@@ -154,9 +154,10 @@ class StageTwoPointOneController(Node):
             self.arrival_direction = None
             self.current_cell_center = None
             try:
+                self.validate_team(request.team)
                 self.validate_loaded_count(self.loaded_count)
                 self.wait_for_dependencies()
-                self.execute_task()
+                self.execute_task(request.team)
             except Exception as exc:
                 response.success = False
                 response.message = str(exc)
@@ -164,9 +165,17 @@ class StageTwoPointOneController(Node):
                 return response
 
             response.success = True
-            response.message = 'Stage 2.1 completed'
+            response.message = f'Stage 2.1 completed for {request.team} team'
             response.loaded_count = self.loaded_count
             return response
+
+    @staticmethod
+    def validate_team(team):
+        if team not in (
+            StageTwoPointOne.Request.RED,
+            StageTwoPointOne.Request.BLUE,
+        ):
+            raise ValueError(f'team must be red or blue, got {team!r}')
 
     @staticmethod
     def validate_loaded_count(loaded_count):
@@ -297,6 +306,13 @@ class StageTwoPointOneController(Node):
                 self.high_kfs_edge_offset * math.sin(edge_pose[2])),
         )
 
+    @staticmethod
+    def team_edge_pose(edge_pose, team):
+        StageTwoPointOneController.validate_team(team)
+        if team == StageTwoPointOne.Request.RED:
+            return edge_pose
+        return edge_pose[0], -edge_pose[1], edge_pose[2]
+
     def move_to_loading_edge(self, edge_pose):
         target_center = self.cell_center_from_edge_pose(edge_pose)
         if self.current_cell_center is not None:
@@ -349,18 +365,25 @@ class StageTwoPointOneController(Node):
         )
         self.load_front_kfs(load_mode)
 
-    def execute_task(self):
-        self.set_lift(self.lift_initial)
-        self.move_to_loading_edge(self.cell_5_3_edge_pose)
-        self.set_lift(self.lift_up)
-        self.detect_and_maybe_load(self.cell_5_3_edge_pose)
+    def execute_task(self, team):
+        cell_5_3_edge_pose = self.team_edge_pose(
+            self.cell_5_3_edge_pose, team)
+        cell_5_1_edge_pose = self.team_edge_pose(
+            self.cell_5_1_edge_pose, team)
+        cell_5_2_edge_pose = self.team_edge_pose(
+            self.cell_5_2_edge_pose, team)
 
-        self.move_to_loading_edge(self.cell_5_1_edge_pose)
-        self.detect_and_maybe_load(self.cell_5_1_edge_pose)
+        self.set_lift(self.lift_initial)
+        self.move_to_loading_edge(cell_5_3_edge_pose)
+        self.set_lift(self.lift_up)
+        self.detect_and_maybe_load(cell_5_3_edge_pose)
+
+        self.move_to_loading_edge(cell_5_1_edge_pose)
+        self.detect_and_maybe_load(cell_5_1_edge_pose)
 
         self.set_lift(self.lift_down)
-        self.move_to_loading_edge(self.cell_5_2_edge_pose)
-        self.detect_and_maybe_load(self.cell_5_2_edge_pose)
+        self.move_to_loading_edge(cell_5_2_edge_pose)
+        self.detect_and_maybe_load(cell_5_2_edge_pose)
 
 
 def main():

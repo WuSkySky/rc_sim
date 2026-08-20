@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from robot_r2_control.stage_two_point_one import StageTwoPointOneController
-from robot_r2_interfaces.srv import MoveToPose
+from robot_r2_interfaces.srv import MoveToPose, StageTwoPointOne
 
 
 class ImmediateFuture:
@@ -59,3 +59,23 @@ def test_move_to_pose_failure_raises():
 
     with pytest.raises(RuntimeError, match='MoveToPose failed'):
         controller.move_to_pose((0.0, 0.0, 0.0))
+
+
+@pytest.mark.parametrize(
+    'team, expected_y',
+    [
+        (StageTwoPointOne.Request.RED, -1.8),
+        (StageTwoPointOne.Request.BLUE, 1.8),
+    ],
+)
+def test_team_edge_pose_only_mirrors_y(team, expected_y):
+    pose = (3.2, -1.8, 3.141592653589793)
+
+    mirrored = StageTwoPointOneController.team_edge_pose(pose, team)
+
+    assert mirrored == pytest.approx((3.2, expected_y, pose[2]))
+
+
+def test_invalid_team_is_rejected():
+    with pytest.raises(ValueError, match='team must be red or blue'):
+        StageTwoPointOneController.validate_team('green')

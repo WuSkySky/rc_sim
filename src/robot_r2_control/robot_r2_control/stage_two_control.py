@@ -64,6 +64,11 @@ class StageTwoController(Node):
         return value
 
     @staticmethod
+    def validate_team(team):
+        if team not in (StageTwo.Request.RED, StageTwo.Request.BLUE):
+            raise ValueError(f'team must be red or blue, got {team!r}')
+
+    @staticmethod
     def validate_decision(decision):
         if decision not in (
             StageTwo.Request.LEFT,
@@ -96,8 +101,9 @@ class StageTwoController(Node):
             raise RuntimeError(f'{description} call failed')
         return response
 
-    def run_point_one(self):
+    def run_point_one(self, team):
         request = StageTwoPointOne.Request()
+        request.team = team
         request.loaded_count = 0
         response = self.wait_for_future(
             self.point_one_client.call_async(request),
@@ -109,8 +115,9 @@ class StageTwoController(Node):
             raise RuntimeError(
                 f'StageTwoPointOne failed: {response.message}')
 
-    def run_point_two(self, decision):
+    def run_point_two(self, team, decision):
         request = StageTwoPointTwo.Request()
+        request.team = team
         request.fake_kfs_decision = int(decision)
         request.loaded_count = self.loaded_count
         response = self.wait_for_future(
@@ -127,10 +134,11 @@ class StageTwoController(Node):
         with self.service_lock:
             self.loaded_count = 0
             try:
+                self.validate_team(request.team)
                 self.validate_decision(request.fake_kfs_decision)
                 self.wait_for_dependencies()
-                self.run_point_one()
-                self.run_point_two(request.fake_kfs_decision)
+                self.run_point_one(request.team)
+                self.run_point_two(request.team, request.fake_kfs_decision)
             except Exception as exc:
                 response.success = False
                 response.message = str(exc)
@@ -138,7 +146,8 @@ class StageTwoController(Node):
                 return response
 
             response.success = True
-            response.message = 'Stage two completed: 2.1 -> 2.2'
+            response.message = (
+                f'Stage two completed for {request.team} team: 2.1 -> 2.2')
             response.loaded_count = self.loaded_count
             return response
 

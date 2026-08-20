@@ -1,9 +1,6 @@
 string RED=red
 string BLUE=blue
 string team
-uint8 loaded_count
-bool skip_kfs_detection
 ---
 bool success
 string message
-uint8 loaded_count

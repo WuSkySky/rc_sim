@@ -28,7 +28,9 @@ from robot_r2_interfaces.srv import (
     KfsAction,
     MoveRelative,
     StageOne,
+    StageTwoPointOne,
     StageTwoPointTwo,
+    StageTwoPointTwoExit,
     TraverseStep,
 )
 
@@ -91,8 +93,12 @@ def make_node_stub():
     node.stage_one_team = None
     node.stage_two_point_one_request_in_flight = False
     node.stage_two_point_one_skip = None
+    node.stage_two_point_one_team = None
     node.stage_two_point_two_request_in_flight = False
     node.stage_two_point_two_skip = None
+    node.stage_two_point_two_team = None
+    node.stage_two_point_two_exit_request_in_flight = False
+    node.stage_two_point_two_exit_team = None
     node.kfs_action_request_in_flight = False
     node.kfs_parameter_load_in_flight = False
     node.stage_one_parameter_load_in_flight = False
@@ -126,7 +132,14 @@ def make_node_stub():
     node.stage_one_client = FakeClient()
     node.stage_two_point_one_client = FakeClient()
     node.stage_two_point_two_client = FakeClient()
+    node.stage_two_point_two_exit_client = FakeClient()
     node.stage_one_relocalization_pose = (0.0,) * 6
+    node.stage_two_point_one_relocalization_pose = (
+        GuiControlNode.STEP_TWO_POINT_ONE_RELOCALIZATION_DEFAULT)
+    node.stage_two_point_two_relocalization_pose = (
+        GuiControlNode.STEP_TWO_POINT_TWO_RELOCALIZATION_DEFAULT)
+    node.stage_two_point_two_exit_relocalization_pose = (
+        GuiControlNode.STEP_TWO_POINT_TWO_EXIT_RELOCALIZATION_DEFAULT)
     node.status_events = []
     return node
 
@@ -624,16 +637,24 @@ def test_stage_one_rejects_unknown_team_without_relocalizing():
     assert not node.set_base_pose_client.requests
 
 
-def test_stage_two_point_one_relocalizes_to_middle_edge_then_calls_service():
+@pytest.mark.parametrize(
+    'team,label,expected_y',
+    [
+        (StageTwoPointOne.Request.RED, '红方', -2.2),
+        (StageTwoPointOne.Request.BLUE, '蓝方', 2.2),
+    ],
+)
+def test_stage_two_point_one_relocalizes_then_calls_team_service(
+        team, label, expected_y):
     node = make_node_stub()
 
-    success, message = node.request_stage_two_point_one(skip=True)
+    success, message = node.request_stage_two_point_one(team, skip=True)
 
     assert success
-    assert message == '2.1 skip测试：正在重定位到测试起点'
+    assert message == f'2.1 {label}skip测试：正在重定位到测试起点'
     request = node.set_base_pose_odin_client.requests[0]
     assert (request.x, request.y, request.yaw) == (
-        5.568, -3.9638, math.pi)
+        5.568, expected_y, math.pi)
     assert request.z == 0.0
     assert request.roll == 0.0
     assert request.pitch == 0.0
@@ -645,6 +666,7 @@ def test_stage_two_point_one_relocalizes_to_middle_edge_then_calls_service():
         message='base_link pose updated',
     ))
     step_request = node.stage_two_point_one_client.requests[0]
+    assert step_request.team == team
     assert step_request.loaded_count == 0
     assert step_request.skip_kfs_detection is True
     assert node.stage_two_point_one_request_in_flight
@@ -655,15 +677,16 @@ def test_stage_two_point_one_relocalizes_to_middle_edge_then_calls_service():
     ))
     assert not node.stage_two_point_one_request_in_flight
     assert node.pop_status_events() == [
-        '2.1 skip测试：重定位完成，正在调用 2.1',
-        '2.1 skip测试完成：Stage 2.1 completed',
+        f'2.1 {label}skip测试：重定位完成，正在调用 2.1',
+        f'2.1 {label}skip测试完成：Stage 2.1 completed',
     ]
 
 
 def test_stage_two_point_one_normal_passes_skip_false():
     node = make_node_stub()
 
-    success, _ = node.request_stage_two_point_one(skip=False)
+    success, _ = node.request_stage_two_point_one(
+        StageTwoPointOne.Request.RED, skip=False)
     assert success
 
     node.set_base_pose_odin_client.future.complete(SimpleNamespace(
@@ -671,20 +694,29 @@ def test_stage_two_point_one_normal_passes_skip_false():
         message='base_link pose updated',
     ))
     step_request = node.stage_two_point_one_client.requests[0]
+    assert step_request.team == StageTwoPointOne.Request.RED
     assert step_request.loaded_count == 0
     assert step_request.skip_kfs_detection is False
 
 
-def test_stage_two_point_two_relocalizes_then_calls_service():
+@pytest.mark.parametrize(
+    'team,label,expected_y',
+    [
+        (StageTwoPointOne.Request.RED, '红方', -3.0),
+        (StageTwoPointOne.Request.BLUE, '蓝方', 3.0),
+    ],
+)
+def test_stage_two_point_two_relocalizes_then_calls_team_service(
+        team, label, expected_y):
     node = make_node_stub()
 
-    success, message = node.request_stage_two_point_two(skip=True)
+    success, message = node.request_stage_two_point_two(team, skip=True)
 
     assert success
-    assert message == '2.2 skip测试：正在重定位到测试起点'
+    assert message == f'2.2 {label}skip测试：正在重定位到测试起点'
     request = node.set_base_pose_odin_client.requests[0]
     assert (request.x, request.y, request.yaw) == (
-        3.4, -3.0, math.pi)
+        3.4, expected_y, math.pi)
     assert node.stage_two_point_two_request_in_flight
     assert not node.stage_two_point_two_client.requests
 
@@ -693,6 +725,7 @@ def test_stage_two_point_two_relocalizes_then_calls_service():
         message='base_link pose updated',
     ))
     step_request = node.stage_two_point_two_client.requests[0]
+    assert step_request.team == team
     assert step_request.fake_kfs_decision == StageTwoPointTwo.Request.LEFT
     assert step_request.loaded_count == 0
     assert step_request.skip_kfs_detection is True
@@ -703,26 +736,140 @@ def test_stage_two_point_two_relocalizes_then_calls_service():
     ))
     assert not node.stage_two_point_two_request_in_flight
     assert node.pop_status_events() == [
-        '2.2 skip测试：重定位完成，正在调用 2.2',
-        '2.2 skip测试完成：Stage 2.2 completed at (0, 1)',
+        f'2.2 {label}skip测试：重定位完成，正在调用 2.2',
+        f'2.2 {label}skip测试完成：Stage 2.2 completed at (0, 1)',
     ]
 
 
 def test_stage_two_point_two_normal_passes_skip_false():
     node = make_node_stub()
 
-    success, message = node.request_stage_two_point_two(skip=False)
+    success, message = node.request_stage_two_point_two(
+        StageTwoPointOne.Request.RED, skip=False)
 
     assert success
-    assert message == '2.2 正常测试：正在重定位到测试起点'
+    assert message == '2.2 红方正常测试：正在重定位到测试起点'
     node.set_base_pose_odin_client.future.complete(SimpleNamespace(
         success=True,
         message='base_link_odin pose updated',
     ))
     step_request = node.stage_two_point_two_client.requests[0]
+    assert step_request.team == StageTwoPointOne.Request.RED
     assert step_request.fake_kfs_decision == StageTwoPointTwo.Request.LEFT
     assert step_request.loaded_count == 0
     assert step_request.skip_kfs_detection is False
+
+
+@pytest.mark.parametrize(
+    'team,label,expected_y',
+    [
+        (StageTwoPointTwoExit.Request.RED, '红方', -1.8),
+        (StageTwoPointTwoExit.Request.BLUE, '蓝方', 1.8),
+    ],
+)
+def test_stage_two_point_two_exit_relocalizes_then_calls_team_service(
+        team, label, expected_y):
+    node = make_node_stub()
+
+    success, message = node.request_stage_two_point_two_exit(team)
+
+    assert success
+    assert message == f'2.2 后续动作 {label}：正在重定位到 (0,3)'
+    request = node.set_base_pose_odin_client.requests[0]
+    assert (request.x, request.y, request.yaw) == pytest.approx(
+        (-2.6, expected_y, math.pi))
+    assert node.stage_two_point_two_exit_request_in_flight
+    assert not node.stage_two_point_two_exit_client.requests
+
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
+        success=True,
+        message='base_link pose updated',
+    ))
+    exit_request = node.stage_two_point_two_exit_client.requests[0]
+    assert exit_request.team == team
+
+    node.stage_two_point_two_exit_client.future.complete(SimpleNamespace(
+        success=True,
+        message='exit completed',
+    ))
+    assert not node.stage_two_point_two_exit_request_in_flight
+    assert node.pop_status_events() == [
+        f'2.2 后续动作 {label}：重定位完成，正在调用离场服务',
+        f'2.2 后续动作 {label}完成：exit completed',
+    ]
+
+
+def test_stage_two_point_two_exit_does_not_call_service_when_relocalizing_fails():
+    node = make_node_stub()
+
+    success, _ = node.request_stage_two_point_two_exit(
+        StageTwoPointTwoExit.Request.RED)
+    assert success
+
+    node.set_base_pose_odin_client.future.complete(SimpleNamespace(
+        success=False,
+        message='odin unavailable',
+    ))
+
+    assert not node.stage_two_point_two_exit_client.requests
+    assert not node.stage_two_point_two_exit_request_in_flight
+    assert node.pop_status_events() == [
+        '2.2 后续动作 红方重定位失败：odin unavailable',
+    ]
+
+
+def test_stage_two_point_two_exit_rejects_unknown_team():
+    node = make_node_stub()
+
+    success, message = node.request_stage_two_point_two_exit('green')
+
+    assert not success
+    assert message == 'Unknown Stage 2 team: green'
+    assert not node.set_base_pose_odin_client.requests
+
+
+@pytest.mark.parametrize(
+    'method_name',
+    ['request_stage_two_point_one', 'request_stage_two_point_two'],
+)
+def test_stage_two_rejects_unknown_team_before_relocalizing(method_name):
+    node = make_node_stub()
+
+    success, message = getattr(node, method_name)('green', skip=True)
+
+    assert not success
+    assert message == 'Unknown Stage 2 team: green'
+    assert not node.set_base_pose_odin_client.requests
+
+
+@pytest.mark.parametrize(
+    'parameter_name,attribute_name',
+    [
+        (
+            'stage_two_point_one_relocalization_pose',
+            'stage_two_point_one_relocalization_pose',
+        ),
+        (
+            'stage_two_point_two_relocalization_pose',
+            'stage_two_point_two_relocalization_pose',
+        ),
+        (
+            'stage_two_point_two_exit_relocalization_pose',
+            'stage_two_point_two_exit_relocalization_pose',
+        ),
+    ],
+)
+def test_stage_two_relocalization_poses_support_dynamic_update(
+        parameter_name, attribute_name):
+    node = make_node_stub()
+    updated = [1.0, -2.0, 0.0, 0.0, 0.0, math.pi]
+
+    result = node._on_parameters_changed([
+        SimpleNamespace(name=parameter_name, value=updated),
+    ])
+
+    assert result.successful
+    assert getattr(node, attribute_name) == pytest.approx(tuple(updated))
 
 
 def test_parse_relocalization_values_requires_six_values():

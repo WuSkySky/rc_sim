@@ -186,8 +186,8 @@ def generate_launch_description():
     )
 
     # ==================================================================
-    # ArUco 二维码识别对接（基于端头 MIPI 相机）——当前注释停用，不在
-    # real1 启动。需要恢复时取消本段及下方 LaunchDescription 中两行引用
+    # ArUco 二维码检测与专用底盘伺服（基于端头 MIPI 相机）均已注释停用，
+    # 不在 real1 启动。需要恢复时取消本段及下方 LaunchDescription 中两行引用
     # 与 enable_aruco 参数声明的注释即可。
     #
     # aruco_subscribe.launch.py 启动三个节点：

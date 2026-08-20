@@ -9,6 +9,7 @@
     load_timeout_sec: 70.0
     release_timeout_sec: 70.0
 
+    # 红方（负 Y）基准坐标；蓝方运行时仅将所有格子的 Y 取反。
     # First coordinate: forward index 0..5. Second coordinate: lane 1..3.
     forward_x: [-2.6, -1.4, -0.2, 1.0, 2.2, 3.4]
     lateral_y: [-4.2, -3.0, -1.8]
@@ -29,5 +30,10 @@
     higher_kfs_edge_offset: 0.20
     lower_kfs_edge_offset: 0.40
     release_edge_offset: 0.20
+
+    # 2.2 后续离场动作：红方 (0,0) 外推格心与沿世界负 X 的移动距离。
+    # 蓝方运行时仅将格心 Y 取反。
+    exit_cell_0_0_pose: [-2.6, -5.4, 3.141592653589793]
+    exit_x_offset: 2.9
 
     detection_sample_count: 10

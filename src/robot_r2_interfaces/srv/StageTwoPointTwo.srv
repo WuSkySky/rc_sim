@@ -1,5 +1,8 @@
 uint8 LEFT=1
 uint8 RIGHT=2
+string RED=red
+string BLUE=blue
+string team
 uint8 fake_kfs_decision
 uint8 loaded_count
 bool skip_kfs_detection

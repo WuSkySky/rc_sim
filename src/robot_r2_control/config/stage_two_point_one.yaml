@@ -8,6 +8,7 @@
     load_timeout_sec: 70.0
     release_timeout_sec: 70.0
 
+    # 红方（负 Y）基准坐标；蓝方运行时仅将 Y 取反。
     # Each point starts at its index-5 column center, then shifts 0.2 m
     # toward the index-4 column (world x: 3.4 -> 3.2).
     # yaw=pi makes the robot front face -x, toward the index-4 column.

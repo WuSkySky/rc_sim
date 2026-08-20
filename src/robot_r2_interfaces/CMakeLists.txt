@@ -34,6 +34,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StageTwo.srv"
   "srv/StageTwoPointOne.srv"
   "srv/StageTwoPointTwo.srv"
+  "srv/StageTwoPointTwoExit.srv"
   "srv/TraverseStep.srv"
   "srv/Align.srv"
   DEPENDENCIES geometry_msgs sensor_msgs std_msgs

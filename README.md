@@ -112,6 +112,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 完整阶段二      | `/r2/stage_two`              | `robot_r2_interfaces/srv/StageTwo`            | 仿真、实机 |
 | 阶段 2.1     | `/r2/stage_two_point_one`    | `robot_r2_interfaces/srv/StageTwoPointOne`    | 仿真、实机 |
 | 阶段 2.2     | `/r2/stage_two_point_two`    | `robot_r2_interfaces/srv/StageTwoPointTwo`    | 仿真、实机 |
+| 阶段 2.2 后续离场 | `/r2/stage_two_point_two_exit` | `robot_r2_interfaces/srv/StageTwoPointTwoExit` | 仿真、实机 |
 | 底盘绝对位置伺服   | `/r2/move_to_pose`           | `robot_r2_interfaces/srv/MoveToPose`          | 仿真、实机 |
 | 底盘相对位置伺服   | `/r2/move_relative`          | `robot_r2_interfaces/srv/MoveRelative`        | 仿真、实机 |
 | 重置或设置里程计位姿 | `/r2/set_base_pose`          | `robot_r2_interfaces/srv/SetBasePose`         | 仅实机   |
@@ -168,18 +169,22 @@ ros2 param set /stage_one weapon_grip_tolerance_m 0.0015
 
 ### 阶段二任务
 
-完整执行阶段 2.1 → 2.2。假 KFS 决策：`1=左`，`2=右`。
+完整执行阶段 2.1 → 2.2。`team` 只接受 `red` 或 `blue`；红方沿用配置中的
+负 Y 坐标，蓝方仅将重定位和任务格子的 Y 坐标取反。不会额外镜像配置中的 yaw；
+移动朝向仍根据实际目标坐标计算。格子高度、左右相机映射以及假 KFS 的
+`LEFT/RIGHT` 决策不变。假 KFS 决策：`1=左`，`2=右`。
 
 ```bash
 ros2 service call /r2/stage_two robot_r2_interfaces/srv/StageTwo \
-  "{fake_kfs_decision: 1}"
+  "{team: red, fake_kfs_decision: 1}"
 ```
 
 单独执行阶段 2.1：
 
 ```bash
 ros2 service call /r2/stage_two_point_one \
-  robot_r2_interfaces/srv/StageTwoPointOne "{loaded_count: 0}"
+  robot_r2_interfaces/srv/StageTwoPointOne \
+  "{team: red, loaded_count: 0, skip_kfs_detection: false}"
 ```
 
 单独执行阶段 2.2：
@@ -187,8 +192,35 @@ ros2 service call /r2/stage_two_point_one \
 ```bash
 ros2 service call /r2/stage_two_point_two \
   robot_r2_interfaces/srv/StageTwoPointTwo \
-  "{fake_kfs_decision: 1, loaded_count: 0}"
+  "{team: red, fake_kfs_decision: 1, loaded_count: 0, skip_kfs_detection: false}"
 ```
+
+单独执行阶段 2.2 后续离场动作：
+
+```bash
+ros2 service call /r2/stage_two_point_two_exit \
+  robot_r2_interfaces/srv/StageTwoPointTwoExit \
+  "{team: red}"
+```
+
+该独立服务不会自动追加到阶段 2.2 或完整阶段二流程。它使用 Odin 绝对位置伺服，
+先到 `(0,0)` 外推格心，再保持 Y 和 yaw 不变，沿世界负 X 移动
+`exit_x_offset`（默认 `2.9 m`）。红方默认两段目标为
+`(-2.6, -5.4, π)`、`(-5.5, -5.4, π)`；蓝方仅镜像 Y，目标为
+`(-2.6, 5.4, π)`、`(-5.5, 5.4, π)`。格心和离场距离可通过
+`stage_two_point_two.yaml` 中的 `exit_cell_0_0_pose`、`exit_x_offset`
+动态修改。
+
+GUI 的 Step2 区域提供一个由 2.1、2.2 共用的红/蓝方选择器，默认红方；每个阶段
+仍分别提供正常识别和 skip 识别按钮。GUI 会先按所选队伍调用 Odin 重定位，成功后
+再把相同的 `team` 传给阶段服务。红方重定位基准位姿配置在
+`gui_control.yaml` 的 `stage_two_point_one_relocalization_pose` 和
+`stage_two_point_two_relocalization_pose`，蓝方自动镜像其中的 Y。2.1 默认 X
+保持 `5.568`；蓝方默认 Y 为 `(4,3)` 格心的 `+1.8` 再增加 `0.4 m`，即
+`+2.2`，红方对称为 `-2.2`。Step2.2 区域的
+“2.2 后续动作（重定位后执行）”按钮会先按队伍重定位到 `(0,3)` 格心（红方默认
+`(-2.6, -1.8, π)`，蓝方镜像 Y），成功后调用独立离场服务；该重定位基准可通过
+`stage_two_point_two_exit_relocalization_pose` 动态修改。
 
 ### 底盘、里程计与抬升
 
