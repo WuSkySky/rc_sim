@@ -1,0 +1,21 @@
+competition_gui:
+  ros__parameters:
+    # Step1 使用串口里程计重定位；Step2 使用 Odin 重定位。
+    stage_one_relocalization_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    stage_two_relocalization_pose: [5.568, -2.2, 0.0, 0.0, 0.0, 3.141592653589793]
+
+    lift_min: 0.0
+    lift_max: 0.376
+
+    kfs_lift_min: 0.0
+    kfs_lift_max: 0.42
+    root_rotate_min: -0.262
+    root_rotate_max: 2.356194490192345
+    tip_rotate_min: -3.141592653589793
+    tip_rotate_max: 0.0
+    grip_min: 0.0
+    grip_max: 0.209
+    weapon_rotate_min: 0.0
+    weapon_rotate_max: 3.490658503988659
+    weapon_grip_min: 0.0
+    weapon_grip_max: 0.03

@@ -70,7 +70,7 @@ def make_controller():
     controller.config_lock = threading.Lock()
     controller.config = default_config()
     controller.blue_relocalization_pose = (
-        -5.69, 5.53, 0.0, 0.0, 0.0, math.pi)
+        -5.69, 5.53, 0.0, 0.0, 0.0, math.pi / 2.0)
     controller.actions = []
     controller.set_base_pose_client = FakeClient(
         'relocalize', controller.actions)
@@ -86,24 +86,24 @@ def make_controller():
 
 
 @pytest.mark.parametrize(
-    'team, expected_relocalization_y, expected_target_y',
+    'team, expected_relocalization_y, expected_target_y, expected_yaw',
     [
-        (StageThree.Request.BLUE, 5.53, 10.16),
-        (StageThree.Request.RED, -5.53, -10.16),
+        (StageThree.Request.BLUE, 5.53, 10.16, math.pi / 2.0),
+        (StageThree.Request.RED, -5.53, -10.16, -math.pi / 2.0),
     ],
 )
-def test_task_config_mirrors_only_y(
-        team, expected_relocalization_y, expected_target_y):
+def test_task_config_mirrors_y_and_yaw(
+        team, expected_relocalization_y, expected_target_y, expected_yaw):
     controller = make_controller()
 
     config = controller.task_config(team, 3)
 
     assert config['relocalization_pose'] == pytest.approx(
-        (-5.69, expected_relocalization_y, 0.0, 0.0, 0.0, math.pi))
+        (-5.69, expected_relocalization_y, 0.0, 0.0, 0.0, expected_yaw))
     expected_targets = (
-        (-5.29, expected_target_y, math.pi),
-        (-4.75, expected_target_y, math.pi),
-        (-4.21, expected_target_y, math.pi),
+        (-5.29, expected_target_y, expected_yaw),
+        (-4.75, expected_target_y, expected_yaw),
+        (-4.21, expected_target_y, expected_yaw),
     )
     for actual, expected in zip(config['targets'], expected_targets):
         assert actual == pytest.approx(expected)
@@ -245,8 +245,8 @@ def test_service_uses_only_first_two_absolute_targets_for_two_kfs():
         for request in controller.move_to_pose_client.requests
     )
     expected_targets = (
-        (-5.29, -10.16, math.pi),
-        (-4.75, -10.16, math.pi),
+        (-5.29, -10.16, -math.pi / 2.0),
+        (-4.75, -10.16, -math.pi / 2.0),
     )
     for actual, expected in zip(targets, expected_targets):
         assert actual == pytest.approx(expected)

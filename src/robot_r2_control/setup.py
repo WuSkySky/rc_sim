@@ -22,6 +22,7 @@ setup(
                 'config/kfs_loader.yaml',
                 'config/step_traverse.yaml',
                 'config/gui_control.yaml',
+                'config/competition_gui.yaml',
                 'config/alignment.yaml',
             ]),
     ],
@@ -36,6 +37,7 @@ setup(
         'console_scripts': [
             'teleop_control = robot_r2_control.teleop_control:main',
             'gui_control = robot_r2_control.gui_control:main',
+            'competition_gui = robot_r2_control.competition_gui:main',
             'stage_one = robot_r2_control.stage_one:main',
             'stage_two_control = robot_r2_control.stage_two_control:main',
             'stage_two_point_one = robot_r2_control.stage_two_point_one:main',

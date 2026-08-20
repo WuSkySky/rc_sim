@@ -55,7 +55,7 @@ class StageThreeController(Node):
         self.declare_parameter('kfs_lift_timeout_sec', 15.0)
         self.declare_parameter(
             'blue_relocalization_pose',
-            [-5.69, 5.53, 0.0, 0.0, 0.0, math.pi],
+            [-5.69, 5.53, 0.0, 0.0, 0.0, math.pi / 2.0],
         )
         self.declare_parameter('stage_two_exit_endpoint_x', -5.5)
         self.declare_parameter('first_target_x_offset', 0.21)
@@ -235,7 +235,10 @@ class StageThreeController(Node):
         target_y = blue_target_y
         if team == StageThree.Request.RED:
             relocalization_pose[1] = -relocalization_pose[1]
+            relocalization_pose[5] = -relocalization_pose[5]
             target_y = -blue_target_y
+
+        target_yaw = relocalization_pose[5]
 
         first_target_x = (
             config['stage_two_exit_endpoint_x'] +
@@ -245,7 +248,7 @@ class StageThreeController(Node):
             (
                 first_target_x + index * config['target_x_spacing'],
                 target_y,
-                blue_relocalization_pose[5],
+                target_yaw,
             )
             for index in range(loaded_count)
         )

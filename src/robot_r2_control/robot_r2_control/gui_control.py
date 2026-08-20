@@ -14,6 +14,10 @@ from geometry_msgs.msg import Twist
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
+from robot_r2_control.joint_control_gui import (
+    JointControlGuiMixin,
+    JointControlNodeMixin,
+)
 from robot_r2_interfaces.msg import LiftCommand
 from robot_r2_interfaces.srv import (
     Align,
@@ -376,7 +380,7 @@ def make_stage_one_parameter_load_command(config_path):
     return make_parameter_load_command(config_path, '/stage_one')
 
 
-class GuiControlNode(Node):
+class GuiControlNode(JointControlNodeMixin, Node):
     CMD_VEL_TOPIC = '/r2/cmd_vel'
     MOVE_RELATIVE_SERVICE = '/r2/move_relative'
     KFS_ALIGNMENT_SERVICE = '/r2/align_to_kfs'
@@ -390,7 +394,7 @@ class GuiControlNode(Node):
     STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
     STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
     STAGE_THREE_SERVICE = '/r2/stage_three'
-    LIFT_COMMAND_TOPIC = '/r2/lift/cmd_lift'
+    LIFT_COMMAND_TOPIC = JointControlNodeMixin.LIFT_COMMAND_TOPIC
 
     # Step2 测试重定位位姿：base_link 在 map 中的目标位姿
     # （x, y, z, roll, pitch, yaw）；yaw=pi 使车头朝 -x，面向梅林区。
@@ -406,13 +410,8 @@ class GuiControlNode(Node):
     STEP_TWO_POINT_TWO_EXIT_RELOCALIZATION_DEFAULT = (
         -2.6, -1.8, 0.0, 0.0, 0.0, math.pi)
 
-    KFS_LOAD_MOTOR_FEEDBACK_TOPICS = {
-        'root_rotate': '/r2/gripper/rotate_feedback',
-        'tip_rotate': '/r2/gripper/tip_rotate_feedback',
-        'grip': '/r2/gripper/grip_feedback',
-        'weapon_rotate': '/r2/weapon/rotate_feedback',
-        'weapon_grip': '/r2/weapon/grip_feedback',
-    }
+    KFS_LOAD_MOTOR_FEEDBACK_TOPICS = (
+        JointControlNodeMixin.KFS_LOAD_MOTOR_FEEDBACK_TOPICS)
 
     # GUI 中可从工作区 src 源码直接加载参数的 Step2 相关节点。
     STEP_TWO_PARAMETER_LOAD_TARGETS = {
@@ -436,38 +435,7 @@ class GuiControlNode(Node):
         },
     }
 
-    FLOAT_CONTROL_PARAMETERS = {
-        'kfs_lift': {
-            'topic': '/r2/kfs_lift/cmd',
-            'minimum': ('kfs_lift_min', 0.0),
-            'maximum': ('kfs_lift_max', 0.42),
-        },
-        'root_rotate': {
-            'topic': '/r2/gripper/rotate_cmd',
-            'minimum': ('root_rotate_min', -0.262),
-            'maximum': ('root_rotate_max', 2.356194490192345),
-        },
-        'tip_rotate': {
-            'topic': '/r2/gripper/tip_rotate_cmd',
-            'minimum': ('tip_rotate_min', -math.pi),
-            'maximum': ('tip_rotate_max', 0.0),
-        },
-        'grip': {
-            'topic': '/r2/gripper/grip_cmd',
-            'minimum': ('grip_min', 0.0),
-            'maximum': ('grip_max', 0.209),
-        },
-        'weapon_rotate': {
-            'topic': '/r2/weapon/rotate_cmd',
-            'minimum': ('weapon_rotate_min', 0.0),
-            'maximum': ('weapon_rotate_max', math.radians(200.0)),
-        },
-        'weapon_grip': {
-            'topic': '/r2/weapon/grip_cmd',
-            'minimum': ('weapon_grip_min', 0.0),
-            'maximum': ('weapon_grip_max', 0.03),
-        },
-    }
+    FLOAT_CONTROL_PARAMETERS = JointControlNodeMixin.FLOAT_CONTROL_PARAMETERS
 
     MOTION_PARAMETER_DEFAULTS = {
         'motion_publish_rate': 20.0,
@@ -793,31 +761,21 @@ class GuiControlNode(Node):
                 dict(self.motion_config),
             )
 
+    def get_joint_range_snapshot(self):
+        generation, lift_min, lift_max, ranges, _ = self.get_range_snapshot()
+        return generation, lift_min, lift_max, ranges
+
     def publish_lift_command(self, front_lift, rear_lift):
-        command = LiftCommand()
-        command.front_lift = float(front_lift)
-        command.rear_lift = float(rear_lift)
-        self.lift_command_publisher.publish(command)
+        return super().publish_lift_command(front_lift, rear_lift)
 
     def publish_float_command(self, control_name, value):
-        command = Float64()
-        command.data = float(value)
-        self.float_command_publishers[control_name].publish(command)
+        return super().publish_float_command(control_name, value)
 
     def _on_kfs_load_motor_feedback(self, motor_name, message):
-        value = float(message.data)
-        if not math.isfinite(value):
-            return
-        with self.state_lock:
-            self.kfs_load_motor_feedback[motor_name] = value
-            self.kfs_load_feedback_generation += 1
+        return super()._on_kfs_load_motor_feedback(motor_name, message)
 
     def get_kfs_load_feedback_snapshot(self):
-        with self.state_lock:
-            return (
-                self.kfs_load_feedback_generation,
-                dict(self.kfs_load_motor_feedback),
-            )
+        return super().get_kfs_load_feedback_snapshot()
 
     @staticmethod
     def _make_twist(x=0.0, y=0.0, yaw=0.0):
@@ -2043,59 +2001,10 @@ class GuiControlNode(Node):
         return events
 
 
-class GuiControlApp:
-    KFS_CONTROLS = (
-        {
-            'name': 'kfs_lift',
-            'label': 'KFS 升降',
-            'unit': 'm',
-            'resolution': 0.001,
-            'decimals': 3,
-        },
-        {
-            'name': 'root_rotate',
-            'label': '夹爪根部旋转',
-            'unit': 'rad',
-            'resolution': 0.001,
-            'decimals': 3,
-        },
-        {
-            'name': 'tip_rotate',
-            'label': '夹爪尖端旋转（0 初始，工作方向为负）',
-            'unit': 'rad',
-            'resolution': 0.001,
-            'decimals': 3,
-            'reverse_slider': True,
-        },
-        {
-            'name': 'grip',
-            'label': '夹爪开度（0 为闭合）',
-            'unit': 'm',
-            'resolution': 0.001,
-            'decimals': 3,
-        },
-    )
-    WEAPON_CONTROLS = (
-        {
-            'name': 'weapon_rotate',
-            'label': '武器夹爪旋转',
-            'unit': '°',
-            'resolution': 1.0,
-            'decimals': 0,
-            'to_display': math.degrees,
-            'to_command': math.radians,
-        },
-        {
-            'name': 'weapon_grip',
-            'label': '武器夹爪开合',
-            'unit': 'cm',
-            'resolution': 0.1,
-            'decimals': 1,
-            'to_display': lambda value: value * 100.0,
-            'to_command': lambda value: value / 100.0,
-        },
-    )
-    FLOAT_CONTROLS = KFS_CONTROLS + WEAPON_CONTROLS
+class GuiControlApp(JointControlGuiMixin):
+    KFS_CONTROLS = JointControlGuiMixin.KFS_CONTROLS
+    WEAPON_CONTROLS = JointControlGuiMixin.WEAPON_CONTROLS
+    FLOAT_CONTROLS = JointControlGuiMixin.FLOAT_CONTROLS
 
     def __init__(self, node):
         self.node = node
@@ -2104,18 +2013,7 @@ class GuiControlApp:
         self.root.resizable(False, False)
         self.root.protocol('WM_DELETE_WINDOW', self.close)
 
-        self.front_lift_value = tk.DoubleVar(value=node.lift_min)
-        self.rear_lift_value = tk.DoubleVar(value=node.lift_min)
-        self.combined_lift_value = tk.DoubleVar(value=node.lift_min)
-        self.float_control_values = {}
-        for control in self.FLOAT_CONTROLS:
-            control_name = control['name']
-            self.float_control_values[control_name] = tk.DoubleVar(
-                value=0.0)
-        self.kfs_load_feedback_text = {
-            name: tk.StringVar(value='实际反馈：尚未收到')
-            for name in self.node.KFS_LOAD_MOTOR_FEEDBACK_TOPICS
-        }
+        self.initialize_joint_ui()
         self.relocalization_values = {
             name: tk.StringVar(value='0.0')
             for name in RELOCALIZATION_FIELDS
@@ -2128,6 +2026,7 @@ class GuiControlApp:
         self.last_float_commands = {}
         self.last_config_generation = -1
         self.last_kfs_load_feedback_generation = -1
+        self.joint_control_widgets = []
         self.last_chassis_busy = None
         self.last_kfs_action_busy = None
         self.last_kfs_parameter_load_busy = None
@@ -2509,27 +2408,7 @@ class GuiControlApp:
             pady=(8, 0),
         )
 
-        lift_frame = ttk.LabelFrame(
-            mechanism_column, text='底盘抬升', padding=12)
-        lift_frame.grid(row=0, column=0, sticky='ew')
-        self.front_lift_slider = self._create_slider(
-            lift_frame, 0, '前轮抬升 (m)', self.front_lift_value,
-            self.node.lift_min, self.node.lift_max, 0.001,
-            self._publish_lift_command)
-        self.rear_lift_slider = self._create_slider(
-            lift_frame, 1, '后轮抬升 (m)', self.rear_lift_value,
-            self.node.lift_min, self.node.lift_max, 0.001,
-            self._publish_lift_command)
-        self.combined_lift_slider = self._create_slider(
-            lift_frame, 2, '一起抬升 (m)', self.combined_lift_value,
-            self.node.lift_min, self.node.lift_max, 0.001,
-            self._publish_combined_lift_command)
-
-        self.float_control_sliders = {}
-        self._create_control_frame(
-            mechanism_column, 1, 'KFS 机构', self.KFS_CONTROLS)
-        self._create_control_frame(
-            mechanism_column, 2, '武器机构', self.WEAPON_CONTROLS)
+        self.build_joint_controls(mechanism_column)
 
         status_label = ttk.Label(
             main_frame, textvariable=self.status_text, anchor='w')
@@ -2537,64 +2416,23 @@ class GuiControlApp:
             row=1, column=0, columnspan=3, sticky='ew', pady=(8, 0))
 
     def _create_control_frame(self, parent, row, title, controls):
-        frame = ttk.LabelFrame(parent, text=title, padding=8)
-        frame.grid(row=row, column=0, sticky='ew', pady=(6, 0))
-        control_row = 0
-        for control in controls:
-            control_name = control['name']
-            minimum, maximum = self.node.float_control_ranges[control_name]
-            to_display = control.get('to_display', float)
-            slider_start = to_display(minimum)
-            slider_end = to_display(maximum)
-            if control.get('reverse_slider', False):
-                slider_start, slider_end = slider_end, slider_start
-            self.float_control_sliders[control_name] = self._create_slider(
-                frame,
-                control_row,
-                f"{control['label']} ({control['unit']})",
-                self.float_control_values[control_name],
-                slider_start,
-                slider_end,
-                control['resolution'],
-                partial(self._publish_float_command, control_name),
-            )
-            control_row += 1
-            if control_name in self.kfs_load_feedback_text:
-                feedback_label = ttk.Label(
-                    frame,
-                    textvariable=self.kfs_load_feedback_text[control_name],
-                    anchor='e',
-                )
-                feedback_label.grid(
-                    row=control_row,
-                    column=0,
-                    sticky='ew',
-                    pady=(0, 4),
-                )
-                control_row += 1
+        return super()._create_control_frame(parent, row, title, controls)
 
     @staticmethod
     def _create_slider(
         parent, row, label, variable, minimum, maximum, resolution,
         release_callback,
     ):
-        slider = tk.Scale(
+        return JointControlGuiMixin._create_slider(
             parent,
-            label=label,
-            variable=variable,
-            from_=minimum,
-            to=maximum,
-            resolution=resolution,
-            orient=tk.HORIZONTAL,
-            length=300,
-            showvalue=True,
-            digits=4,
+            row,
+            label,
+            variable,
+            minimum,
+            maximum,
+            resolution,
+            release_callback,
         )
-        slider.grid(row=row, column=0, sticky='ew', pady=(0, 2))
-        slider.bind('<ButtonRelease-1>', release_callback)
-        for key_name in ('Left', 'Right', 'Up', 'Down', 'Home', 'End'):
-            slider.bind(f'<KeyRelease-{key_name}>', release_callback)
-        return slider
 
     def _on_key_press(self, event):
         if isinstance(event.widget, (tk.Entry, ttk.Entry)):
@@ -2738,65 +2576,18 @@ class GuiControlApp:
         self.status_text.set(message)
 
     def _publish_lift_command(self, _event=None):
-        targets = (
-            round(self.front_lift_value.get(), 3),
-            round(self.rear_lift_value.get(), 3),
-        )
-        if targets == self.last_lift_command:
-            self.status_text.set('底盘抬升目标值未变化')
-            return
-        self.node.publish_lift_command(*targets)
-        self.last_lift_command = targets
-        self.status_text.set(
-            f'已发送：前 {targets[0]:.3f} m，后 {targets[1]:.3f} m')
+        return super()._publish_lift_command(_event)
 
     def _publish_combined_lift_command(self, _event=None):
-        target = round(self.combined_lift_value.get(), 3)
-        self.front_lift_value.set(target)
-        self.rear_lift_value.set(target)
-        self.node.publish_lift_command(target, target)
-        self.last_lift_command = (target, target)
-        self.status_text.set(f'已发送：前后均为 {target:.3f} m')
+        return super()._publish_combined_lift_command(_event)
 
     def _publish_float_command(self, control_name, _event=None):
-        control = next(
-            item for item in self.FLOAT_CONTROLS
-            if item['name'] == control_name)
-        decimals = control['decimals']
-        display_target = round(
-            self.float_control_values[control_name].get(), decimals)
-        if self.last_float_commands.get(control_name) == display_target:
-            self.status_text.set(f"{control['label']}目标值未变化")
-            return
-        to_command = control.get('to_command', float)
-        self.node.publish_float_command(
-            control_name, to_command(display_target))
-        self.last_float_commands[control_name] = display_target
-        self.status_text.set(
-            f"已发送：{control['label']} "
-            f"{display_target:.{decimals}f} {control['unit']}")
+        return super()._publish_float_command(control_name, _event)
 
     def _sync_dynamic_ranges(self):
-        generation, lift_min, lift_max, ranges, motion_config = (
-            self.node.get_range_snapshot())
-        if generation == self.last_config_generation:
+        if not self.sync_joint_ranges():
             return
-        self.last_config_generation = generation
-        for slider in (
-            self.front_lift_slider,
-            self.rear_lift_slider,
-            self.combined_lift_slider,
-        ):
-            slider.configure(from_=lift_min, to=lift_max)
-        for control in self.FLOAT_CONTROLS:
-            minimum, maximum = ranges[control['name']]
-            to_display = control.get('to_display', float)
-            slider_start = to_display(minimum)
-            slider_end = to_display(maximum)
-            if control.get('reverse_slider', False):
-                slider_start, slider_end = slider_end, slider_start
-            self.float_control_sliders[control['name']].configure(
-                from_=slider_start, to=slider_end)
+        motion_config = self.node.get_range_snapshot()[4]
         control_text = motion_control_text(motion_config)
         self.keyboard_hint.configure(text=control_text['keyboard_hint'])
         for kind, button in self.velocity_test_buttons.items():
@@ -2810,23 +2601,7 @@ class GuiControlApp:
             text=control_text['tip_alignment'])
 
     def _sync_kfs_load_feedback(self):
-        generation, feedback = (
-            self.node.get_kfs_load_feedback_snapshot())
-        if generation == self.last_kfs_load_feedback_generation:
-            return
-        self.last_kfs_load_feedback_generation = generation
-        controls = {item['name']: item for item in self.FLOAT_CONTROLS}
-        for name, text_variable in self.kfs_load_feedback_text.items():
-            value = feedback[name]
-            if value is None:
-                text_variable.set('实际反馈：尚未收到')
-                continue
-            control = controls[name]
-            display_value = control.get('to_display', float)(value)
-            decimals = control['decimals']
-            text_variable.set(
-                f"实际反馈：{display_value:.{decimals}f} "
-                f"{control['unit']}")
+        return self.sync_joint_feedback()
 
     def _poll_ros(self):
         if self._closed:
