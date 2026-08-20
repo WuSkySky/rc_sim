@@ -88,7 +88,7 @@ def make_controller():
     controller.release_timeout_sec = 70.0
     controller.dependency_timeout_sec = 2.0
     controller.higher_kfs_edge_offset = 0.2
-    controller.lower_kfs_edge_offset = 0.4
+    controller.lower_kfs_edge_offset = 0.35
     controller.release_edge_offset = 0.2
     controller.detection_sample_count = 10
     controller.mode = StageTwoPointTwo.Request.STANDARD
@@ -415,7 +415,7 @@ def test_route_pickup_preserves_alignment_and_load_modes(
     'current, target, expected_offset',
     [
         ((4, 2), (4, 1), 0.2),
-        ((3, 2), (3, 1), 0.4),
+        ((3, 2), (3, 1), 0.35),
     ],
 )
 def test_pickup_approaches_high_and_low_kfs_relative_to_aligned_pose(

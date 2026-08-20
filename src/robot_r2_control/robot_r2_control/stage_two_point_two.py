@@ -72,7 +72,7 @@ class StageTwoPointTwoController(Node):
         self.declare_parameter('terminal_forward_index', 0)
         self.declare_parameter('chassis_front_offset', 0.35)
         self.declare_parameter('higher_kfs_edge_offset', 0.2)
-        self.declare_parameter('lower_kfs_edge_offset', 0.4)
+        self.declare_parameter('lower_kfs_edge_offset', 0.35)
         self.declare_parameter('release_edge_offset', 0.2)
         self.declare_parameter('detection_sample_count', 10)
         self.declare_parameter(

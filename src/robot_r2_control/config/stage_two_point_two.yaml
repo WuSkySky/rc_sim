@@ -29,7 +29,7 @@
     chassis_front_offset: 0.35
     # 视觉对齐后使用 Odin 相对坐标向 KFS 前进的距离。
     higher_kfs_edge_offset: 0.20
-    lower_kfs_edge_offset: 0.40
+    lower_kfs_edge_offset: 0.35
     release_edge_offset: 0.20
 
     # 2.2 后续离场动作：蓝方 (0,0) 外推格心与沿世界负 X 的移动距离。
