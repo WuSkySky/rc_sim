@@ -23,7 +23,7 @@ class StageTwoController(Node):
     ENTRY_FORWARD_INDEX = 4
     GRID_FORWARD_INDICES = frozenset((1, 2, 3, 4))
     GRID_LATERAL_INDICES = frozenset((1, 2, 3))
-    POINT_ONE_ORDER = (3, 1, 2)
+    POINT_ONE_ORDER = (2, 1, 3)
     TIMEOUT_PARAMETERS = (
         'dependency_timeout_sec',
         'stage_two_point_one_timeout_sec',

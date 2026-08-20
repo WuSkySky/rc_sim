@@ -116,6 +116,20 @@ def test_get_cell_keeps_blue_and_mirrors_red(team, expected_y):
         (3.4, expected_y, 0.0))
 
 
+def test_red_get_cell_validates_the_mirrored_height_cell():
+    controller = make_controller()
+    controller.team = StageTwoPointTwo.Request.RED
+    heights = list(controller.cell_heights)
+    heights[3 * len(controller.lateral_y)] = float('nan')
+    controller.cell_heights = tuple(heights)
+
+    # 红方 lane 1 映射到蓝方基准 lane 3，该格仍可通行。
+    assert controller.get_cell((3, 1)) == pytest.approx((1.0, 1.8, 3.0))
+    # 红方 lane 3 映射到刚设为 NaN 的蓝方基准 lane 1。
+    with pytest.raises(ValueError, match=r'cell \(3, 3\) is not traversable'):
+        controller.get_cell((3, 3))
+
+
 def test_invalid_team_is_rejected():
     with pytest.raises(ValueError, match='team must be red or blue'):
         StageTwoPointTwoController.validate_team('green')

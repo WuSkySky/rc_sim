@@ -26,7 +26,7 @@ KFS_ACTION_SERVICE = '/r2/kfs/action'
 
 class StageTwoPointOneController(Node):
     KFS_TRUE_CLASS = 'true'
-    DEFAULT_ROUTE = (3, 1, 2)
+    DEFAULT_ROUTE = (2, 1, 3)
     HIGH_CELLS = frozenset((1, 3))
 
     def __init__(self):

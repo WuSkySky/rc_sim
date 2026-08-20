@@ -920,7 +920,7 @@ def test_stage_two_point_one_route_is_forwarded_after_relocalization():
 
 @pytest.mark.parametrize(
     'raw, expected',
-    [('3,1,2', (3, 1, 2)), (' 1, 3 ', (1, 3))],
+    [('2,1,3', (2, 1, 3)), (' 1, 3 ', (1, 3))],
 )
 def test_parse_stage_two_point_one_route(raw, expected):
     assert parse_stage_two_point_one_route(raw) == expected

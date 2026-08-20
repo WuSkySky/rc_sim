@@ -307,7 +307,7 @@ def parse_relocalization_values(raw_values):
 def parse_stage_two_point_one_route(raw_value):
     parts = [part.strip() for part in str(raw_value).split(',')]
     if not parts or any(not part for part in parts):
-        raise ValueError('2.1 路线不能为空，格式示例：3,1,2')
+        raise ValueError('2.1 路线不能为空，格式示例：2,1,3')
     try:
         route = tuple(int(part) for part in parts)
     except ValueError as exc:
@@ -2147,7 +2147,7 @@ class GuiControlApp(JointControlGuiMixin):
             for name in RELOCALIZATION_FIELDS
         }
         self.team_value = tk.StringVar(value=StageOne.Request.RED)
-        self.stage_two_point_one_route_value = tk.StringVar(value='3,1,2')
+        self.stage_two_point_one_route_value = tk.StringVar(value='2,1,3')
         self.status_text = tk.StringVar(value='已就绪')
 
         self.last_lift_command = None

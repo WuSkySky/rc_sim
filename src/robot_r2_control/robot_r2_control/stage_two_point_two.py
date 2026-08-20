@@ -404,14 +404,18 @@ class StageTwoPointTwoController(Node):
         return SetParametersResult(successful=True)
 
     @staticmethod
-    def validate_grid_index(index, forward_x, lateral_y, cell_heights):
+    def grid_height_index(index, forward_x, lateral_y):
         forward_index, lateral_index = index
         if not 0 <= forward_index < len(forward_x):
             raise ValueError(f'forward index {forward_index} is invalid')
         lateral_offset = lateral_index - 1
         if not 0 <= lateral_offset < len(lateral_y):
             raise ValueError(f'lateral index {lateral_index} is invalid')
-        height_index = forward_index * len(lateral_y) + lateral_offset
+        return forward_index * len(lateral_y) + lateral_offset
+
+    @classmethod
+    def validate_grid_index(cls, index, forward_x, lateral_y, cell_heights):
+        height_index = cls.grid_height_index(index, forward_x, lateral_y)
         if not math.isfinite(cell_heights[height_index]):
             raise ValueError(f'cell {index} is not traversable')
 
@@ -421,24 +425,26 @@ class StageTwoPointTwoController(Node):
             lateral_y = self.lateral_y
             cell_heights = self.cell_heights
             team = self.team
-        self.validate_grid_index(
-            index, forward_x, lateral_y, cell_heights)
+        self.validate_team(team)
         forward_index, lateral_index = index
-        lateral_offset = lateral_index - 1
-        if team == StageTwoPointTwo.Request.BLUE:
-            # 蓝方（负 Y 基准）直接使用基准坐标。
-            height_index = forward_index * len(lateral_y) + lateral_offset
-            return (
-                forward_x[forward_index],
-                lateral_y[lateral_offset],
-                cell_heights[height_index],
-            )
-        # 红方为蓝方的完整镜像：lane 编号取反且 Y 取反，高度布局随之镜像。
-        mirrored_offset = len(lateral_y) - 1 - lateral_offset
-        height_index = forward_index * len(lateral_y) + mirrored_offset
+        # 先校验请求索引的范围，再按队伍将它映射到蓝方基准网格。
+        self.grid_height_index(index, forward_x, lateral_y)
+        mapped_lateral_index = lateral_index
+        if team == StageTwoPointTwo.Request.RED:
+            mapped_lateral_index = len(lateral_y) + 1 - lateral_index
+        mapped_index = (forward_index, mapped_lateral_index)
+        height_index = self.grid_height_index(
+            mapped_index, forward_x, lateral_y)
+        if not math.isfinite(cell_heights[height_index]):
+            raise ValueError(f'cell {index} is not traversable')
+
+        lateral_offset = mapped_lateral_index - 1
+        y = lateral_y[lateral_offset]
+        if team == StageTwoPointTwo.Request.RED:
+            y = -y
         return (
             forward_x[forward_index],
-            -lateral_y[mirrored_offset],
+            y,
             cell_heights[height_index],
         )
 

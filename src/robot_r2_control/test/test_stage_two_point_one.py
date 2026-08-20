@@ -101,8 +101,8 @@ def test_invalid_team_is_rejected():
 @pytest.mark.parametrize(
     'mode, route, loaded_count, expected',
     [
-        (StageTwoPointOne.Request.STANDARD, [], 0, (3, 1, 2)),
-        (StageTwoPointOne.Request.SKIP, [], 0, (3, 1, 2)),
+        (StageTwoPointOne.Request.STANDARD, [], 0, (2, 1, 3)),
+        (StageTwoPointOne.Request.SKIP, [], 0, (2, 1, 3)),
         (StageTwoPointOne.Request.ROUTE, [1, 3], 0, (1, 3)),
     ],
 )

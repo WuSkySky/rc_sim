@@ -122,7 +122,7 @@ def test_route_splits_entry_kfs_from_remaining_grid():
         ))
 
     assert move_cells == ((4, 2), (3, 2), (2, 2), (1, 2), (1, 1))
-    assert point_one_route == (3, 1, 2)
+    assert point_one_route == (2, 1, 3)
     assert point_two_loads == ((1, 1), (2, 3))
 
 
