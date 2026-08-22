@@ -7,7 +7,8 @@
 
 ```bash
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-ignore robot_r2_detect_cpp
+colcon build --symlink-install --packages-ignore robot_r2_detect_cpp mipi_camera
+colcon build --symlink-install --packages-ignore robot_r2_detect_cpp mipi_camera yahboom_camera
 source install/setup.bash
 ```
 
