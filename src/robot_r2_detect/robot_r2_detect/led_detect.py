@@ -113,7 +113,7 @@ class LedDetectNode(AbortableMixin, Node):
         self.declare_parameter("visualization_enabled", False)
         self.declare_parameter("continuous_detection", False)
         self.declare_parameter("stable_match_frames", 5)
-        self.declare_parameter("service_timeout_sec", 30.0)
+        self.declare_parameter("service_timeout_sec", 180.0)
         self.declare_parameter("aruco_dictionary", "DICT_4X4_50")
         self.declare_parameter("target_marker_id", 4)
         self.declare_parameter("marker_size_mm", 100.0)

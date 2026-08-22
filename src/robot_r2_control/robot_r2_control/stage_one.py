@@ -89,7 +89,7 @@ PARAMETER_DEFAULTS = {
     'lift_timeout_sec': 15.0,
     'alignment_timeout_sec': 15.0,
     'weapon_timeout_sec': 10.0,
-    'led_detection_timeout_sec': 32.0,
+    'led_detection_timeout_sec': 182.0,
 }
 
 
