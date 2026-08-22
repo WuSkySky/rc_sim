@@ -31,26 +31,30 @@ source install/setup.bash
 ros2 launch bringup gui_control.launch.py
 ```
 
-正式比赛 GUI 只提供 Step1、Step2、Step3 启动和手动关节控制，不包含调试、
-重定位或参数写入按钮。通过独立可执行文件启动：
+正式比赛 GUI 提供待执行阶段选择、任务配置和手动关节控制，不包含调试、重定位
+或参数写入按钮。通过独立可执行文件启动：
 
 ```bash
 ros2 run robot_r2_control competition_gui
 ```
 
-正式 GUI 左栏选择红/蓝方并配置任务。Step2 固定使用路线模式：两个 4 行×3 列
+正式 GUI 左栏使用 Step1、Step2、Step3 三选一选择待执行阶段，并选择红/蓝方、
+配置任务。选择本身不会执行阶段；`real1.launch.py` 常驻的 `all_step_control`
+收到 `/r2/serial/button` 的物理按钮按下状态后才启动当前阶段。未运行 GUI 时，
+总控默认准备红方 Step1。Step2 固定使用路线模式：两个 4 行×3 列
 矩阵分别表示移动路线和需要 Load 的 KFS。矩阵上方明确标注出口、下方明确标注
 入口，不显示服务内部的格子坐标或索引；路线格按点击顺序显示“第 N 步”，KFS
 格只显示“KFS”。每个矩阵均可独立清空。Step2 成功返回 `loaded_count=1..3` 时
-会自动更新 Step3 的 KFS 数量。任一阶段运行期间，其他启动、配置和手动关节
+会自动更新 Step3 的 KFS 数量。任一阶段运行期间，其他阶段选择、配置和手动关节
 控件均会暂时禁用。手动关节范围集中在
 `robot_r2_control/config/competition_gui.yaml`，也支持运行时动态修改。
 
-正式 GUI 的 Step1 会先调用 `/r2/set_base_pose`，默认重定位到
-`(0,0,0,0,0,0)`；Step2 会先调用 `/r2/set_base_pose_odin`，默认使用蓝方基准
-`(5.568,-2.2,0,0,0,π)`，红方将 Y 镜像为 `+2.2`。重定位成功后才会调用
-对应阶段服务。两个六维位姿与关节范围一起配置在 `competition_gui.yaml`，支持
-运行时动态修改；Step3 仍由阶段节点自身完成重定位。
+总控执行 Step1 时先调用 `/r2/set_base_pose`，默认重定位到
+`(0,0,0,0,0,0)`；执行 Step2 时先调用 `/r2/set_base_pose_odin`，默认使用蓝方
+基准 `(5.568,-2.2,0,0,0,π)`，红方将 Y 镜像为 `+2.2`。重定位成功后才会调用
+对应阶段服务。按钮屏蔽时间和两个六维位姿集中在
+`robot_r2_control/config/all_step_control.yaml`，支持运行时动态修改；Step3 仍由
+阶段节点自身完成重定位。
 
 矩阵坐标始终采用用户面对场地的固定视角：出口在上、入口在下，屏幕左、右
 就是实际场地的左、右。切换队伍不会移动或清空已经选择的格子。GUI 对两队都直接
@@ -137,6 +141,7 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 阶段 2.2     | `/r2/stage_two_point_two`    | `robot_r2_interfaces/srv/StageTwoPointTwo`    | 仿真、实机 |
 | 阶段 2.2 后续离场 | `/r2/stage_two_point_two_exit` | `robot_r2_interfaces/srv/StageTwoPointTwoExit` | 仿真、实机 |
 | 阶段 3       | `/r2/stage_three`            | `robot_r2_interfaces/srv/StageThree`          | 仿真、实机 |
+| 配置物理按钮待执行阶段 | `/r2/all_step/configure`      | `robot_r2_interfaces/srv/ConfigureAllStep`    | 仅实机   |
 | 底盘绝对位置伺服   | `/r2/move_to_pose`           | `robot_r2_interfaces/srv/MoveToPose`          | 仿真、实机 |
 | 底盘相对位置伺服   | `/r2/move_relative`          | `robot_r2_interfaces/srv/MoveRelative`        | 仿真、实机 |
 | 重置或设置里程计位姿 | `/r2/set_base_pose`          | `robot_r2_interfaces/srv/SetBasePose`         | 仅实机   |
@@ -180,6 +185,9 @@ ros2 topic pub --once /r2/system/abort std_msgs/msg/Empty "{}"
 斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向。转向完成后调用
 `/r2/led_detection/detect`，只有 LED 状态连续稳定匹配请求目标并返回成功，才会
 松开武器夹爪；检测失败、服务不可用或等待超时时保持夹持并令 Step1 返回失败。
+端头视觉对齐如果返回 `Alignment timeout:` 超时结果，Step1 会记录警告并继续执行
+剩余动作；最终 `message` 会包含该超时信息。对齐服务不可用、被中止或其他非超时
+错误仍会令 Step1 失败。
 初始左右/前后位置伺服与端头旋转、夹爪张开同时执行，三者全部完成后才继续。
 夹爪闭合后，底盘会在当前工作高度基础上再向上抬升
 `action_8_lift_increment_m`（默认 `0.03 m`）并将武器旋转到最终角度，再使用
@@ -510,8 +518,9 @@ ros2 param set /tip_alignment reverse_direction false
 
 real1 还会启动使用相同基础参数的 `/tip_alignment` 实例。它订阅
 `/r2/tip/roi`，通过 `/r2/align_to_tip` 提供端头对齐服务，并将速度输出映射到
-`/r2/cmd_vel`。该实例默认设置 `reverse_direction: true`，KFS 和仿真实例则默认
-为 `false`。例如：
+`/r2/cmd_vel`。该实例通过 `tip_alignment.yaml` 设置
+`reverse_direction: true`，并将横向最大速度单独限制为 `0.075 m/s`（基础配置
+`0.1 m/s` 的 75%）；KFS 和仿真实例仍使用基础速度配置。例如：
 
 ```bash
 ros2 service call /r2/align_to_tip \
@@ -677,15 +686,19 @@ ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
 
 ## 串口协议
 
-串口默认使用 `115200 8N1`。下发和反馈均为固定 46 字节帧：
+串口默认使用 `115200 8N1`。命令帧和反馈帧长度不同：
 
 ```text
-0xAA | 11 × IEEE 754 binary32 | 0x55
+TX（46 字节）：0xAA | 11 × IEEE 754 binary32 | 0x55
+RX（59 字节）：0xAA | 14 × IEEE 754 binary32 | button | 0x55
 ```
 
 - 字节 `0`：帧头 `0xAA`
-- 字节 `1~44`：11 个连续的 32 位浮点数，无填充
-- 字节 `45`：帧尾 `0x55`
+- TX 字节 `1~44`：11 个连续的控制字段，无填充
+- TX 字节 `45`：帧尾 `0x55`
+- RX 字节 `1~56`：14 个连续的反馈字段，无填充
+- RX 字节 `57`：物理按钮，`1` 表示按下，`0` 表示抬起
+- RX 字节 `58`：帧尾 `0x55`
 - 浮点数字节序由 `float_endianness` 配置，当前为小端
 - 线位移、线速度使用米和米每秒，角度、角速度使用弧度和弧度每秒
 
@@ -705,6 +718,9 @@ ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
 | 8   | 33~36 | `kfs_grip`        | KFS 夹爪目标开度（0 闭合） | KFS 夹爪实际开度（0 闭合） | m     |
 | 9   | 37~40 | `weapon_rotate`   | 武器目标角度       | 武器实际角度       | rad   |
 | 10  | 41~44 | `weapon_grip`     | 武器目标开合位置     | 武器实际开合位置     | m     |
+| 11  | 45~48 | `odometry_x`      | TX 中不存在         | 下位机里程计 X       | m     |
+| 12  | 49~52 | `odometry_y`      | TX 中不存在         | 下位机里程计 Y       | m     |
+| 13  | 53~56 | `odometry_yaw`    | TX 中不存在         | 下位机里程计偏航角    | rad   |
 
 
 ### 1. 上位机到下位机：命令协议
@@ -717,7 +733,8 @@ ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
 
 ### 2. 下位机到上位机：反馈协议
 
-下位机按相同字段顺序返回完整反馈帧。串口节点校验帧头、固定长度、帧尾和浮点数有效性后，发布以下反馈话题：
+下位机按相同浮点字段顺序返回反馈帧，并在帧尾前追加按钮字节。串口节点校验帧头、
+59 字节固定长度、帧尾、按钮值和浮点数有效性后，发布以下反馈话题：
 
 
 | 反馈内容       | ROS 2 话题                          | 消息类型                                   |
@@ -730,6 +747,11 @@ ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
 | KFS 夹爪开合位置 | `/r2/gripper/grip_feedback`       | `std_msgs/msg/Float64`                 |
 | 武器角度       | `/r2/weapon/rotate_feedback`      | `std_msgs/msg/Float64`                 |
 | 武器开合位置     | `/r2/weapon/grip_feedback`        | `std_msgs/msg/Float64`                 |
+| 物理按钮状态     | `/r2/serial/button`               | `std_msgs/msg/Bool`                    |
+
+`all_step_control` 对第一次按下启动 5 秒屏蔽；5 秒后若阶段仍在执行则继续忽略，
+阶段空闲后恢复检测。恢复后收到的下一条 `1` 可以再次执行当前所选阶段。总控状态发布
+在 `/r2/all_step/status`（`robot_r2_interfaces/msg/AllStepStatus`）。
 
 
 协议只反馈前、后两组抬升位置，因此发布 `LiftFeedback` 时同一组左右轮使用相同值。原始反馈帧同时发布到：
@@ -737,6 +759,10 @@ ros2 service call /simulation/reset_kfs std_srvs/srv/Trigger "{}"
 ```text
 /r2/serial/raw_rx  std_msgs/msg/String
 ```
+
+串口无法打开时，节点在本轮连续失败的第一次 WARN 中发布一次
+`/r2/system/abort`，后续重连失败不会重复发布。串口成功打开后会重新武装；如果之后
+再次断开且无法打开，则会为新一轮故障再发布一次中止消息。
 
 ## 调试
 

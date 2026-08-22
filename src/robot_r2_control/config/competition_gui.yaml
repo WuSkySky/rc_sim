@@ -1,9 +1,5 @@
 competition_gui:
   ros__parameters:
-    # Step1 使用串口里程计重定位；Step2 使用 Odin 重定位。
-    stage_one_relocalization_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    stage_two_relocalization_pose: [5.568, -2.2, 0.0, 0.0, 0.0, 3.141592653589793]
-
     lift_min: 0.0
     lift_max: 0.376
 

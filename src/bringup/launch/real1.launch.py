@@ -114,6 +114,18 @@ def generate_launch_description():
         output='screen',
     )
 
+    all_step_config = os.path.join(
+        control_pkg,
+        'config',
+        'all_step_control.yaml',
+    )
+    all_step_control = Node(
+        package='robot_r2_control',
+        executable='all_step_control',
+        parameters=[all_step_config],
+        output='screen',
+    )
+
     odometry_tf_config = os.path.join(
         serial_pkg,
         'config',
@@ -131,6 +143,11 @@ def generate_launch_description():
         'config',
         'alignment.yaml',
     )
+    tip_alignment_config = os.path.join(
+        control_pkg,
+        'config',
+        'tip_alignment.yaml',
+    )
     kfs_alignment = Node(
         package='robot_r2_control',
         executable='alignment',
@@ -147,7 +164,7 @@ def generate_launch_description():
         package='robot_r2_control',
         executable='alignment',
         name='tip_alignment',
-        parameters=[alignment_config, {'reverse_direction': True}],
+        parameters=[alignment_config, tip_alignment_config],
         remappings=[
             ('/r2/alignment/detection', '/r2/tip/roi'),
             ('/r2/alignment/cmd_vel', '/r2/cmd_vel'),
@@ -239,6 +256,7 @@ def generate_launch_description():
         odin_odometry_postprocess,
         control_launch,
         serial_bridge,
+        all_step_control,
         odometry_tf,
         kfs_alignment,
         tip_alignment,

@@ -9,20 +9,23 @@ from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from robot_r2_common import ABORT_TOPIC
 from robot_r2_interfaces.msg import LiftCommand, LiftFeedback
 import serial
-from std_msgs.msg import Float64, String
+from std_msgs.msg import Bool, Empty, Float64, String
 
 from serial_pkg.frame_ids import set_odometry_frame_ids
 from serial_pkg.protocol import (
-    FLOAT_FIELD_COUNT,
+    COMMAND_FLOAT_FIELD_COUNT,
+    FEEDBACK_FRAME_SIZE,
     FrameParser,
-    decode_frame,
+    decode_feedback_frame,
     encode_frame,
 )
 
 
 class SerialBridge(Node):
+    BUTTON_TOPIC = '/r2/serial/button'
     VX = 0
     VY = 1
     VW = 2
@@ -122,10 +125,10 @@ class SerialBridge(Node):
             float(value)
             for value in self.get_parameter('initial_command_values').value
         )
-        if len(initial_values) != FLOAT_FIELD_COUNT:
+        if len(initial_values) != COMMAND_FLOAT_FIELD_COUNT:
             raise ValueError(
                 f'initial_command_values must contain '
-                f'{FLOAT_FIELD_COUNT} values')
+                f'{COMMAND_FLOAT_FIELD_COUNT} values')
         if not all(math.isfinite(value) for value in initial_values):
             raise ValueError('initial_command_values must all be finite')
 
@@ -135,7 +138,12 @@ class SerialBridge(Node):
         self.cmd_vel_timed_out = False
         self.serial_port = None
         self.next_reconnect_time = 0.0
-        self.parser = FrameParser(self.frame_header, self.frame_tail)
+        self.open_failure_abort_sent = False
+        self.parser = FrameParser(
+            self.frame_header,
+            self.frame_tail,
+            frame_size=FEEDBACK_FRAME_SIZE,
+        )
 
         raw_rx_topic = str(self.get_parameter('raw_rx_topic').value)
         self.raw_rx_publisher = self.create_publisher(
@@ -143,6 +151,10 @@ class SerialBridge(Node):
         raw_tx_topic = str(self.get_parameter('raw_tx_topic').value)
         self.raw_tx_publisher = self.create_publisher(
             String, raw_tx_topic, 10)
+        self.button_publisher = self.create_publisher(
+            Bool, self.BUTTON_TOPIC, 10)
+        self.abort_publisher = self.create_publisher(
+            Empty, ABORT_TOPIC, 10)
 
         self.velocity_feedback_publisher = self.create_publisher(
             Twist,
@@ -296,12 +308,20 @@ class SerialBridge(Node):
             self.serial_port = None
             self.get_logger().warn(
                 f'Unable to open {self.serial_port_name}: {exc}')
+            self._publish_abort_once_for_open_failure()
             return False
 
+        self.open_failure_abort_sent = False
         self.parser.clear()
         self.get_logger().info(
             f'Opened {self.serial_port_name} at {self.baud_rate} baud')
         return True
+
+    def _publish_abort_once_for_open_failure(self):
+        if self.open_failure_abort_sent:
+            return
+        self.open_failure_abort_sent = True
+        self.abort_publisher.publish(Empty())
 
     def mark_serial_disconnected(self, description, exception):
         self.get_logger().error(f'{description}: {exception}')
@@ -377,7 +397,7 @@ class SerialBridge(Node):
             message.data = frame.hex(' ').upper()
             self.raw_rx_publisher.publish(message)
             try:
-                values = decode_frame(
+                values, button_pressed = decode_feedback_frame(
                     frame,
                     self.frame_header,
                     self.frame_tail,
@@ -387,9 +407,11 @@ class SerialBridge(Node):
                 self.get_logger().warn(
                     f'Ignored invalid serial feedback frame: {exc}')
                 continue
-            self.publish_feedback(values)
+            self.publish_feedback(values, button_pressed)
 
-    def publish_feedback(self, values):
+    def publish_feedback(self, values, button_pressed=False):
+        self.button_publisher.publish(Bool(data=bool(button_pressed)))
+
         velocity = Twist()
         velocity.linear.x = values[self.VX]
         velocity.linear.y = values[self.VY]

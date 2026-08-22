@@ -1,0 +1,13 @@
+uint8 STAGE_ONE=1
+uint8 STAGE_TWO=2
+uint8 STAGE_THREE=3
+
+uint8 selected_stage
+string team
+CellIndex[<=12] stage_two_move_cells
+CellIndex[<=12] stage_two_kfs_cells
+uint8 stage_three_loaded_count
+---
+bool applied
+bool ready
+string message

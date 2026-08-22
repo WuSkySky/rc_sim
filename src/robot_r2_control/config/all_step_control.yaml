@@ -1,0 +1,8 @@
+all_step_control:
+  ros__parameters:
+    # 第一次检测到按钮按下后，至少忽略后续按钮状态这么长时间。
+    button_ignore_sec: 5.0
+
+    # Step1 使用串口里程计重定位；Step2 使用 Odin 重定位。
+    stage_one_relocalization_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    stage_two_relocalization_pose: [5.568, -2.2, 0.0, 0.0, 0.0, 3.141592653589793]

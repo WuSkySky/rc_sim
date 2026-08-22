@@ -23,6 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ArucoMarkerPose.msg"
   "msg/ArucoPoseDetection.msg"
   "msg/CellIndex.msg"
+  "msg/AllStepStatus.msg"
   "srv/MoveRelative.srv"
   "srv/MoveToPose.srv"
   "srv/SetBasePose.srv"
@@ -39,6 +40,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StageThree.srv"
   "srv/TraverseStep.srv"
   "srv/Align.srv"
+  "srv/ConfigureAllStep.srv"
   DEPENDENCIES geometry_msgs sensor_msgs std_msgs
 )
 

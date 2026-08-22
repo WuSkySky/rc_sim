@@ -108,11 +108,18 @@ class StageTwoGridEditor(ttk.Frame):
     ROUTE_SELECT_COLOR = '#4f83cc'
     KFS_SELECT_COLOR = '#e09f3e'
 
-    def __init__(self, parent, compact=False, status_callback=None):
+    def __init__(
+        self,
+        parent,
+        compact=False,
+        status_callback=None,
+        change_callback=None,
+    ):
         super().__init__(parent)
         self.model = StageTwoGridModel()
         self.compact = compact
         self.status_callback = status_callback
+        self.change_callback = change_callback
         self.route_variables = {
             cell: tk.BooleanVar(value=False) for cell in GRID_CELLS
         }
@@ -184,10 +191,12 @@ class StageTwoGridEditor(ttk.Frame):
     def _toggle_route(self, cell):
         self.model.toggle_route(cell)
         self.refresh_route_buttons()
+        self._report_change()
 
     def _toggle_kfs(self, cell):
         self.model.toggle_kfs(cell)
         self.refresh_kfs_buttons()
+        self._report_change()
 
     def clear_route(self):
         self.model.clear_route()
@@ -195,6 +204,7 @@ class StageTwoGridEditor(ttk.Frame):
             variable.set(False)
         self.refresh_route_buttons()
         self._report_status('已清空 Step2 路线')
+        self._report_change()
 
     def clear_kfs(self):
         self.model.clear_kfs()
@@ -202,6 +212,7 @@ class StageTwoGridEditor(ttk.Frame):
             variable.set(False)
         self.refresh_kfs_buttons()
         self._report_status('已清空 Step2 KFS 标记')
+        self._report_change()
 
     def refresh_route_buttons(self):
         orders = {
@@ -220,6 +231,10 @@ class StageTwoGridEditor(ttk.Frame):
     def _report_status(self, message):
         if self.status_callback is not None:
             self.status_callback(message)
+
+    def _report_change(self):
+        if self.change_callback is not None:
+            self.change_callback()
 
     def set_state(self, state):
         for widget in self.interactive_widgets:

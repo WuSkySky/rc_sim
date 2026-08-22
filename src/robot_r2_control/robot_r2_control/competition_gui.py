@@ -1,170 +1,75 @@
 from collections import deque
 from dataclasses import dataclass
-from functools import partial
-import math
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 
-from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from robot_r2_common import ABORT_TOPIC
 from robot_r2_control.joint_control_gui import (
     JointControlGuiMixin,
     JointControlNodeMixin,
 )
-from robot_r2_control.stage_two_grid_gui import (
-    StageTwoGridEditor,
-    make_stage_two_route_request,
-)
-from robot_r2_interfaces.srv import (
-    SetBasePose,
-    StageOne,
-    StageThree,
-    StageTwo,
-)
+from robot_r2_control.stage_two_grid_gui import StageTwoGridEditor
+from robot_r2_interfaces.msg import AllStepStatus, CellIndex
+from robot_r2_interfaces.srv import ConfigureAllStep, StageOne
 from std_msgs.msg import Empty
 
 
 @dataclass(frozen=True)
-class CompetitionGuiEvent:
+class CompetitionGuiConfigResult:
+    applied: bool
+    ready: bool
     message: str
-    stage: int
-    success: bool
-    loaded_count: int | None = None
 
 
 class CompetitionGuiNode(JointControlNodeMixin, Node):
-    SET_BASE_POSE_SERVICE = '/r2/set_base_pose'
-    SET_BASE_POSE_ODIN_SERVICE = '/r2/set_base_pose_odin'
-    STAGE_ONE_SERVICE = '/r2/stage_one'
-    STAGE_TWO_SERVICE = '/r2/stage_two'
-    STAGE_THREE_SERVICE = '/r2/stage_three'
-    STAGE_ONE_RELOCALIZATION_DEFAULT = (0.0,) * 6
-    STAGE_TWO_RELOCALIZATION_DEFAULT = (
-        5.568, -2.2, 0.0, 0.0, 0.0, math.pi)
+    CONFIGURE_SERVICE = '/r2/all_step/configure'
+    STATUS_TOPIC = '/r2/all_step/status'
 
     def __init__(self):
         super().__init__('competition_gui')
         self.state_lock = threading.RLock()
         self.status_events = deque()
-        self.stage_request_in_flight = False
-        self.active_stage = None
+        self.configuration_results = deque()
+        self.stage_busy = False
 
         self.initialize_joint_control()
-        self.declare_parameter(
-            'stage_one_relocalization_pose',
-            list(self.STAGE_ONE_RELOCALIZATION_DEFAULT),
+        self.configure_client = self.create_client(
+            ConfigureAllStep, self.CONFIGURE_SERVICE)
+        status_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
-        self.declare_parameter(
-            'stage_two_relocalization_pose',
-            list(self.STAGE_TWO_RELOCALIZATION_DEFAULT),
+        self.status_subscription = self.create_subscription(
+            AllStepStatus,
+            self.STATUS_TOPIC,
+            self.on_all_step_status,
+            status_qos,
         )
-        self.stage_one_relocalization_pose = self.validate_pose_parameter(
-            self.get_parameter('stage_one_relocalization_pose').value,
-            'stage_one_relocalization_pose',
-        )
-        self.stage_two_relocalization_pose = self.validate_pose_parameter(
-            self.get_parameter('stage_two_relocalization_pose').value,
-            'stage_two_relocalization_pose',
-        )
-        self.set_base_pose_client = self.create_client(
-            SetBasePose, self.SET_BASE_POSE_SERVICE)
-        self.set_base_pose_odin_client = self.create_client(
-            SetBasePose, self.SET_BASE_POSE_ODIN_SERVICE)
-        self.stage_one_client = self.create_client(
-            StageOne, self.STAGE_ONE_SERVICE)
-        self.stage_two_client = self.create_client(
-            StageTwo, self.STAGE_TWO_SERVICE)
-        self.stage_three_client = self.create_client(
-            StageThree, self.STAGE_THREE_SERVICE)
         self.abort_publisher = self.create_publisher(
             Empty, ABORT_TOPIC, 10)
         self.add_on_set_parameters_callback(self.on_parameters_changed)
+
+    def on_parameters_changed(self, parameters):
+        return self.on_joint_parameters_changed(parameters)
 
     def abort_current_task(self):
         self.abort_publisher.publish(Empty())
         return '已发送取消当前任务请求'
 
-    @staticmethod
-    def validate_team(team):
-        if team not in (StageOne.Request.RED, StageOne.Request.BLUE):
-            raise ValueError(f'team must be red or blue, got {team!r}')
-
-    @staticmethod
-    def validate_pose_parameter(values, name):
-        if isinstance(values, (str, bytes)):
-            raise ValueError(f'{name} must contain exactly 6 numbers')
-        try:
-            pose = tuple(values)
-        except TypeError as exc:
-            raise ValueError(
-                f'{name} must contain exactly 6 numbers') from exc
-        if len(pose) != 6:
-            raise ValueError(f'{name} must contain exactly 6 numbers')
-        if any(
-            isinstance(value, bool) or not isinstance(value, (int, float))
-            for value in pose
-        ):
-            raise ValueError(f'{name} values must be numeric')
-        converted = tuple(float(value) for value in pose)
-        if not all(math.isfinite(value) for value in converted):
-            raise ValueError(f'{name} values must be finite')
-        return converted
-
-    def on_parameters_changed(self, parameters):
-        updates = {parameter.name: parameter.value for parameter in parameters}
-        try:
-            with self.state_lock:
-                stage_one_pose = self.stage_one_relocalization_pose
-                stage_two_pose = self.stage_two_relocalization_pose
-            if 'stage_one_relocalization_pose' in updates:
-                stage_one_pose = self.validate_pose_parameter(
-                    updates['stage_one_relocalization_pose'],
-                    'stage_one_relocalization_pose',
-                )
-            if 'stage_two_relocalization_pose' in updates:
-                stage_two_pose = self.validate_pose_parameter(
-                    updates['stage_two_relocalization_pose'],
-                    'stage_two_relocalization_pose',
-                )
-        except ValueError as exc:
-            return SetParametersResult(successful=False, reason=str(exc))
-
-        joint_result = self.on_joint_parameters_changed(parameters)
-        if not joint_result.successful:
-            return joint_result
+    def on_all_step_status(self, message):
         with self.state_lock:
-            self.stage_one_relocalization_pose = stage_one_pose
-            self.stage_two_relocalization_pose = stage_two_pose
-        return SetParametersResult(successful=True)
-
-    @staticmethod
-    def base_pose_request(pose):
-        request = SetBasePose.Request()
-        (
-            request.x,
-            request.y,
-            request.z,
-            request.roll,
-            request.pitch,
-            request.yaw,
-        ) = pose
-        return request
-
-    def stage_two_relocalization_for_team(self, team):
-        # 基准为蓝方（负 Y）；红方仅将 Y 取反。
-        self.validate_team(team)
-        with self.state_lock:
-            pose = list(self.stage_two_relocalization_pose)
-        if team == StageTwo.Request.RED:
-            pose[1] = -pose[1]
-        return tuple(pose)
+            self.stage_busy = message.state == AllStepStatus.RUNNING
+            self.status_events.append(message)
 
     def is_stage_busy(self):
         with self.state_lock:
-            return self.stage_request_in_flight
+            return self.stage_busy
 
     def pop_status_events(self):
         with self.state_lock:
@@ -172,197 +77,59 @@ class CompetitionGuiNode(JointControlNodeMixin, Node):
             self.status_events.clear()
         return events
 
-    def _begin_stage_request(self, stage, client, request, description):
+    def pop_configuration_results(self):
         with self.state_lock:
-            if self.stage_request_in_flight:
-                return False, '已有阶段任务正在执行'
-            if not client.service_is_ready():
-                return False, f'{description} 服务不可用'
-            self.stage_request_in_flight = True
-            self.active_stage = stage
+            results = list(self.configuration_results)
+            self.configuration_results.clear()
+        return results
 
+    def send_configuration(self, request):
+        if not self.configure_client.service_is_ready():
+            return False
         try:
-            future = client.call_async(request)
+            future = self.configure_client.call_async(request)
         except Exception as exc:
             with self.state_lock:
-                self.stage_request_in_flight = False
-                self.active_stage = None
-            return False, f'{description} 请求发送失败：{exc}'
-        future.add_done_callback(partial(
-            self._on_stage_complete,
-            stage=stage,
-            description=description,
-        ))
-        return True, f'{description}：正在执行'
+                self.configuration_results.append(
+                    CompetitionGuiConfigResult(
+                        applied=False,
+                        ready=False,
+                        message=f'总控配置请求发送失败：{exc}',
+                    )
+                )
+            return True
+        future.add_done_callback(self.on_configuration_complete)
+        return True
 
-    def _begin_relocalized_stage_request(
-        self,
-        stage,
-        relocalization_client,
-        relocalization_pose,
-        stage_client,
-        stage_request,
-        description,
-    ):
-        with self.state_lock:
-            if self.stage_request_in_flight:
-                return False, '已有阶段任务正在执行'
-            if not relocalization_client.service_is_ready():
-                return False, f'{description} 重定位服务不可用'
-            if not stage_client.service_is_ready():
-                return False, f'{description} 服务不可用'
-            self.stage_request_in_flight = True
-            self.active_stage = stage
-
-        request = self.base_pose_request(relocalization_pose)
-        try:
-            future = relocalization_client.call_async(request)
-        except Exception as exc:
-            with self.state_lock:
-                self.stage_request_in_flight = False
-                self.active_stage = None
-            return False, f'{description} 重定位请求发送失败：{exc}'
-        future.add_done_callback(partial(
-            self._on_relocalization_complete,
-            stage=stage,
-            stage_client=stage_client,
-            stage_request=stage_request,
-            description=description,
-        ))
-        return True, f'{description}：正在重定位'
-
-    def request_stage_one(self, team):
-        try:
-            self.validate_team(team)
-        except ValueError as exc:
-            return False, str(exc)
-        request = StageOne.Request()
-        request.team = team
-        with self.state_lock:
-            relocalization_pose = self.stage_one_relocalization_pose
-        return self._begin_relocalized_stage_request(
-            1,
-            self.set_base_pose_client,
-            relocalization_pose,
-            self.stage_one_client,
-            request,
-            'Step1',
-        )
-
-    def request_stage_two(self, team, move_cells, kfs_cells):
-        try:
-            self.validate_team(team)
-        except ValueError as exc:
-            return False, str(exc)
-        request = make_stage_two_route_request(
-            team, move_cells, kfs_cells)
-        relocalization_pose = self.stage_two_relocalization_for_team(team)
-        return self._begin_relocalized_stage_request(
-            2,
-            self.set_base_pose_odin_client,
-            relocalization_pose,
-            self.stage_two_client,
-            request,
-            'Step2',
-        )
-
-    def request_stage_three(self, team, loaded_count):
-        try:
-            self.validate_team(team)
-        except ValueError as exc:
-            return False, str(exc)
-        if loaded_count not in (1, 2, 3):
-            return False, 'Step3 KFS 数量必须是 1、2 或 3'
-        request = StageThree.Request()
-        request.team = team
-        request.loaded_count = loaded_count
-        return self._begin_stage_request(
-            3, self.stage_three_client, request, 'Step3')
-
-    def _finish_stage(self, stage, message, success, loaded_count=None):
-        with self.state_lock:
-            self.stage_request_in_flight = False
-            self.active_stage = None
-            self.status_events.append(CompetitionGuiEvent(
-                message=message,
-                stage=stage,
-                success=success,
-                loaded_count=loaded_count,
-            ))
-
-    def _on_relocalization_complete(
-        self,
-        future,
-        stage,
-        stage_client,
-        stage_request,
-        description,
-    ):
+    def on_configuration_complete(self, future):
         try:
             response = future.result()
         except Exception as exc:
-            self._finish_stage(
-                stage,
-                f'{description} 重定位调用异常：{exc}',
-                False,
+            result = CompetitionGuiConfigResult(
+                applied=False,
+                ready=False,
+                message=f'总控配置调用异常：{exc}',
             )
-            return
-        if response is None:
-            self._finish_stage(
-                stage, f'{description} 重定位失败：无响应', False)
-            return
-        if not response.success:
-            self._finish_stage(
-                stage,
-                f'{description} 重定位失败：{response.message}',
-                False,
-            )
-            return
-
-        try:
-            stage_future = stage_client.call_async(stage_request)
-        except Exception as exc:
-            self._finish_stage(
-                stage,
-                f'{description} 请求发送失败：{exc}',
-                False,
-            )
-            return
-        stage_future.add_done_callback(partial(
-            self._on_stage_complete,
-            stage=stage,
-            description=description,
-        ))
-
-    def _on_stage_complete(self, future, stage, description):
-        loaded_count = None
-        try:
-            response = future.result()
-        except Exception as exc:
-            success = False
-            message = f'{description} 调用异常：{exc}'
         else:
             if response is None:
-                success = False
-                message = f'{description} 失败：无响应'
-            elif response.success:
-                success = True
-                message = f'{description} 完成：{response.message}'
-                if stage == 2:
-                    loaded_count = int(response.loaded_count)
+                result = CompetitionGuiConfigResult(
+                    applied=False,
+                    ready=False,
+                    message='总控配置失败：无响应',
+                )
             else:
-                success = False
-                message = f'{description} 失败：{response.message}'
-
-        self._finish_stage(
-            stage,
-            message,
-            success,
-            loaded_count=loaded_count,
-        )
+                result = CompetitionGuiConfigResult(
+                    applied=bool(response.applied),
+                    ready=bool(response.ready),
+                    message=str(response.message),
+                )
+        with self.state_lock:
+            self.configuration_results.append(result)
 
 
 class CompetitionGuiApp(JointControlGuiMixin):
+    CONFIG_RETRY_SEC = 1.0
+
     def __init__(self, node):
         self.node = node
         self.root = tk.Tk()
@@ -371,10 +138,15 @@ class CompetitionGuiApp(JointControlGuiMixin):
         self.root.protocol('WM_DELETE_WINDOW', self.close)
 
         self.team_value = tk.StringVar(value=StageOne.Request.RED)
+        self.selected_stage = tk.IntVar(
+            value=ConfigureAllStep.Request.STAGE_ONE)
         self.stage_three_count = tk.IntVar(value=3)
-        self.status_text = tk.StringVar(value='已就绪')
+        self.status_text = tk.StringVar(value='正在连接 All Step 总控')
         self.interactive_widgets = []
         self.last_stage_busy = None
+        self.configuration_dirty = True
+        self.configuration_in_flight = False
+        self.next_configuration_retry = 0.0
         self._closed = False
 
         self.initialize_joint_ui()
@@ -391,7 +163,7 @@ class CompetitionGuiApp(JointControlGuiMixin):
         joint_column.grid(row=0, column=1, sticky='new')
 
         self._build_team_controls(task_column)
-        self._build_stage_one_controls(task_column)
+        self._build_stage_selector(task_column)
         self._build_stage_two_controls(task_column)
         self._build_stage_three_controls(task_column)
         self.build_joint_controls(joint_column)
@@ -436,6 +208,7 @@ class CompetitionGuiApp(JointControlGuiMixin):
                 text=label,
                 variable=self.team_value,
                 value=value,
+                command=self._configuration_changed,
             )
             button.grid(
                 row=0,
@@ -445,16 +218,23 @@ class CompetitionGuiApp(JointControlGuiMixin):
             )
             self.interactive_widgets.append(button)
 
-    def _build_stage_one_controls(self, parent):
-        frame = ttk.LabelFrame(parent, text='Step1', padding=10)
+    def _build_stage_selector(self, parent):
+        frame = ttk.LabelFrame(parent, text='物理按钮启动阶段', padding=10)
         frame.grid(row=1, column=0, sticky='ew', pady=(8, 0))
-        self.stage_one_button = ttk.Button(
-            frame,
-            text='启动 Step1',
-            command=self._start_stage_one,
-        )
-        self.stage_one_button.grid(row=0, column=0, sticky='ew')
-        self.interactive_widgets.append(self.stage_one_button)
+        for column, stage in enumerate((
+            ConfigureAllStep.Request.STAGE_ONE,
+            ConfigureAllStep.Request.STAGE_TWO,
+            ConfigureAllStep.Request.STAGE_THREE,
+        )):
+            button = ttk.Radiobutton(
+                frame,
+                text=f'Step{stage}',
+                variable=self.selected_stage,
+                value=stage,
+                command=self._configuration_changed,
+            )
+            button.grid(row=0, column=column, sticky='w', padx=6)
+            self.interactive_widgets.append(button)
 
     def _build_stage_two_controls(self, parent):
         frame = ttk.LabelFrame(parent, text='Step2 路线模式', padding=10)
@@ -462,20 +242,11 @@ class CompetitionGuiApp(JointControlGuiMixin):
         self.stage_two_grid_editor = StageTwoGridEditor(
             frame,
             status_callback=self.status_text.set,
+            change_callback=self._configuration_changed,
         )
-        self.stage_two_grid_editor.grid(
-            row=0, column=0, columnspan=2, sticky='n')
+        self.stage_two_grid_editor.grid(row=0, column=0, sticky='n')
         self.interactive_widgets.extend(
             self.stage_two_grid_editor.interactive_widgets)
-
-        self.stage_two_button = ttk.Button(
-            frame,
-            text='启动 Step2',
-            command=self._start_stage_two,
-        )
-        self.stage_two_button.grid(
-            row=1, column=0, columnspan=2, sticky='ew', pady=(8, 0))
-        self.interactive_widgets.append(self.stage_two_button)
 
     def _build_stage_three_controls(self, parent):
         frame = ttk.LabelFrame(parent, text='Step3 KFS 数量', padding=10)
@@ -486,46 +257,52 @@ class CompetitionGuiApp(JointControlGuiMixin):
                 text=str(count),
                 variable=self.stage_three_count,
                 value=count,
+                command=self._configuration_changed,
             )
             button.grid(row=0, column=column, sticky='w', padx=6)
             self.interactive_widgets.append(button)
-        self.stage_three_button = ttk.Button(
-            frame,
-            text='启动 Step3',
-            command=self._start_stage_three,
-        )
-        self.stage_three_button.grid(
-            row=1, column=0, columnspan=3, sticky='ew', pady=(8, 0))
-        self.interactive_widgets.append(self.stage_three_button)
 
-    def _start_stage_one(self):
-        self._handle_start_result(
-            self.node.request_stage_one(self.team_value.get()))
+    def _configuration_changed(self):
+        self.configuration_dirty = True
+        self.next_configuration_retry = 0.0
 
-    def _start_stage_two(self):
-        try:
-            route = self.stage_two_grid_editor.model.validated_route()
-        except ValueError as exc:
-            self.status_text.set(str(exc))
+    @staticmethod
+    def _cell_message(cell):
+        return CellIndex(
+            forward_index=int(cell[0]), lateral_index=int(cell[1]))
+
+    def _configuration_request(self):
+        request = ConfigureAllStep.Request()
+        request.selected_stage = int(self.selected_stage.get())
+        request.team = self.team_value.get()
+        request.stage_two_move_cells = [
+            self._cell_message(cell)
+            for cell in self.stage_two_grid_editor.model.route_cells
+        ]
+        request.stage_two_kfs_cells = [
+            self._cell_message(cell)
+            for cell in self.stage_two_grid_editor.model.sorted_kfs_cells()
+        ]
+        request.stage_three_loaded_count = int(
+            self.stage_three_count.get())
+        return request
+
+    def _try_sync_configuration(self):
+        if (
+            not self.configuration_dirty
+            or self.configuration_in_flight
+            or self.node.is_stage_busy()
+        ):
             return
-        self._handle_start_result(self.node.request_stage_two(
-            self.team_value.get(),
-            route,
-            self.stage_two_grid_editor.model.sorted_kfs_cells(),
-        ))
-
-    def _start_stage_three(self):
-        self._handle_start_result(self.node.request_stage_three(
-            self.team_value.get(),
-            self.stage_three_count.get(),
-        ))
-
-    def _handle_start_result(self, result):
-        accepted, message = result
-        self.status_text.set(message)
-        if accepted:
-            self.last_stage_busy = True
-            self._set_busy_state(True)
+        now = time.monotonic()
+        if now < self.next_configuration_retry:
+            return
+        if not self.node.send_configuration(self._configuration_request()):
+            self.status_text.set('All Step 总控服务不可用，等待重试')
+            self.next_configuration_retry = now + self.CONFIG_RETRY_SEC
+            return
+        self.configuration_dirty = False
+        self.configuration_in_flight = True
 
     def joint_commands_allowed(self):
         return not self.node.is_stage_busy()
@@ -536,15 +313,28 @@ class CompetitionGuiApp(JointControlGuiMixin):
             widget.configure(state=state)
         self.set_joint_controls_state(state)
 
-    def _handle_event(self, event):
-        message = event.message
-        if event.stage == 2 and event.success:
-            if event.loaded_count in (1, 2, 3):
-                self.stage_three_count.set(event.loaded_count)
-                message += f'；Step3 KFS 数量已更新为 {event.loaded_count}'
-            elif event.loaded_count == 0:
-                message += '；未装载 KFS，Step3 数量保持不变'
-        self.status_text.set(message)
+    def _handle_status(self, status):
+        if (
+            status.state == AllStepStatus.SUCCEEDED
+            and status.selected_stage == ConfigureAllStep.Request.STAGE_TWO
+            and status.loaded_count in (1, 2, 3)
+        ):
+            self.stage_three_count.set(status.loaded_count)
+            self.configuration_dirty = True
+            self.status_text.set(
+                f'{status.message}；Step3 KFS 数量已更新为 '
+                f'{status.loaded_count}'
+            )
+            return
+        self.status_text.set(status.message)
+
+    def _handle_configuration_result(self, result):
+        self.configuration_in_flight = False
+        self.status_text.set(result.message)
+        if not result.applied:
+            self.configuration_dirty = True
+            self.next_configuration_retry = (
+                time.monotonic() + self.CONFIG_RETRY_SEC)
 
     def _poll_ros(self):
         if self._closed:
@@ -553,12 +343,15 @@ class CompetitionGuiApp(JointControlGuiMixin):
             rclpy.spin_once(self.node, timeout_sec=0.0)
             self.sync_joint_ranges()
             self.sync_joint_feedback()
-            for event in self.node.pop_status_events():
-                self._handle_event(event)
+            for status in self.node.pop_status_events():
+                self._handle_status(status)
+            for result in self.node.pop_configuration_results():
+                self._handle_configuration_result(result)
             busy = self.node.is_stage_busy()
             if busy != self.last_stage_busy:
                 self.last_stage_busy = busy
                 self._set_busy_state(busy)
+            self._try_sync_configuration()
         except Exception as exc:
             self.node.get_logger().error(f'正式 GUI ROS 回调异常：{exc}')
             self.status_text.set(f'ROS 回调异常：{exc}')

@@ -24,6 +24,8 @@ setup(
                 'config/gui_control.yaml',
                 'config/competition_gui.yaml',
                 'config/alignment.yaml',
+                'config/tip_alignment.yaml',
+                'config/all_step_control.yaml',
             ]),
     ],
     install_requires=['setuptools', 'pynput'],
@@ -46,6 +48,7 @@ setup(
             'kfs_loader_control = robot_r2_control.kfs_loader:main',
             'step_traverse = robot_r2_control.step_traverse:main',
             'alignment = robot_r2_control.alignment:main',
+            'all_step_control = robot_r2_control.all_step_control:main',
         ],
     },
 )

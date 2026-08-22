@@ -13,8 +13,14 @@ from robot_r2_interfaces.srv import DetectLed, MoveRelative, StageOne
 
 
 class FakeLogger:
+    def __init__(self):
+        self.warnings = []
+
     def info(self, _message):
         pass
+
+    def warn(self, message):
+        self.warnings.append(message)
 
 
 class ImmediateFuture:
@@ -58,7 +64,8 @@ def default_config():
 
 def make_sequence_controller():
     controller = StageOneController.__new__(StageOneController)
-    controller.get_logger = lambda: FakeLogger()
+    controller.logger = FakeLogger()
+    controller.get_logger = lambda: controller.logger
     controller.weapon_rotate_client = 'rotate_client'
     controller.weapon_grip_client = 'grip_client'
     controller.calls = []
@@ -149,6 +156,133 @@ def test_action_failure_stops_later_actions_and_reports_number():
         ),
         ('lift', 0.14),
     ]
+
+
+def test_alignment_timeout_continues_remaining_actions_and_records_warning():
+    controller = make_sequence_controller()
+
+    def time_out_alignment(_config):
+        controller.calls.append(('align',))
+        return 'Alignment timeout: no target detected'
+
+    controller.align_tip = time_out_alignment
+    warnings = []
+
+    result = controller.execute_task(
+        default_config(), StageOne.Request.RED, warnings)
+
+    assert len(controller.calls) == 14
+    assert controller.calls[3] == ('align',)
+    assert controller.calls[-1] == (
+        'weapon_joint', 'grip_client', 0.028, 0.001)
+    assert result == tuple(warnings)
+    assert len(warnings) == 1
+    assert 'Alignment timeout: no target detected' in warnings[0]
+    assert 'remaining actions continued' in warnings[0]
+    assert controller.logger.warnings == warnings
+
+
+def test_align_tip_returns_timeout_message_instead_of_failing():
+    controller = StageOneController.__new__(StageOneController)
+    controller.align_client = FakeClient(
+        'align', [],
+        response=SimpleNamespace(
+            success=False,
+            message='Alignment timeout: target lost',
+        ),
+    )
+
+    warning = controller.align_tip(default_config())
+
+    assert warning == 'Alignment timeout: target lost'
+    request = controller.align_client.requests[0]
+    assert request.pixel_tolerance == pytest.approx(5.0)
+    assert request.timeout_sec == pytest.approx(15.0)
+
+
+def test_align_tip_non_timeout_failure_still_fails_stage_one():
+    controller = StageOneController.__new__(StageOneController)
+    controller.align_client = FakeClient(
+        'align', [],
+        response=SimpleNamespace(
+            success=False,
+            message='aborted by /r2/system/abort',
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='AlignToTip failed: aborted by /r2/system/abort',
+    ):
+        controller.align_tip(default_config())
+
+
+def test_response_message_includes_alignment_warning_on_success_or_failure():
+    warnings = [
+        'Action 4 (align weapon tip) timed out; remaining actions continued: '
+        'Alignment timeout: no target detected',
+    ]
+
+    success_message = StageOneController.response_message(
+        'Stage 1 completed for red team', warnings)
+    failure_message = StageOneController.response_message(
+        'Action 5 (move backward) failed: rejected', warnings)
+
+    assert success_message.startswith('Stage 1 completed for red team;')
+    assert 'Alignment timeout: no target detected' in success_message
+    assert failure_message.startswith('Action 5 (move backward) failed:')
+    assert 'Alignment timeout: no target detected' in failure_message
+
+
+def make_handle_controller(execute_task):
+    controller = StageOneController.__new__(StageOneController)
+    controller.service_lock = threading.Lock()
+    controller.config_lock = threading.RLock()
+    controller._config = default_config()
+    controller.wait_for_dependencies = lambda _timeout: None
+    controller.execute_task = execute_task
+    return controller
+
+
+def test_handle_task_succeeds_and_reports_alignment_timeout_warning():
+    warning = (
+        'Action 4 (align weapon tip) timed out; remaining actions continued: '
+        'Alignment timeout: target lost'
+    )
+
+    def execute(_config, _team, warnings):
+        warnings.append(warning)
+
+    controller = make_handle_controller(execute)
+    response = controller.handle_task(
+        SimpleNamespace(team=StageOne.Request.RED),
+        SimpleNamespace(success=False, message=''),
+    )
+
+    assert response.success
+    assert response.message.startswith('Stage 1 completed for red team;')
+    assert warning in response.message
+
+
+def test_handle_task_failure_keeps_earlier_alignment_timeout_warning():
+    warning = (
+        'Action 4 (align weapon tip) timed out; remaining actions continued: '
+        'Alignment timeout: no target detected'
+    )
+
+    def execute(_config, _team, warnings):
+        warnings.append(warning)
+        raise RuntimeError('Action 5 (move backward) failed: rejected')
+
+    controller = make_handle_controller(execute)
+    response = controller.handle_task(
+        SimpleNamespace(team=StageOne.Request.BLUE),
+        SimpleNamespace(success=True, message=''),
+    )
+
+    assert not response.success
+    assert response.message.startswith('Action 5 (move backward) failed:')
+    assert warning in response.message
 
 
 def test_weapon_pair_dispatches_both_requests_before_waiting():

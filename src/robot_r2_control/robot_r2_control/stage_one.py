@@ -27,6 +27,7 @@ ALIGN_TO_TIP_SERVICE = '/r2/align_to_tip'
 WEAPON_ROTATE_SERVICE = '/r2/weapon/set_rotate'
 WEAPON_GRIP_SERVICE = '/r2/weapon/set_grip'
 LED_DETECT_SERVICE = '/r2/led_detection/detect'
+ALIGNMENT_TIMEOUT_PREFIX = 'Alignment timeout:'
 
 
 @dataclass(frozen=True)
@@ -363,7 +364,10 @@ class StageOneController(AbortableMixin, Node):
             'AlignToTip',
         )
         if not response.success:
+            if response.message.startswith(ALIGNMENT_TIMEOUT_PREFIX):
+                return response.message
             raise RuntimeError(f'AlignToTip failed: {response.message}')
+        return None
 
     def weapon_request(self, position, tolerance, timeout_sec):
         request = SetJointPosition.Request()
@@ -460,14 +464,17 @@ class StageOneController(AbortableMixin, Node):
         self.get_logger().info(
             f'Step1 action {number}/14 started: {description}')
         try:
-            operation()
+            result = operation()
         except Exception as exc:
             raise RuntimeError(
                 f'Action {number} ({description}) failed: {exc}') from exc
         self.get_logger().info(
             f'Step1 action {number}/14 completed: {description}')
+        return result
 
-    def execute_task(self, config, team):
+    def execute_task(self, config, team, warnings=None):
+        if warnings is None:
+            warnings = []
         lateral_sign = self.lateral_sign(team)
         lateral_direction = 'left' if lateral_sign > 0.0 else 'right'
         self.run_action(
@@ -492,7 +499,15 @@ class StageOneController(AbortableMixin, Node):
             'lift chassis to working height',
             lambda: self.set_lift(config.action_3_lift_height_m, config),
         )
-        self.run_action(4, 'align weapon tip', lambda: self.align_tip(config))
+        alignment_timeout = self.run_action(
+            4, 'align weapon tip', lambda: self.align_tip(config))
+        if alignment_timeout is not None:
+            warning = (
+                'Action 4 (align weapon tip) timed out; remaining actions '
+                f'continued: {alignment_timeout}'
+            )
+            warnings.append(warning)
+            self.get_logger().warn(warning)
         self.run_action(
             5,
             'move backward',
@@ -569,22 +584,31 @@ class StageOneController(AbortableMixin, Node):
                 config,
             ),
         )
+        return tuple(warnings)
+
+    @staticmethod
+    def response_message(base_message, warnings):
+        if not warnings:
+            return base_message
+        return f'{base_message}; warnings: {"; ".join(warnings)}'
 
     def handle_task(self, request, response):
         abort_scope = self.abort_scope()
         with self.service_lock, abort_scope:
             config = self.config_snapshot()
+            warnings = []
             try:
                 self.raise_if_abort_requested()
                 self.validate_team(request.team)
                 self.wait_for_dependencies(config.dependency_timeout_sec)
-                self.execute_task(config, request.team)
+                self.execute_task(config, request.team, warnings)
             except Exception as exc:
                 response.success = False
-                response.message = str(exc)
+                response.message = self.response_message(str(exc), warnings)
                 return response
             response.success = True
-            response.message = f'Stage 1 completed for {request.team} team'
+            response.message = self.response_message(
+                f'Stage 1 completed for {request.team} team', warnings)
             return response
 
 
