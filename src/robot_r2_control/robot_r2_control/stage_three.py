@@ -6,6 +6,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.srv import (
     KfsAction,
     MoveRelative,
@@ -26,7 +27,7 @@ KFS_LIFT_SERVICE = '/r2/kfs_lift'
 SET_LIFT_SERVICE = '/r2/lift/set'
 
 
-class StageThreeController(Node):
+class StageThreeController(AbortableMixin, Node):
     POSITIVE_PARAMETERS = (
         'dependency_timeout_sec',
         'relocalization_timeout_sec',
@@ -56,6 +57,8 @@ class StageThreeController(Node):
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
         self.config_lock = threading.Lock()
+        self.abort_monitor = AbortMonitor(
+            self, callback_group=self.callback_group)
 
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('relocalization_timeout_sec', 5.0)
@@ -294,20 +297,18 @@ class StageThreeController(Node):
             'backoff_distances': backoff_distances,
         }
 
-    @staticmethod
-    def wait_for_future(future, timeout_sec, description):
+    def wait_for_future(self, future, timeout_sec, description):
         completed = threading.Event()
         future.add_done_callback(lambda _: completed.set())
-        if not completed.wait(timeout_sec + 1.0):
+        if not self.wait_for_event_or_abort(completed, timeout_sec + 1.0):
             raise RuntimeError(f'{description} timed out waiting for response')
         response = future.result()
         if response is None:
             raise RuntimeError(f'{description} call failed')
         return response
 
-    @staticmethod
-    def wait_for_service(client, timeout_sec, description):
-        if not client.wait_for_service(timeout_sec=timeout_sec):
+    def wait_for_service(self, client, timeout_sec, description):
+        if not self.wait_for_service_or_abort(client, timeout_sec):
             raise RuntimeError(f'{description} service unavailable')
 
     def relocalize(self, pose, timeout_sec):
@@ -321,7 +322,7 @@ class StageThreeController(Node):
             request.yaw,
         ) = pose
         response = self.wait_for_future(
-            self.set_base_pose_client.call_async(request),
+            self.call_async_or_abort(self.set_base_pose_client, request),
             timeout_sec,
             'SetBasePose',
         )
@@ -337,7 +338,7 @@ class StageThreeController(Node):
         request.yaw_tolerance = 0.0
         request.timeout_sec = timeout_sec
         response = self.wait_for_future(
-            self.move_to_pose_client.call_async(request),
+            self.call_async_or_abort(self.move_to_pose_client, request),
             timeout_sec,
             'MoveToPose',
         )
@@ -355,7 +356,7 @@ class StageThreeController(Node):
         request.yaw_tolerance = 0.0
         request.timeout_sec = timeout_sec
         response = self.wait_for_future(
-            self.move_relative_client.call_async(request),
+            self.call_async_or_abort(self.move_relative_client, request),
             timeout_sec,
             'MoveRelative',
         )
@@ -373,7 +374,7 @@ class StageThreeController(Node):
         request.yaw_tolerance = 0.0
         request.timeout_sec = timeout_sec
         response = self.wait_for_future(
-            self.move_relative_client.call_async(request),
+            self.call_async_or_abort(self.move_relative_client, request),
             timeout_sec,
             'MoveRelative',
         )
@@ -385,7 +386,7 @@ class StageThreeController(Node):
         request.action = KfsAction.Request.POP
         request.mode = mode
         response = self.wait_for_future(
-            self.kfs_action_client.call_async(request),
+            self.call_async_or_abort(self.kfs_action_client, request),
             timeout_sec,
             'KfsAction pop',
         )
@@ -398,7 +399,7 @@ class StageThreeController(Node):
         request.tolerance = tolerance
         request.timeout_sec = timeout_sec
         response = self.wait_for_future(
-            self.kfs_lift_client.call_async(request),
+            self.call_async_or_abort(self.kfs_lift_client, request),
             timeout_sec,
             'KfsLift',
         )
@@ -412,7 +413,7 @@ class StageThreeController(Node):
         request.tolerance = float(tolerance)
         request.timeout_sec = float(timeout_sec)
         response = self.wait_for_future(
-            self.chassis_lift_client.call_async(request),
+            self.call_async_or_abort(self.chassis_lift_client, request),
             timeout_sec,
             'SetLift',
         )
@@ -431,8 +432,10 @@ class StageThreeController(Node):
             self.wait_for_service(client, timeout_sec, description)
 
     def handle_task(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             try:
+                self.raise_if_abort_requested()
                 config = self.task_config(
                     request.team, int(request.loaded_count))
                 dependency_timeout = config['dependency_timeout_sec']

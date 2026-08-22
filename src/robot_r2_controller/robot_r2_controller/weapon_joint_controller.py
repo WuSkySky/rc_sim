@@ -9,6 +9,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from robot_r2_common import AbortMonitor, PositionAbortMixin
 from robot_r2_interfaces.srv import SetJointPosition
 from std_msgs.msg import Float64
 
@@ -56,7 +57,7 @@ GRIP_PROFILE = WeaponJointProfile(
 )
 
 
-class WeaponJointServiceController(Node):
+class WeaponJointServiceController(PositionAbortMixin, Node):
     def __init__(self, profile):
         super().__init__(profile.node_name)
         self.profile = profile
@@ -92,6 +93,11 @@ class WeaponJointServiceController(Node):
         )
         self.parameter_callback = self.add_on_set_parameters_callback(
             self.on_parameters_changed)
+        self.abort_monitor = AbortMonitor(
+            self,
+            callback_group=self.callback_group,
+            on_abort=self.hold_current_position_on_abort,
+        )
 
     @staticmethod
     def validate_config(config):
@@ -159,7 +165,10 @@ class WeaponJointServiceController(Node):
             self.state_condition.notify_all()
 
     def handle_set_position(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
+            if self.abort_requested():
+                return self.fill_aborted_position_response(request, response)
             config = self.config_snapshot()
             try:
                 tolerance, timeout_sec = self.validate_request(
@@ -170,9 +179,15 @@ class WeaponJointServiceController(Node):
             command = Float64()
             command.data = float(request.position)
             self.command_publisher.publish(command)
+            if self.abort_requested():
+                self.hold_current_position_on_abort()
+                return self.fill_aborted_position_response(request, response)
 
             deadline = time.monotonic() + timeout_sec
             while rclpy.ok():
+                if self.abort_requested():
+                    return self.fill_aborted_position_response(
+                        request, response)
                 with self.state_condition:
                     if self.current_position is not None:
                         error = request.position - self.current_position
@@ -186,7 +201,7 @@ class WeaponJointServiceController(Node):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0.0:
                         break
-                    self.state_condition.wait(timeout=remaining)
+                    self.state_condition.wait(timeout=min(remaining, 0.05))
 
             with self.state_condition:
                 final_position = (

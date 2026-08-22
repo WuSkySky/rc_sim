@@ -9,6 +9,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import qos_profile_sensor_data
+from robot_r2_common import ABORT_TOPIC
 
 from robot_r2_control.alignment import (
     ALIGN_SERVICE,
@@ -19,6 +20,7 @@ from robot_r2_control.alignment import (
 )
 from robot_r2_interfaces.msg import AlignmentDetection
 from robot_r2_interfaces.srv import Align
+from std_msgs.msg import Empty
 
 
 def wait_until(predicate, timeout_sec=2.0):
@@ -48,6 +50,7 @@ def alignment_harness():
         DETECTION_TOPIC,
         qos_profile_sensor_data,
     )
+    aborts = driver.create_publisher(Empty, ABORT_TOPIC, 10)
     commands = []
     driver.create_subscription(
         Twist,
@@ -67,6 +70,7 @@ def alignment_harness():
     yield SimpleNamespace(
         controller=controller,
         detections=detections,
+        aborts=aborts,
         commands=commands,
         client=client,
     )
@@ -159,6 +163,31 @@ def test_alignment_reports_target_lost(alignment_harness):
     assert response.message == 'Alignment timeout: target lost'
     assert response.final_offset_x == 0
     assert alignment_harness.commands[-1].linear.y == 0.0
+
+
+def test_abort_stops_active_alignment_without_poisoning_next_request(
+    alignment_harness,
+):
+    first_future = send_request(alignment_harness, timeout=1.0)
+    wait_for_nonzero_command(alignment_harness, start_index=0)
+
+    alignment_harness.aborts.publish(Empty())
+
+    assert wait_until(first_future.done)
+    first_response = first_future.result()
+    assert not first_response.success
+    assert first_response.message == 'aborted by /r2/system/abort'
+    assert wait_until(lambda: alignment_harness.commands[-1].linear.y == 0.0)
+
+    second_future = send_request(
+        alignment_harness, tolerance=2.0, timeout=1.0)
+    deadline = time.monotonic() + 1.0
+    while not second_future.done() and time.monotonic() < deadline:
+        publish_detection(alignment_harness, valid=True, offset=1)
+        time.sleep(0.02)
+
+    assert second_future.done()
+    assert second_future.result().success
 
 
 def test_pid_output_and_integral_are_limited():

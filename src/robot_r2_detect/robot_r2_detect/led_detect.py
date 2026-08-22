@@ -14,6 +14,7 @@ import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import ABORT_MESSAGE, AbortMonitor, AbortableMixin
 from robot_r2_interfaces.msg import CameraFrame, LedDetection
 from robot_r2_interfaces.srv import DetectLed
 from sensor_msgs.msg import Image
@@ -58,7 +59,7 @@ def _image_work_needed(
     return continuous_detection or visualization_enabled or service_active
 
 
-class LedDetectNode(Node):
+class LedDetectNode(AbortableMixin, Node):
     """Detect configurable LEDs and wait for a requested target state."""
 
     def __init__(self) -> None:
@@ -68,6 +69,7 @@ class LedDetectNode(Node):
         self._subscription_lock = threading.Lock()
         self._image_callback_group = MutuallyExclusiveCallbackGroup()
         self._service_callback_group = MutuallyExclusiveCallbackGroup()
+        self._abort_callback_group = MutuallyExclusiveCallbackGroup()
 
         self._frame_sequence = 0
         self._service_active = False
@@ -97,6 +99,15 @@ class LedDetectNode(Node):
         )
         self.add_on_set_parameters_callback(self._on_parameters_changed)
         self._sync_image_subscription()
+        self.abort_monitor = AbortMonitor(
+            self,
+            callback_group=self._abort_callback_group,
+            on_abort=self._wake_service_on_abort,
+        )
+
+    def _wake_service_on_abort(self):
+        with self._state_condition:
+            self._state_condition.notify_all()
 
     def _declare_parameters(self) -> None:
         self.declare_parameter("visualization_enabled", False)
@@ -453,6 +464,7 @@ class LedDetectNode(Node):
             )
 
     def _handle_detect_led(self, request, response):
+        abort_scope = self.abort_scope()
         target_states = tuple(bool(state) for state in request.target_states)
         if len(target_states) != self._led_count:
             response.success = False
@@ -463,7 +475,12 @@ class LedDetectNode(Node):
             response.led_states = []
             return response
 
-        with self._service_lock:
+        with self._service_lock, abort_scope:
+            if self.abort_requested():
+                response.success = False
+                response.message = ABORT_MESSAGE
+                response.led_states = []
+                return response
             started_at = time.monotonic()
             last_states: tuple[bool, ...] | None = None
             last_reason = ""
@@ -488,6 +505,14 @@ class LedDetectNode(Node):
             try:
                 self._sync_image_subscription()
                 while rclpy.ok():
+                    if self.abort_requested():
+                        response.success = False
+                        response.message = ABORT_MESSAGE
+                        response.led_states = (
+                            list(last_states)
+                            if last_states is not None else []
+                        )
+                        return response
                     with self._state_condition:
                         while (
                             self._frame_sequence <= handled_sequence
@@ -497,7 +522,7 @@ class LedDetectNode(Node):
                             if remaining <= 0.0:
                                 break
                             self._state_condition.wait(
-                                timeout=min(remaining, 0.1)
+                                timeout=min(remaining, 0.05)
                             )
 
                         if self._frame_sequence > handled_sequence:

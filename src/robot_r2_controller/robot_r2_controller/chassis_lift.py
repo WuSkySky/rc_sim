@@ -5,11 +5,12 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.msg import LiftCommand, LiftFeedback
 from robot_r2_interfaces.srv import SetLift
 
 
-class LiftServiceController(Node):
+class LiftServiceController(AbortableMixin, Node):
     def __init__(self):
         super().__init__('chassis_lift')
         self.callback_group = ReentrantCallbackGroup()
@@ -53,6 +54,11 @@ class LiftServiceController(Node):
             self.handle_set_lift,
             callback_group=self.callback_group,
         )
+        self.abort_monitor = AbortMonitor(
+            self,
+            callback_group=self.callback_group,
+            on_abort=self.hold_current_lift_on_abort,
+        )
 
     def on_feedback(self, msg):
         with self.state_condition:
@@ -62,8 +68,32 @@ class LiftServiceController(Node):
             self.current_rear_right_lift = msg.rear_right_lift
             self.state_condition.notify_all()
 
+    def hold_current_lift_on_abort(self):
+        command = None
+        with self.state_condition:
+            values = (
+                self.current_front_left_lift,
+                self.current_front_right_lift,
+                self.current_rear_left_lift,
+                self.current_rear_right_lift,
+            )
+            if all(
+                value is not None and math.isfinite(float(value))
+                for value in values
+            ):
+                command = LiftCommand()
+                command.front_lift = (values[0] + values[1]) / 2.0
+                command.rear_lift = (values[2] + values[3]) / 2.0
+            self.state_condition.notify_all()
+        if command is not None:
+            self.command_publisher.publish(command)
+
     def handle_set_lift(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
+            if self.abort_requested():
+                return self.fill_failure_response(
+                    request, response, 'aborted by /r2/system/abort')
             requested_tolerance = float(request.tolerance)
             requested_timeout = float(request.timeout_sec)
             if (
@@ -97,9 +127,16 @@ class LiftServiceController(Node):
             command.front_lift = request.front_lift
             command.rear_lift = request.rear_lift
             self.command_publisher.publish(command)
+            if self.abort_requested():
+                self.hold_current_lift_on_abort()
+                return self.fill_failure_response(
+                    request, response, 'aborted by /r2/system/abort')
 
             deadline = self.get_clock().now().nanoseconds / 1e9 + timeout_sec
             while rclpy.ok():
+                if self.abort_requested():
+                    return self.fill_failure_response(
+                        request, response, 'aborted by /r2/system/abort')
                 with self.state_condition:
                     remaining = deadline - (self.get_clock().now().nanoseconds / 1e9)
                     if remaining <= 0.0:
@@ -111,7 +148,7 @@ class LiftServiceController(Node):
                         self.current_rear_left_lift is None or
                         self.current_rear_right_lift is None
                     ):
-                        self.state_condition.wait(timeout=min(remaining, 0.5))
+                        self.state_condition.wait(timeout=min(remaining, 0.05))
                         continue
 
                     fe_l = request.front_lift - self.current_front_left_lift
@@ -141,29 +178,32 @@ class LiftServiceController(Node):
 
                     self.state_condition.wait(timeout=min(remaining, 0.05))
 
-            with self.state_condition:
-                fl = (
-                    self.current_front_left_lift
-                    if self.current_front_left_lift is not None else 0.0)
-                fr = (
-                    self.current_front_right_lift
-                    if self.current_front_right_lift is not None else 0.0)
-                rl = (
-                    self.current_rear_left_lift
-                    if self.current_rear_left_lift is not None else 0.0)
-                rr = (
-                    self.current_rear_right_lift
-                    if self.current_rear_right_lift is not None else 0.0)
-                final_front = (fl + fr) / 2.0
-                final_rear = (rl + rr) / 2.0
+            return self.fill_failure_response(
+                request, response, 'SetLift timeout')
 
-                response.success = False
-                response.message = 'SetLift timeout'
-                response.final_front_lift = final_front
-                response.final_rear_lift = final_rear
-                response.front_error = request.front_lift - final_front
-                response.rear_error = request.rear_lift - final_rear
-                return response
+    def fill_failure_response(self, request, response, message):
+        with self.state_condition:
+            fl = (
+                self.current_front_left_lift
+                if self.current_front_left_lift is not None else 0.0)
+            fr = (
+                self.current_front_right_lift
+                if self.current_front_right_lift is not None else 0.0)
+            rl = (
+                self.current_rear_left_lift
+                if self.current_rear_left_lift is not None else 0.0)
+            rr = (
+                self.current_rear_right_lift
+                if self.current_rear_right_lift is not None else 0.0)
+        final_front = (fl + fr) / 2.0
+        final_rear = (rl + rr) / 2.0
+        response.success = False
+        response.message = message
+        response.final_front_lift = final_front
+        response.final_rear_lift = final_rear
+        response.front_error = request.front_lift - final_front
+        response.rear_error = request.rear_lift - final_rear
+        return response
 
 
 def main():

@@ -21,9 +21,11 @@
 #include <robot_r2_interfaces/msg/kfs_type_result.hpp>
 #include <robot_r2_interfaces/srv/get_kfs_type.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <std_msgs/msg/header.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -58,6 +60,8 @@ constexpr char kFrontDebugTopic[] = "/r2/detection/front/debug";
 constexpr char kLeftDebugTopic[] = "/r2/detection/left/debug";
 constexpr char kRightDebugTopic[] = "/r2/detection/right/debug";
 constexpr char kServiceName[] = "/r2/detection/get_type";
+constexpr char kAbortTopic[] = "/r2/system/abort";
+constexpr char kAbortMessage[] = "aborted by /r2/system/abort";
 
 void check_cuda(cudaError_t status, const char *operation) {
   if (status != cudaSuccess) {
@@ -539,6 +543,8 @@ public:
         create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
     service_callback_group_ =
         create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+    abort_callback_group_ =
+        create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 
     raw_publisher_ =
         create_publisher<robot_r2_interfaces::msg::KfsFusedRawDetections>(
@@ -576,6 +582,17 @@ public:
           handle_vote_service(request, response);
         },
         rmw_qos_profile_services_default, service_callback_group_);
+
+    rclcpp::SubscriptionOptions abort_options;
+    abort_options.callback_group = abort_callback_group_;
+    abort_subscription_ = create_subscription<std_msgs::msg::Empty>(
+        kAbortTopic, rclcpp::QoS(1).reliable().durability_volatile(),
+        [this](std_msgs::msg::Empty::ConstSharedPtr) {
+          abort_generation_.fetch_add(1, std::memory_order_release);
+          RCLCPP_WARN(get_logger(),
+                      "Received %s; aborting active request", kAbortTopic);
+        },
+        abort_options);
 
     replace_inference_timer(configuration->inference_rate);
     RCLCPP_INFO(get_logger(),
@@ -1140,6 +1157,8 @@ private:
   void handle_vote_service(
       const std::shared_ptr<GetKfsType::Request> request,
       const std::shared_ptr<GetKfsType::Response> response) {
+    const std::uint64_t abort_generation =
+        abort_generation_.load(std::memory_order_acquire);
     if (request->sample_count == 0) {
       response->success = false;
       response->message = "sample_count must be positive";
@@ -1161,6 +1180,12 @@ private:
     // Serialize concurrent GetKfsType requests so they never fight over the
     // shared per-camera vote state.
     std::unique_lock<std::mutex> service_lock(service_mutex_);
+    if (abort_generation !=
+        abort_generation_.load(std::memory_order_acquire)) {
+      response->success = false;
+      response->message = kAbortMessage;
+      return;
+    }
     for (auto &camera : cameras_) {
       std::lock_guard<std::mutex> vote_lock(camera->vote_mutex);
       camera->vote_samples.clear();
@@ -1172,6 +1197,10 @@ private:
     // deadline expires. Per-camera conditions fire independently, so a short
     // poll is simpler than waiting on three condition variables at once.
     while (rclcpp::ok()) {
+      if (abort_generation !=
+          abort_generation_.load(std::memory_order_acquire)) {
+        break;
+      }
       bool all_complete = true;
       for (const auto &camera : cameras_) {
         std::lock_guard<std::mutex> vote_lock(camera->vote_mutex);
@@ -1188,7 +1217,9 @@ private:
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
-    bool all_succeeded = true;
+    const bool aborted =
+        abort_generation != abort_generation_.load(std::memory_order_acquire);
+    bool all_succeeded = !aborted;
     for (std::size_t index = 0; index < cameras_.size(); ++index) {
       CameraState &camera = *cameras_[index];
       std::vector<std::string> samples;
@@ -1199,6 +1230,12 @@ private:
         camera.vote_target = 0;
       }
       auto &result = type_result_slot(*response, index);
+      if (aborted) {
+        result.success = false;
+        result.message = kAbortMessage;
+        result.class_name = "";
+        continue;
+      }
       if (samples.size() < sample_count) {
         all_succeeded = false;
         result.success = false;
@@ -1216,9 +1253,13 @@ private:
     }
 
     response->success = all_succeeded;
-    response->message =
-        all_succeeded ? "Selected most frequent classes for all cameras"
-                      : "One or more cameras timed out during voting";
+    if (aborted) {
+      response->message = kAbortMessage;
+    } else if (all_succeeded) {
+      response->message = "Selected most frequent classes for all cameras";
+    } else {
+      response->message = "One or more cameras timed out during voting";
+    }
   }
 
   std::mutex frame_mutex_;
@@ -1232,10 +1273,13 @@ private:
   std::vector<rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr>
       debug_publishers_;
   rclcpp::Service<GetKfsType>::SharedPtr service_;
+  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr abort_subscription_;
+  std::atomic<std::uint64_t> abort_generation_{0};
   std::mutex service_mutex_;
   rclcpp::CallbackGroup::SharedPtr image_callback_group_;
   rclcpp::CallbackGroup::SharedPtr inference_callback_group_;
   rclcpp::CallbackGroup::SharedPtr service_callback_group_;
+  rclcpp::CallbackGroup::SharedPtr abort_callback_group_;
   rclcpp::TimerBase::SharedPtr inference_timer_;
   std::unique_ptr<TensorRtResNet> engine_;
   std::mutex engine_mutex_;

@@ -6,6 +6,7 @@ from rcl_interfaces.msg import SetParametersResult
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.srv import MoveRelative, SetLift, TraverseStep
 
 
@@ -14,7 +15,7 @@ MOVE_RELATIVE_SERVICE = '/r2/move_relative'
 SET_LIFT_SERVICE = '/r2/lift/set'
 
 
-class StepTraverseController(Node):
+class StepTraverseController(AbortableMixin, Node):
     # 支持运行时动态修改（ros2 param set）的参数：
     # 移动距离与线速度上限（非负）与抬升位置（有限）。
     DISTANCE_PARAMETER_NAMES = (
@@ -45,6 +46,8 @@ class StepTraverseController(Node):
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
         self.config_lock = threading.Lock()
+        self.abort_monitor = AbortMonitor(
+            self, callback_group=self.callback_group)
 
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('move_timeout_sec', 35.0)
@@ -195,8 +198,10 @@ class StepTraverseController(Node):
         return SetParametersResult(successful=True)
 
     def handle_traverse_step(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             try:
+                self.raise_if_abort_requested()
                 distance_to_step = self.validate_request(request)
                 self.wait_for_dependencies()
 
@@ -234,16 +239,15 @@ class StepTraverseController(Node):
 
     def wait_for_dependencies(self):
         timeout = self.dependency_timeout_sec
-        if not self.move_client.wait_for_service(timeout_sec=timeout):
+        if not self.wait_for_service_or_abort(self.move_client, timeout):
             raise RuntimeError('MoveRelative service unavailable')
-        if not self.lift_client.wait_for_service(timeout_sec=timeout):
+        if not self.wait_for_service_or_abort(self.lift_client, timeout):
             raise RuntimeError('SetLift service unavailable')
 
-    @staticmethod
-    def wait_for_future(future, timeout_sec, description):
+    def wait_for_future(self, future, timeout_sec, description):
         completed = threading.Event()
         future.add_done_callback(lambda _: completed.set())
-        if not completed.wait(timeout_sec + 1.0):
+        if not self.wait_for_event_or_abort(completed, timeout_sec + 1.0):
             raise RuntimeError(f'{description} timed out waiting for response')
 
         response = future.result()
@@ -262,7 +266,7 @@ class StepTraverseController(Node):
         request.yaw_tolerance = 0.0
         request.timeout_sec = self.move_timeout_sec
         response = self.wait_for_future(
-            self.move_client.call_async(request),
+            self.call_async_or_abort(self.move_client, request),
             self.move_timeout_sec,
             'MoveRelative',
         )
@@ -276,7 +280,7 @@ class StepTraverseController(Node):
         request.tolerance = 0.0
         request.timeout_sec = self.lift_timeout_sec
         response = self.wait_for_future(
-            self.lift_client.call_async(request),
+            self.call_async_or_abort(self.lift_client, request),
             self.lift_timeout_sec,
             'SetLift',
         )

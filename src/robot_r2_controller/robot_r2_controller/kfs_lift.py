@@ -6,11 +6,12 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import AbortMonitor, PositionAbortMixin
 from robot_r2_interfaces.srv import SetJointPosition
 from std_msgs.msg import Float64
 
 
-class KfsLiftServiceController(Node):
+class KfsLiftServiceController(PositionAbortMixin, Node):
     def __init__(self):
         super().__init__('kfs_lift')
         self.callback_group = ReentrantCallbackGroup()
@@ -53,6 +54,11 @@ class KfsLiftServiceController(Node):
             self.handle_set_lift,
             callback_group=self.callback_group,
         )
+        self.abort_monitor = AbortMonitor(
+            self,
+            callback_group=self.callback_group,
+            on_abort=self.hold_current_position_on_abort,
+        )
 
     def on_feedback(self, msg):
         with self.state_condition:
@@ -60,7 +66,10 @@ class KfsLiftServiceController(Node):
             self.state_condition.notify_all()
 
     def handle_set_lift(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
+            if self.abort_requested():
+                return self.fill_aborted_position_response(request, response)
             if not math.isfinite(request.position):
                 response.success = False
                 response.message = 'KFS lift position must be finite'
@@ -84,9 +93,15 @@ class KfsLiftServiceController(Node):
             command = Float64()
             command.data = request.position
             self.command_publisher.publish(command)
+            if self.abort_requested():
+                self.hold_current_position_on_abort()
+                return self.fill_aborted_position_response(request, response)
 
             deadline = time.monotonic() + timeout_sec
             while rclpy.ok():
+                if self.abort_requested():
+                    return self.fill_aborted_position_response(
+                        request, response)
                 with self.state_condition:
                     if self.current_position is not None:
                         error = request.position - self.current_position
@@ -100,7 +115,7 @@ class KfsLiftServiceController(Node):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0.0:
                         break
-                    self.state_condition.wait(timeout=remaining)
+                    self.state_condition.wait(timeout=min(remaining, 0.05))
 
             final_position = self._last_position()
             response.success = False

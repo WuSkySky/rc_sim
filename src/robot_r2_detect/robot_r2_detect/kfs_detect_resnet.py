@@ -73,6 +73,11 @@ def main(args: list[str] | None = None) -> None:
     from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
     from rclpy.executors import MultiThreadedExecutor
     from rclpy.node import Node
+    from robot_r2_common import (
+        ABORT_MESSAGE,
+        AbortMonitor,
+        AbortableMixin,
+    )
     from robot_r2_interfaces.msg import (
         CameraFrame,
         KfsProcessedDetection,
@@ -94,7 +99,7 @@ def main(args: list[str] | None = None) -> None:
         validate_model_configuration,
     )
 
-    class KfsDetectResnetNode(Node):
+    class KfsDetectResnetNode(AbortableMixin, Node):
         """Classify camera frames while preserving the KFS detection API."""
 
         def __init__(self) -> None:
@@ -102,6 +107,7 @@ def main(args: list[str] | None = None) -> None:
             self._image_callback_group = MutuallyExclusiveCallbackGroup()
             self._service_callback_group = MutuallyExclusiveCallbackGroup()
             self._state_callback_group = MutuallyExclusiveCallbackGroup()
+            self._abort_callback_group = MutuallyExclusiveCallbackGroup()
             self._vote_condition = threading.Condition()
             self._vote_active = False
             self._vote_target_count = 0
@@ -159,6 +165,11 @@ def main(args: list[str] | None = None) -> None:
             self.add_on_set_parameters_callback(
                 self._on_parameters_changed
             )
+            self.abort_monitor = AbortMonitor(
+                self,
+                callback_group=self._abort_callback_group,
+                on_abort=self._wake_waiters_on_abort,
+            )
             self.get_logger().info(
                 f"Loaded ResNet KFS classifier from {self._model_path} "
                 f"with {self._classifier.backend}"
@@ -169,6 +180,12 @@ def main(args: list[str] | None = None) -> None:
                     "enabled; the latest placement state will be frozen on "
                     "the first service request"
                 )
+
+        def _wake_waiters_on_abort(self) -> None:
+            with self._vote_condition:
+                self._vote_condition.notify_all()
+            with self._state_condition:
+                self._state_condition.notify_all()
 
         # ---- parameters and model ----
 
@@ -656,6 +673,11 @@ def main(args: list[str] | None = None) -> None:
                     self._latest_placements is None
                     or self._robot_pose is None
                 ):
+                    if self.abort_requested():
+                        response.success = False
+                        response.message = ABORT_MESSAGE
+                        response.class_name = ""
+                        return response
                     remaining = deadline - time.monotonic()
                     if remaining <= 0.0:
                         response.success = False
@@ -794,6 +816,16 @@ def main(args: list[str] | None = None) -> None:
                     self._vote_condition.notify_all()
 
         def _handle_get_kfs_type(self, request, response):
+            abort_scope = self.abort_scope()
+            with abort_scope:
+                if self.abort_requested():
+                    response.success = False
+                    response.message = ABORT_MESSAGE
+                    response.class_name = ""
+                    return response
+                return self._handle_get_kfs_type_active(request, response)
+
+        def _handle_get_kfs_type_active(self, request, response):
             if self._simulation_state_detection:
                 return self._handle_simulation_state_detection(
                     request, response
@@ -827,6 +859,9 @@ def main(args: list[str] | None = None) -> None:
                 self._vote_active = True
                 try:
                     while len(self._vote_samples) < sample_count:
+                        if self.abort_requested():
+                            failure_message = ABORT_MESSAGE
+                            break
                         if not rclpy.ok():
                             failure_message = (
                                 "ROS shutdown while collecting detections"
@@ -842,7 +877,7 @@ def main(args: list[str] | None = None) -> None:
                             )
                             break
                         self._vote_condition.wait(
-                            timeout=min(remaining, 0.1)
+                            timeout=min(remaining, 0.05)
                         )
 
                     if not failure_message:

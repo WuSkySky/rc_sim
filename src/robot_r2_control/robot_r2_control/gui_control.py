@@ -14,6 +14,7 @@ from geometry_msgs.msg import Twist
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
+from robot_r2_common import ABORT_TOPIC
 from robot_r2_control.joint_control_gui import (
     JointControlGuiMixin,
     JointControlNodeMixin,
@@ -36,7 +37,7 @@ from robot_r2_interfaces.srv import (
     StageThree,
     TraverseStep,
 )
-from std_msgs.msg import Float64
+from std_msgs.msg import Empty, Float64
 
 
 MOTION_KEYS = {'w', 'a', 's', 'd', 'q', 'e'}
@@ -593,6 +594,8 @@ class GuiControlNode(JointControlNodeMixin, Node):
         }
         self.cmd_vel_publisher = self.create_publisher(
             Twist, self.CMD_VEL_TOPIC, 10)
+        self.abort_publisher = self.create_publisher(
+            Empty, ABORT_TOPIC, 10)
         self.kfs_load_feedback_subscribers = {
             name: self.create_subscription(
                 Float64,
@@ -2119,6 +2122,11 @@ class GuiControlNode(JointControlNodeMixin, Node):
             self.velocity_test_deadline = None
         self.cmd_vel_publisher.publish(Twist())
 
+    def abort_current_task(self):
+        self.stop_chassis()
+        self.abort_publisher.publish(Empty())
+        return '已发送取消当前任务请求'
+
     def _queue_status(self, message):
         with self.state_lock:
             self.status_events.append(message)
@@ -2569,10 +2577,26 @@ class GuiControlApp(JointControlGuiMixin):
 
         self.build_joint_controls(mechanism_column)
 
+        self.abort_button = ttk.Button(
+            main_frame,
+            text='取消当前任务',
+            command=self._abort_current_task,
+        )
+        self.abort_button.grid(
+            row=1,
+            column=0,
+            columnspan=3,
+            sticky='ew',
+            pady=(8, 0),
+        )
+
         status_label = ttk.Label(
             main_frame, textvariable=self.status_text, anchor='w')
         status_label.grid(
-            row=1, column=0, columnspan=3, sticky='ew', pady=(8, 0))
+            row=2, column=0, columnspan=3, sticky='ew', pady=(8, 0))
+
+    def _abort_current_task(self):
+        self.status_text.set(self.node.abort_current_task())
 
     def _create_control_frame(self, parent, row, title, controls):
         return super()._create_control_frame(parent, row, title, controls)

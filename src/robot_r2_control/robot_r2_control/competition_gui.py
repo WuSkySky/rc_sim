@@ -9,6 +9,7 @@ from tkinter import ttk
 from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
+from robot_r2_common import ABORT_TOPIC
 from robot_r2_control.joint_control_gui import (
     JointControlGuiMixin,
     JointControlNodeMixin,
@@ -23,6 +24,7 @@ from robot_r2_interfaces.srv import (
     StageThree,
     StageTwo,
 )
+from std_msgs.msg import Empty
 
 
 @dataclass(frozen=True)
@@ -77,7 +79,13 @@ class CompetitionGuiNode(JointControlNodeMixin, Node):
             StageTwo, self.STAGE_TWO_SERVICE)
         self.stage_three_client = self.create_client(
             StageThree, self.STAGE_THREE_SERVICE)
+        self.abort_publisher = self.create_publisher(
+            Empty, ABORT_TOPIC, 10)
         self.add_on_set_parameters_callback(self.on_parameters_changed)
+
+    def abort_current_task(self):
+        self.abort_publisher.publish(Empty())
+        return '已发送取消当前任务请求'
 
     @staticmethod
     def validate_team(team):
@@ -388,17 +396,33 @@ class CompetitionGuiApp(JointControlGuiMixin):
         self._build_stage_three_controls(task_column)
         self.build_joint_controls(joint_column)
 
-        ttk.Label(
+        self.abort_button = ttk.Button(
             main_frame,
-            textvariable=self.status_text,
-            anchor='w',
-        ).grid(
+            text='取消当前任务',
+            command=self._abort_current_task,
+        )
+        self.abort_button.grid(
             row=1,
             column=0,
             columnspan=2,
             sticky='ew',
             pady=(8, 0),
         )
+
+        ttk.Label(
+            main_frame,
+            textvariable=self.status_text,
+            anchor='w',
+        ).grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            sticky='ew',
+            pady=(8, 0),
+        )
+
+    def _abort_current_task(self):
+        self.status_text.set(self.node.abort_current_task())
 
     def _build_team_controls(self, parent):
         frame = ttk.LabelFrame(parent, text='比赛队伍', padding=10)

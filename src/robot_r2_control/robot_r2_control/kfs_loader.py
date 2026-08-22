@@ -10,6 +10,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.srv import (
     KfsAction,
     SetJointPosition,
@@ -121,7 +122,7 @@ def validate_timeout(value):
     return timeout
 
 
-class KfsLoaderController(Node):
+class KfsLoaderController(AbortableMixin, Node):
     KFS_ACTION_SERVICE = '/r2/kfs/action'
     GRIP_SERVICE = '/r2/gripper/set_grip'
     ROOT_ROTATE_SERVICE = '/r2/gripper/set_rotate'
@@ -132,6 +133,8 @@ class KfsLoaderController(Node):
         self.callback_group = ReentrantCallbackGroup()
         self.operation_lock = threading.Lock()
         self.config_lock = threading.Lock()
+        self.abort_monitor = AbortMonitor(
+            self, callback_group=self.callback_group)
 
         self.declare_parameter('service_timeout_sec', 10.0)
         for parameter_name in TRAJECTORY_PARAMETER_NAMES:
@@ -209,7 +212,7 @@ class KfsLoaderController(Node):
             (self.tip_rotate_client, 'gripper tip rotate'),
         )
         for client, description in clients:
-            if not client.wait_for_service(timeout_sec=timeout_sec):
+            if not self.wait_for_service_or_abort(client, timeout_sec):
                 raise RuntimeError(f'{description} service unavailable')
 
     @staticmethod
@@ -220,8 +223,9 @@ class KfsLoaderController(Node):
         request.timeout_sec = float(timeout_sec)
         return request
 
-    @staticmethod
-    def wait_for_step_futures(futures, timeout_sec, step_description):
+    def wait_for_step_futures(
+        self, futures, timeout_sec, step_description
+    ):
         done_events = {}
         for motor_name, future in futures.items():
             done_event = threading.Event()
@@ -233,7 +237,9 @@ class KfsLoaderController(Node):
         failures = []
         for motor_name, future in futures.items():
             remaining = max(0.0, deadline - time.monotonic())
-            if not done_events[motor_name].wait(remaining):
+            if not self.wait_for_event_or_abort(
+                done_events[motor_name], remaining
+            ):
                 failures.append(f'{motor_name}: call timed out')
                 continue
             try:
@@ -274,9 +280,12 @@ class KfsLoaderController(Node):
                 ),
             }
             futures = {
-                'root': self.root_rotate_client.call_async(requests['root']),
-                'tip': self.tip_rotate_client.call_async(requests['tip']),
-                'grip': self.grip_client.call_async(requests['grip']),
+                'root': self.call_async_or_abort(
+                    self.root_rotate_client, requests['root']),
+                'tip': self.call_async_or_abort(
+                    self.tip_rotate_client, requests['tip']),
+                'grip': self.call_async_or_abort(
+                    self.grip_client, requests['grip']),
             }
             self.wait_for_step_futures(
                 futures,
@@ -318,8 +327,10 @@ class KfsLoaderController(Node):
         raise ValueError(f'unsupported KFS action: {request.action!r}')
 
     def handle_kfs_action(self, request, response):
-        with self.operation_lock:
+        abort_scope = self.abort_scope()
+        with self.operation_lock, abort_scope:
             try:
+                self.raise_if_abort_requested()
                 sequence_name = self.action_sequence_name(request)
                 sequence, timeout_sec = self.snapshot_config(sequence_name)
                 self.execute_sequence(

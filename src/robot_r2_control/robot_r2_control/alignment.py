@@ -23,6 +23,7 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
+from robot_r2_common import ABORT_MESSAGE, AbortMonitor, AbortableMixin
 from robot_r2_interfaces.msg import AlignmentDetection
 from robot_r2_interfaces.srv import Align
 
@@ -45,7 +46,7 @@ class AlignmentConfig:
     output_limit: float
 
 
-class AlignmentController(Node):
+class AlignmentController(AbortableMixin, Node):
     """Align the chassis from generic image-space target feedback."""
 
     def __init__(self) -> None:
@@ -90,6 +91,11 @@ class AlignmentController(Node):
         )
         self._parameter_callback = self.add_on_set_parameters_callback(
             self._on_parameters_changed
+        )
+        self.abort_monitor = AbortMonitor(
+            self,
+            callback_group=self._service_callback_group,
+            on_abort=self._stop_alignment_on_abort,
         )
 
     def _declare_parameters(self) -> None:
@@ -243,7 +249,11 @@ class AlignmentController(Node):
         return output
 
     def _handle_align(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
+            if self.abort_requested():
+                return self._failure_response(
+                    response, ABORT_MESSAGE, None)
             requested_tolerance = float(request.pixel_tolerance)
             requested_timeout = float(request.timeout_sec)
             if not math.isfinite(requested_tolerance):
@@ -298,6 +308,9 @@ class AlignmentController(Node):
             handled_sequence = self._frame_sequence
 
         while rclpy.ok():
+            if self.abort_requested():
+                return self._failure_response(
+                    response, ABORT_MESSAGE, last_offset)
             with self.state_condition:
                 while (
                     self._frame_sequence <= handled_sequence
@@ -314,7 +327,7 @@ class AlignmentController(Node):
                     if remaining <= 0.0:
                         break
                     self.state_condition.wait(
-                        timeout=min(remaining, 0.1)
+                        timeout=min(remaining, 0.05)
                     )
 
                 if self._frame_sequence > handled_sequence:
@@ -398,6 +411,9 @@ class AlignmentController(Node):
                 output = -output
             cmd = Twist()
             cmd.linear.y = output
+            if self.abort_requested():
+                return self._failure_response(
+                    response, ABORT_MESSAGE, last_offset)
             self._pub_cmd.publish(cmd)
 
         return self._failure_response(
@@ -407,6 +423,7 @@ class AlignmentController(Node):
         )
 
     def _failure_response(self, response, message, offset):
+        self._pid_reset()
         self._stop()
         response.success = False
         response.message = message
@@ -415,6 +432,12 @@ class AlignmentController(Node):
 
     def _stop(self) -> None:
         self._pub_cmd.publish(Twist())
+
+    def _stop_alignment_on_abort(self) -> None:
+        with self.state_condition:
+            self._alignment_active = False
+            self.state_condition.notify_all()
+        self._stop()
 
 
 def main(args: list[str] | None = None) -> None:

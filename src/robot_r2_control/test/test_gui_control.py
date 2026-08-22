@@ -140,6 +140,7 @@ def make_node_stub():
     }
     node.motion_config = dict(GuiControlNode.MOTION_PARAMETER_DEFAULTS)
     node.cmd_vel_publisher = FakePublisher()
+    node.abort_publisher = FakePublisher()
     node.move_relative_client = FakeClient()
     node.kfs_alignment_client = FakeClient()
     node.tip_alignment_client = FakeClient()
@@ -1491,6 +1492,22 @@ def test_keyboard_press_cancels_velocity_test():
     assert node.press_manual_key('a')
     assert node.velocity_test_kind is None
     assert node.velocity_test_deadline is None
+
+
+def test_abort_current_task_stops_gui_motion_and_publishes_event():
+    node = make_node_stub()
+    node.active_manual_keys.add('w')
+    node.velocity_test_kind = 'forward'
+    node.velocity_test_deadline = math.inf
+
+    message = node.abort_current_task()
+
+    assert message == '已发送取消当前任务请求'
+    assert not node.active_manual_keys
+    assert node.velocity_test_kind is None
+    assert node.velocity_test_deadline is None
+    assert len(node.cmd_vel_publisher.messages) == 1
+    assert len(node.abort_publisher.messages) == 1
 
 
 def test_keyboard_is_ignored_during_pose_servo():

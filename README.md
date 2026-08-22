@@ -156,6 +156,22 @@ ros2 interface show robot_r2_interfaces/srv/MoveToPose
 | 武器夹爪开合    | `/r2/weapon/set_grip`        | `robot_r2_interfaces/srv/SetJointPosition`    | 仅实机   |
 | 重新随机摆放 KFS | `/simulation/reset_kfs`      | `std_srvs/srv/Trigger`                        | 仅仿真   |
 
+### 一次性中止正在执行的任务
+
+任务编排、底盘运动、升降、夹爪、视觉对齐和任务依赖的检测服务都订阅
+`/r2/system/abort`（`std_msgs/msg/Empty`）。收到一条消息后，当时已经开始的
+相关服务会尽快停止并以 `success: false` 返回；之后发起的新请求不受影响。
+
+```bash
+ros2 topic pub --once /r2/system/abort std_msgs/msg/Empty "{}"
+```
+
+调试 GUI 和正式比赛 GUI 均提供始终可用的“取消当前任务”按钮，用于发布同一
+中止消息；调试 GUI 还会同步停止本机键盘控制和定时速度测试。
+
+底盘会立即发布零速度，位置控制执行器会在存在有效反馈时重新下发当前位置以
+保持。该机制用于软件任务中止，不替代硬件急停或下位机失联保护。
+
 
 ### 阶段一任务
 

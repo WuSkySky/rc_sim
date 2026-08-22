@@ -83,6 +83,14 @@ class FakeWidget:
         self.states.append(kwargs)
 
 
+class FakePublisher:
+    def __init__(self):
+        self.messages = []
+
+    def publish(self, message):
+        self.messages.append(message)
+
+
 def make_node():
     node = CompetitionGuiNode.__new__(CompetitionGuiNode)
     node.state_lock = threading.RLock()
@@ -94,6 +102,7 @@ def make_node():
     node.stage_one_client = FakeClient()
     node.stage_two_client = FakeClient()
     node.stage_three_client = FakeClient()
+    node.abort_publisher = FakePublisher()
     node.stage_one_relocalization_pose = (
         node.STAGE_ONE_RELOCALIZATION_DEFAULT)
     node.stage_two_relocalization_pose = (
@@ -503,6 +512,7 @@ def test_busy_state_disables_configuration_and_joint_widgets():
     app = CompetitionGuiApp.__new__(CompetitionGuiApp)
     app.interactive_widgets = [FakeWidget(), FakeWidget()]
     app.joint_control_widgets = [FakeWidget()]
+    app.abort_button = FakeWidget()
 
     app._set_busy_state(True)
     app._set_busy_state(False)
@@ -512,6 +522,27 @@ def test_busy_state_disables_configuration_and_joint_widgets():
             {'state': 'disabled'},
             {'state': 'normal'},
         ]
+    assert app.abort_button.states == []
+
+
+def test_abort_current_task_publishes_event():
+    node = make_node()
+
+    message = node.abort_current_task()
+
+    assert message == '已发送取消当前任务请求'
+    assert len(node.abort_publisher.messages) == 1
+
+
+def test_abort_button_updates_status():
+    app = CompetitionGuiApp.__new__(CompetitionGuiApp)
+    app.node = SimpleNamespace(
+        abort_current_task=lambda: '已发送取消当前任务请求')
+    app.status_text = FakeVariable('')
+
+    app._abort_current_task()
+
+    assert app.status_text.get() == '已发送取消当前任务请求'
 
 
 def test_joint_limits_update_atomically():

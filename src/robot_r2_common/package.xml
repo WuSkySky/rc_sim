@@ -1,22 +1,14 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>robot_r2_control</name>
+  <name>robot_r2_common</name>
   <version>0.0.0</version>
-  <description>Control utilities for Robot R2.</description>
+  <description>Shared runtime helpers for Robot R2 nodes.</description>
   <maintainer email="skysky@example.com">skysky</maintainer>
   <license>TODO: License declaration</license>
 
-  <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>robot_r2_common</exec_depend>
-  <exec_depend>robot_r2_interfaces</exec_depend>
-  <exec_depend>ros2param</exec_depend>
   <exec_depend>std_msgs</exec_depend>
-  <exec_depend>python3-pynput</exec_depend>
-  <exec_depend>python3-tk</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 

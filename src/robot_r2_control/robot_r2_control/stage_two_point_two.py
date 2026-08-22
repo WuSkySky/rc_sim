@@ -8,6 +8,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.srv import (
     Align,
     GetKfsType,
@@ -33,7 +34,7 @@ ALIGN_TO_KFS_SERVICE = '/r2/align_to_kfs'
 KFS_ACTION_SERVICE = '/r2/kfs/action'
 
 
-class StageTwoPointTwoController(Node):
+class StageTwoPointTwoController(AbortableMixin, Node):
     FORWARD = (-1, 0)
     LEFT = (0, -1)
     RIGHT = (0, 1)
@@ -46,6 +47,9 @@ class StageTwoPointTwoController(Node):
         self.service_lock = threading.Lock()
         self.config_lock = threading.Lock()
         self.pose_condition = threading.Condition()
+        self.abort_monitor = AbortMonitor(
+            self, callback_group=self.callback_group,
+            on_abort=self._wake_pose_waiters)
         self.current_pose = None
         self.loaded_count = 0
         self.team = StageTwoPointTwo.Request.RED
@@ -467,19 +471,26 @@ class StageTwoPointTwoController(Node):
         deadline = time.monotonic() + pose_timeout_sec
         with self.pose_condition:
             while self.current_pose is None:
+                self.raise_if_abort_requested()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0.0:
                     raise RuntimeError('Pose feedback unavailable')
-                self.pose_condition.wait(timeout=remaining)
+                self.pose_condition.wait(timeout=min(remaining, 0.05))
             return self.current_pose
 
+    def _wake_pose_waiters(self):
+        with self.pose_condition:
+            self.pose_condition.notify_all()
+
     def handle_task(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             self.loaded_count = int(request.loaded_count)
             self.team = request.team
             self.mode = int(request.mode)
             self.arrival_direction = None
             try:
+                self.raise_if_abort_requested()
                 self.validate_team(self.team)
                 self.validate_loaded_count(self.loaded_count)
                 (
@@ -533,18 +544,20 @@ class StageTwoPointTwoController(Node):
         return lift_height, lift_timeout_sec, targets
 
     def handle_exit(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             try:
+                self.raise_if_abort_requested()
                 lift_height, lift_timeout_sec, targets = self.exit_config(
                     request.team)
                 with self.config_lock:
                     dependency_timeout_sec = self.dependency_timeout_sec
-                if not self.lift_client.wait_for_service(
-                    timeout_sec=dependency_timeout_sec
+                if not self.wait_for_service_or_abort(
+                    self.lift_client, dependency_timeout_sec
                 ):
                     raise RuntimeError('SetLift service unavailable')
-                if not self.move_client.wait_for_service(
-                    timeout_sec=dependency_timeout_sec
+                if not self.wait_for_service_or_abort(
+                    self.move_client, dependency_timeout_sec
                 ):
                     raise RuntimeError('MoveToPose service unavailable')
                 self.set_lift(lift_height, lift_timeout_sec)
@@ -569,7 +582,7 @@ class StageTwoPointTwoController(Node):
         request.tolerance = 0.0
         request.timeout_sec = float(timeout_sec)
         response = self.wait_for_future(
-            self.lift_client.call_async(request),
+            self.call_async_or_abort(self.lift_client, request),
             timeout_sec,
             'SetLift',
         )
@@ -739,16 +752,15 @@ class StageTwoPointTwoController(Node):
         elif self.mode == StageTwoPointTwo.Request.ROUTE:
             dependencies.append((self.align_client, 'AlignToKfs'))
         for client, name in dependencies:
-            if not client.wait_for_service(
-                timeout_sec=dependency_timeout_sec
+            if not self.wait_for_service_or_abort(
+                client, dependency_timeout_sec
             ):
                 raise RuntimeError(f'{name} service unavailable')
 
-    @staticmethod
-    def wait_for_future(future, timeout_sec, description):
+    def wait_for_future(self, future, timeout_sec, description):
         completed = threading.Event()
         future.add_done_callback(lambda _: completed.set())
-        if not completed.wait(timeout_sec + 1.0):
+        if not self.wait_for_event_or_abort(completed, timeout_sec + 1.0):
             raise RuntimeError(f'{description} timed out waiting for response')
 
         response = future.result()
@@ -768,7 +780,7 @@ class StageTwoPointTwoController(Node):
         request.yaw_tolerance = 0.0
         request.timeout_sec = move_timeout_sec
         response = self.wait_for_future(
-            self.move_client.call_async(request),
+            self.call_async_or_abort(self.move_client, request),
             move_timeout_sec,
             'MoveToPose',
         )
@@ -787,7 +799,7 @@ class StageTwoPointTwoController(Node):
         request.yaw_tolerance = 0.0
         request.timeout_sec = move_timeout_sec
         response = self.wait_for_future(
-            self.move_relative_client.call_async(request),
+            self.call_async_or_abort(self.move_relative_client, request),
             move_timeout_sec,
             'MoveRelative',
         )
@@ -815,7 +827,7 @@ class StageTwoPointTwoController(Node):
         request.sample_count = sample_count
         request.timeout_sec = detection_timeout_sec
         response = self.wait_for_future(
-            self.detection_client.call_async(request),
+            self.call_async_or_abort(self.detection_client, request),
             detection_timeout_sec,
             'GetKfsType',
         )
@@ -833,7 +845,7 @@ class StageTwoPointTwoController(Node):
         request.action = KfsAction.Request.LOAD
         request.mode = mode
         response = self.wait_for_future(
-            self.kfs_action_client.call_async(request),
+            self.call_async_or_abort(self.kfs_action_client, request),
             load_timeout_sec,
             'KfsAction load',
         )
@@ -847,7 +859,7 @@ class StageTwoPointTwoController(Node):
         request = KfsAction.Request()
         request.action = KfsAction.Request.RELEASE
         response = self.wait_for_future(
-            self.kfs_action_client.call_async(request),
+            self.call_async_or_abort(self.kfs_action_client, request),
             release_timeout_sec,
             'KfsAction release',
         )
@@ -867,7 +879,7 @@ class StageTwoPointTwoController(Node):
         )
         request.distance_to_step = float(distance_to_step)
         response = self.wait_for_future(
-            self.traverse_client.call_async(request),
+            self.call_async_or_abort(self.traverse_client, request),
             traverse_timeout_sec,
             'TraverseStep',
         )
@@ -991,7 +1003,7 @@ class StageTwoPointTwoController(Node):
         request.pixel_tolerance = 0.0
         request.timeout_sec = 0.0
         response = self.wait_for_future(
-            self.align_client.call_async(request),
+            self.call_async_or_abort(self.align_client, request),
             align_timeout_sec,
             'AlignToKfs',
         )

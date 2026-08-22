@@ -6,6 +6,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.srv import (
     Align,
     GetKfsType,
@@ -24,7 +25,7 @@ ALIGN_TO_KFS_SERVICE = '/r2/align_to_kfs'
 KFS_ACTION_SERVICE = '/r2/kfs/action'
 
 
-class StageTwoPointOneController(Node):
+class StageTwoPointOneController(AbortableMixin, Node):
     KFS_TRUE_CLASS = 'true'
     DEFAULT_ROUTE = (2, 1, 3)
     HIGH_CELLS = frozenset((1, 3))
@@ -40,6 +41,8 @@ class StageTwoPointOneController(Node):
         self.arrival_direction = None
         self.current_cell_center = None
         self.current_lift = None
+        self.abort_monitor = AbortMonitor(
+            self, callback_group=self.callback_group)
 
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('move_timeout_sec', 35.0)
@@ -231,13 +234,15 @@ class StageTwoPointOneController(Node):
         return SetParametersResult(successful=True)
 
     def handle_task(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             self.loaded_count = int(request.loaded_count)
             self.mode = int(request.mode)
             self.arrival_direction = None
             self.current_cell_center = None
             self.current_lift = None
             try:
+                self.raise_if_abort_requested()
                 self.validate_team(request.team)
                 self.validate_loaded_count(self.loaded_count)
                 self.route_cells = self.validate_mode_and_route(
@@ -315,16 +320,15 @@ class StageTwoPointOneController(Node):
         ):
             dependencies.append((self.align_client, 'AlignToKfs'))
         for client, name in dependencies:
-            if not client.wait_for_service(
-                timeout_sec=dependency_timeout_sec
+            if not self.wait_for_service_or_abort(
+                client, dependency_timeout_sec
             ):
                 raise RuntimeError(f'{name} service unavailable')
 
-    @staticmethod
-    def wait_for_future(future, timeout_sec, description):
+    def wait_for_future(self, future, timeout_sec, description):
         completed = threading.Event()
         future.add_done_callback(lambda _: completed.set())
-        if not completed.wait(timeout_sec + 1.0):
+        if not self.wait_for_event_or_abort(completed, timeout_sec + 1.0):
             raise RuntimeError(f'{description} timed out waiting for response')
 
         response = future.result()
@@ -344,7 +348,7 @@ class StageTwoPointOneController(Node):
         request.yaw_tolerance = 0.0
         request.timeout_sec = move_timeout_sec
         response = self.wait_for_future(
-            self.move_client.call_async(request),
+            self.call_async_or_abort(self.move_client, request),
             move_timeout_sec,
             'MoveToPose',
         )
@@ -360,7 +364,7 @@ class StageTwoPointOneController(Node):
         request.tolerance = 0.0
         request.timeout_sec = lift_timeout_sec
         response = self.wait_for_future(
-            self.lift_client.call_async(request),
+            self.call_async_or_abort(self.lift_client, request),
             lift_timeout_sec,
             'SetLift',
         )
@@ -375,7 +379,7 @@ class StageTwoPointOneController(Node):
         request.sample_count = sample_count
         request.timeout_sec = detection_timeout_sec
         response = self.wait_for_future(
-            self.detection_client.call_async(request),
+            self.call_async_or_abort(self.detection_client, request),
             detection_timeout_sec,
             'GetKfsType',
         )
@@ -389,7 +393,7 @@ class StageTwoPointOneController(Node):
         request.action = KfsAction.Request.LOAD
         request.mode = mode
         response = self.wait_for_future(
-            self.kfs_action_client.call_async(request),
+            self.call_async_or_abort(self.kfs_action_client, request),
             load_timeout_sec,
             'KfsAction load',
         )
@@ -403,7 +407,7 @@ class StageTwoPointOneController(Node):
         request = KfsAction.Request()
         request.action = KfsAction.Request.RELEASE
         response = self.wait_for_future(
-            self.kfs_action_client.call_async(request),
+            self.call_async_or_abort(self.kfs_action_client, request),
             release_timeout_sec,
             'KfsAction release',
         )
@@ -420,7 +424,7 @@ class StageTwoPointOneController(Node):
         request.pixel_tolerance = 0.0
         request.timeout_sec = 0.0
         response = self.wait_for_future(
-            self.align_client.call_async(request),
+            self.call_async_or_abort(self.align_client, request),
             align_timeout_sec,
             'AlignToKfs',
         )

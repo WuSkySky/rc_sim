@@ -9,6 +9,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.srv import (
     Align,
     DetectLed,
@@ -92,12 +93,14 @@ PARAMETER_DEFAULTS = {
 }
 
 
-class StageOneController(Node):
+class StageOneController(AbortableMixin, Node):
     def __init__(self):
         super().__init__('stage_one')
         self.callback_group = ReentrantCallbackGroup()
         self.service_lock = threading.Lock()
         self.config_lock = threading.RLock()
+        self.abort_monitor = AbortMonitor(
+            self, callback_group=self.callback_group)
 
         for name, default in PARAMETER_DEFAULTS.items():
             self.declare_parameter(name, default)
@@ -259,7 +262,7 @@ class StageOneController(Node):
             (self.led_detect_client, 'LedDetect'),
         )
         for client, name in dependencies:
-            if not client.wait_for_service(timeout_sec=timeout_sec):
+            if not self.wait_for_service_or_abort(client, timeout_sec):
                 raise RuntimeError(f'{name} service unavailable')
 
     @staticmethod
@@ -273,19 +276,17 @@ class StageOneController(Node):
         StageOneController.validate_team(team)
         return 1.0 if team == StageOne.Request.RED else -1.0
 
-    @staticmethod
-    def wait_for_future(future, timeout_sec, description):
+    def wait_for_future(self, future, timeout_sec, description):
         completed = threading.Event()
         future.add_done_callback(lambda _: completed.set())
-        if not completed.wait(timeout_sec + 1.0):
+        if not self.wait_for_event_or_abort(completed, timeout_sec + 1.0):
             raise RuntimeError(f'{description} timed out waiting for response')
         response = future.result()
         if response is None:
             raise RuntimeError(f'{description} call failed')
         return response
 
-    @staticmethod
-    def wait_for_parallel_futures(futures, timeout_sec):
+    def wait_for_parallel_futures(self, futures, timeout_sec):
         events = []
         for _, future in futures:
             event = threading.Event()
@@ -296,7 +297,10 @@ class StageOneController(Node):
         errors = []
         for (description, future), event in zip(futures, events):
             remaining = deadline - time.monotonic()
-            if remaining <= 0.0 or not event.wait(remaining):
+            if (
+                remaining <= 0.0 or
+                not self.wait_for_event_or_abort(event, remaining)
+            ):
                 errors.append(
                     f'{description} timed out waiting for response')
                 continue
@@ -319,7 +323,7 @@ class StageOneController(Node):
         request.tolerance = config.lift_tolerance_m
         request.timeout_sec = config.lift_timeout_sec
         response = self.wait_for_future(
-            self.lift_client.call_async(request),
+            self.call_async_or_abort(self.lift_client, request),
             config.lift_timeout_sec,
             'SetLift',
         )
@@ -330,7 +334,7 @@ class StageOneController(Node):
         request = self.move_relative_request(
             forward, left, yaw_delta, config)
         response = self.wait_for_future(
-            self.move_client.call_async(request),
+            self.call_async_or_abort(self.move_client, request),
             config.move_timeout_sec,
             'MoveRelative',
         )
@@ -354,7 +358,7 @@ class StageOneController(Node):
         request.pixel_tolerance = config.action_4_pixel_tolerance_px
         request.timeout_sec = config.alignment_timeout_sec
         response = self.wait_for_future(
-            self.align_client.call_async(request),
+            self.call_async_or_abort(self.align_client, request),
             config.alignment_timeout_sec,
             'AlignToTip',
         )
@@ -374,7 +378,7 @@ class StageOneController(Node):
         request = self.weapon_request(
             position, tolerance, config.weapon_timeout_sec)
         response = self.wait_for_future(
-            client.call_async(request),
+            self.call_async_or_abort(client, request),
             config.weapon_timeout_sec,
             description,
         )
@@ -395,11 +399,13 @@ class StageOneController(Node):
         futures = (
             (
                 'WeaponRotate',
-                self.weapon_rotate_client.call_async(rotate_request),
+                self.call_async_or_abort(
+                    self.weapon_rotate_client, rotate_request),
             ),
             (
                 'WeaponGrip',
-                self.weapon_grip_client.call_async(grip_request),
+                self.call_async_or_abort(
+                    self.weapon_grip_client, grip_request),
             ),
         )
         self.wait_for_parallel_futures(
@@ -421,14 +427,19 @@ class StageOneController(Node):
             config.weapon_timeout_sec,
         )
         futures = (
-            ('MoveRelative', self.move_client.call_async(move_request)),
+            (
+                'MoveRelative',
+                self.call_async_or_abort(self.move_client, move_request),
+            ),
             (
                 'WeaponRotate',
-                self.weapon_rotate_client.call_async(rotate_request),
+                self.call_async_or_abort(
+                    self.weapon_rotate_client, rotate_request),
             ),
             (
                 'WeaponGrip',
-                self.weapon_grip_client.call_async(grip_request),
+                self.call_async_or_abort(
+                    self.weapon_grip_client, grip_request),
             ),
         )
         self.wait_for_parallel_futures(
@@ -438,7 +449,7 @@ class StageOneController(Node):
         request = DetectLed.Request()
         request.target_states = list(config.led_target_states)
         response = self.wait_for_future(
-            self.led_detect_client.call_async(request),
+            self.call_async_or_abort(self.led_detect_client, request),
             config.led_detection_timeout_sec,
             'LedDetect',
         )
@@ -560,9 +571,11 @@ class StageOneController(Node):
         )
 
     def handle_task(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             config = self.config_snapshot()
             try:
+                self.raise_if_abort_requested()
                 self.validate_team(request.team)
                 self.wait_for_dependencies(config.dependency_timeout_sec)
                 self.execute_task(config, request.team)

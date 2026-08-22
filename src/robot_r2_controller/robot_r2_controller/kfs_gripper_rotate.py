@@ -7,11 +7,12 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from robot_r2_common import AbortMonitor, PositionAbortMixin
 from robot_r2_interfaces.srv import SetJointPosition
 from std_msgs.msg import Float64
 
 
-class GripperRotateServiceController(Node):
+class GripperRotateServiceController(PositionAbortMixin, Node):
     def __init__(self):
         super().__init__('kfs_gripper_rotate')
         self.callback_group = ReentrantCallbackGroup()
@@ -62,6 +63,11 @@ class GripperRotateServiceController(Node):
         )
         self.parameter_callback = self.add_on_set_parameters_callback(
             self.on_parameters_changed)
+        self.abort_monitor = AbortMonitor(
+            self,
+            callback_group=self.callback_group,
+            on_abort=self.hold_current_position_on_abort,
+        )
 
     @staticmethod
     def _validate_config(
@@ -128,7 +134,10 @@ class GripperRotateServiceController(Node):
             self.state_condition.notify_all()
 
     def handle_set_rotate(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
+            if self.abort_requested():
+                return self.fill_aborted_position_response(request, response)
             with self.config_lock:
                 min_position = self.min_position
                 max_position = self.max_position
@@ -161,9 +170,15 @@ class GripperRotateServiceController(Node):
             cmd = Float64()
             cmd.data = request.position
             self.command_publisher.publish(cmd)
+            if self.abort_requested():
+                self.hold_current_position_on_abort()
+                return self.fill_aborted_position_response(request, response)
 
             deadline = self.get_clock().now().nanoseconds / 1e9 + timeout_sec
             while rclpy.ok():
+                if self.abort_requested():
+                    return self.fill_aborted_position_response(
+                        request, response)
                 should_wait = False
                 with self.state_condition:
                     if self.current_position is None:
@@ -184,7 +199,8 @@ class GripperRotateServiceController(Node):
                     if remaining <= 0.0:
                         break
                     if should_wait:
-                        self.state_condition.wait(timeout=remaining)
+                        self.state_condition.wait(
+                            timeout=min(remaining, 0.05))
 
             with self.state_condition:
                 final_pos = (

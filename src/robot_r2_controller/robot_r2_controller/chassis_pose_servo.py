@@ -11,6 +11,11 @@ from rclpy.callback_groups import (
 )
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import (
+    ABORT_MESSAGE,
+    AbortMonitor,
+    AbortableMixin,
+)
 from robot_r2_interfaces.srv import MoveRelative, MoveToPose
 
 
@@ -105,7 +110,7 @@ class PidAxis:
         self.output_limit = abs(output_limit)
 
 
-class PoseServo(Node):
+class PoseServo(AbortableMixin, Node):
     def __init__(self):
         super().__init__('chassis_pose_servo')
         self.callback_group = ReentrantCallbackGroup()
@@ -205,6 +210,11 @@ class PoseServo(Node):
             callback_group=self.callback_group,
         )
         self.add_on_set_parameters_callback(self.on_parameters_changed)
+        self.abort_monitor = AbortMonitor(
+            self,
+            callback_group=self.callback_group,
+            on_abort=self.stop_active_goal_on_abort,
+        )
 
     def _finite_parameter(self, name):
         value = float(self.get_parameter(name).value)
@@ -260,13 +270,22 @@ class PoseServo(Node):
         with self.state_condition:
             initial_sequence = self.pose_sequences[pose_source]
             while self.pose_sequences[pose_source] <= initial_sequence:
+                self.raise_if_abort_requested()
                 remaining = deadline - time.monotonic()
                 if remaining <= 0.0:
                     raise RuntimeError(
                         f"Pose feedback unavailable for source "
                         f"'{pose_source}'")
-                self.state_condition.wait(timeout=remaining)
+                self.state_condition.wait(timeout=min(remaining, 0.05))
             return self.current_poses[pose_source]
+
+    def stop_active_goal_on_abort(self):
+        with self.state_condition:
+            self.active_goal = None
+            self.goal_completed = False
+            self.reset_controllers()
+            self.state_condition.notify_all()
+        self.publish_zero_twist()
 
     @staticmethod
     def _validate_finite_request(values):
@@ -378,8 +397,10 @@ class PoseServo(Node):
         )
 
     def _handle_motion(self, request, response, description, make_goal):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             try:
+                self.raise_if_abort_requested()
                 pose_source = self.validate_pose_source(request.pose_source)
                 current_pose = self.wait_for_fresh_pose(pose_source)
                 goal, timeout_sec = make_goal(pose_source, current_pose)
@@ -399,6 +420,11 @@ class PoseServo(Node):
 
         deadline = time.monotonic() + timeout_sec
         while rclpy.ok():
+            if self.abort_requested():
+                self.stop_active_goal_on_abort()
+                self.fill_move_response(
+                    response, False, ABORT_MESSAGE, goal)
+                return response
             should_return = False
             success = False
             message = ''
@@ -420,11 +446,14 @@ class PoseServo(Node):
                         should_return = True
                         message = f'{description} timeout'
                     else:
-                        self.state_condition.wait(timeout=remaining)
+                        self.state_condition.wait(
+                            timeout=min(remaining, 0.05))
 
             if should_return:
                 if success:
-                    self.wait_after_completion()
+                    if not self.wait_after_completion():
+                        success = False
+                        message = ABORT_MESSAGE
                 else:
                     self.publish_zero_twist()
                 self.fill_move_response(
@@ -449,10 +478,13 @@ class PoseServo(Node):
         deadline = time.monotonic() + self.completion_wait_sec
         while rclpy.ok():
             self.publish_zero_twist()
+            if self.abort_requested():
+                return False
             remaining = deadline - time.monotonic()
             if remaining <= 0.0:
-                return
+                return True
             time.sleep(min(remaining, 0.02))
+        return False
 
     def control_loop(self):
         now = time.monotonic()

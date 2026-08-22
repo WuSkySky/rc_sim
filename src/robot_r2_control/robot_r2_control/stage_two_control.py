@@ -6,6 +6,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.msg import CellIndex
 from robot_r2_interfaces.srv import (
     StageTwo,
@@ -21,7 +22,7 @@ STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
 STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
 
 
-class StageTwoController(Node):
+class StageTwoController(AbortableMixin, Node):
     ENTRY_FORWARD_INDEX = 4
     GRID_FORWARD_INDICES = frozenset((1, 2, 3, 4))
     GRID_LATERAL_INDICES = frozenset((1, 2, 3))
@@ -39,6 +40,8 @@ class StageTwoController(Node):
         self.service_lock = threading.Lock()
         self.config_lock = threading.Lock()
         self.loaded_count = 0
+        self.abort_monitor = AbortMonitor(
+            self, callback_group=self.callback_group)
 
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('stage_two_point_one_timeout_sec', 450.0)
@@ -226,14 +229,13 @@ class StageTwoController(Node):
             dependencies.insert(
                 0, (self.point_one_client, 'StageTwoPointOne'))
         for client, name in dependencies:
-            if not client.wait_for_service(timeout_sec=timeout_sec):
+            if not self.wait_for_service_or_abort(client, timeout_sec):
                 raise RuntimeError(f'{name} service unavailable')
 
-    @staticmethod
-    def wait_for_future(future, timeout_sec, description):
+    def wait_for_future(self, future, timeout_sec, description):
         completed = threading.Event()
         future.add_done_callback(lambda _: completed.set())
-        if not completed.wait(timeout_sec + 1.0):
+        if not self.wait_for_event_or_abort(completed, timeout_sec + 1.0):
             raise RuntimeError(f'{description} timed out waiting for response')
 
         response = future.result()
@@ -248,7 +250,7 @@ class StageTwoController(Node):
         request.mode = int(mode)
         request.route_cells = list(route_cells)
         response = self.wait_for_future(
-            self.point_one_client.call_async(request),
+            self.call_async_or_abort(self.point_one_client, request),
             timeout_sec,
             'StageTwoPointOne',
         )
@@ -276,7 +278,7 @@ class StageTwoController(Node):
         request.load_cells = [
             self.cell_message(index) for index in load_cells]
         response = self.wait_for_future(
-            self.point_two_client.call_async(request),
+            self.call_async_or_abort(self.point_two_client, request),
             timeout_sec,
             'StageTwoPointTwo',
         )
@@ -289,7 +291,7 @@ class StageTwoController(Node):
         request = StageTwoPointTwoExit.Request()
         request.team = team
         response = self.wait_for_future(
-            self.point_two_exit_client.call_async(request),
+            self.call_async_or_abort(self.point_two_exit_client, request),
             timeout_sec,
             'StageTwoPointTwoExit',
         )
@@ -298,9 +300,11 @@ class StageTwoController(Node):
                 f'StageTwoPointTwoExit failed: {response.message}')
 
     def handle_stage_two(self, request, response):
-        with self.service_lock:
+        abort_scope = self.abort_scope()
+        with self.service_lock, abort_scope:
             self.loaded_count = 0
             try:
+                self.raise_if_abort_requested()
                 self.validate_team(request.team)
                 mode = int(request.mode)
                 move_cells, point_one_route, point_two_loads = (
