@@ -5,7 +5,12 @@ import pytest
 
 from robot_r2_control.stage_two_control import StageTwoController
 from robot_r2_interfaces.msg import CellIndex
-from robot_r2_interfaces.srv import StageTwo, StageTwoPointOne, StageTwoPointTwo
+from robot_r2_interfaces.srv import (
+    StageTwo,
+    StageTwoPointOne,
+    StageTwoPointTwo,
+    StageTwoPointTwoExit,
+)
 
 
 class ImmediateFuture:
@@ -63,8 +68,10 @@ def make_controller():
     controller.dependency_timeout_sec = 2.0
     controller.point_one_timeout_sec = 10.0
     controller.point_two_timeout_sec = 20.0
+    controller.point_two_exit_timeout_sec = 30.0
     controller.point_one_client = FakeClient(2)
     controller.point_two_client = FakeClient(3)
+    controller.point_two_exit_client = FakeClient(3)
     controller.service_lock = threading.Lock()
     controller.config_lock = threading.Lock()
     return controller
@@ -256,6 +263,26 @@ def test_route_without_entry_kfs_skips_point_one_service():
     assert '2.1 skipped' in result.message
 
 
+def test_exit_service_is_called_after_point_two():
+    controller = make_controller()
+    request = SimpleNamespace(
+        team=StageTwo.Request.RED,
+        fake_kfs_decision=0,
+        mode=StageTwo.Request.ROUTE,
+        move_cells=default_move_cells(),
+        kfs_cells=[],
+    )
+    response = SimpleNamespace(success=None, message='', loaded_count=0)
+
+    result = controller.handle_stage_two(request, response)
+
+    assert result.success
+    assert 'exit' in result.message
+    exit_request = controller.point_two_exit_client.requests[0]
+    assert isinstance(exit_request, StageTwoPointTwoExit.Request)
+    assert exit_request.team == StageTwo.Request.RED
+
+
 def test_point_one_failure_stops_before_point_two():
     controller = make_controller()
     controller.point_one_client = FakeClient(1, success=False)
@@ -290,7 +317,7 @@ def test_timeout_parameters_update_atomically():
     result = controller._on_parameters_changed(parameters)
 
     assert result.successful
-    assert controller.config_snapshot() == (3.0, 10.0, 30.0)
+    assert controller.config_snapshot() == (3.0, 10.0, 30.0, 30.0)
 
 
 def test_invalid_timeout_update_keeps_all_previous_values():
@@ -303,4 +330,4 @@ def test_invalid_timeout_update_keeps_all_previous_values():
     result = controller._on_parameters_changed(parameters)
 
     assert not result.successful
-    assert controller.config_snapshot() == (2.0, 10.0, 20.0)
+    assert controller.config_snapshot() == (2.0, 10.0, 20.0, 30.0)

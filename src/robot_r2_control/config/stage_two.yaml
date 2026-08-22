@@ -3,3 +3,4 @@ stage_two_control:
     dependency_timeout_sec: 2.0
     stage_two_point_one_timeout_sec: 450.0
     stage_two_point_two_timeout_sec: 1800.0
+    stage_two_point_two_exit_timeout_sec: 180.0

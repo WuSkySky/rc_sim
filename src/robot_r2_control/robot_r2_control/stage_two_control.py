@@ -11,12 +11,14 @@ from robot_r2_interfaces.srv import (
     StageTwo,
     StageTwoPointOne,
     StageTwoPointTwo,
+    StageTwoPointTwoExit,
 )
 
 
 STAGE_TWO_SERVICE = '/r2/stage_two'
 STAGE_TWO_POINT_ONE_SERVICE = '/r2/stage_two_point_one'
 STAGE_TWO_POINT_TWO_SERVICE = '/r2/stage_two_point_two'
+STAGE_TWO_POINT_TWO_EXIT_SERVICE = '/r2/stage_two_point_two_exit'
 
 
 class StageTwoController(Node):
@@ -28,6 +30,7 @@ class StageTwoController(Node):
         'dependency_timeout_sec',
         'stage_two_point_one_timeout_sec',
         'stage_two_point_two_timeout_sec',
+        'stage_two_point_two_exit_timeout_sec',
     )
 
     def __init__(self):
@@ -40,6 +43,7 @@ class StageTwoController(Node):
         self.declare_parameter('dependency_timeout_sec', 2.0)
         self.declare_parameter('stage_two_point_one_timeout_sec', 450.0)
         self.declare_parameter('stage_two_point_two_timeout_sec', 1800.0)
+        self.declare_parameter('stage_two_point_two_exit_timeout_sec', 180.0)
 
         self.dependency_timeout_sec = self._positive_parameter(
             'dependency_timeout_sec')
@@ -47,6 +51,8 @@ class StageTwoController(Node):
             'stage_two_point_one_timeout_sec')
         self.point_two_timeout_sec = self._positive_parameter(
             'stage_two_point_two_timeout_sec')
+        self.point_two_exit_timeout_sec = self._positive_parameter(
+            'stage_two_point_two_exit_timeout_sec')
 
         self.point_one_client = self.create_client(
             StageTwoPointOne,
@@ -56,6 +62,11 @@ class StageTwoController(Node):
         self.point_two_client = self.create_client(
             StageTwoPointTwo,
             STAGE_TWO_POINT_TWO_SERVICE,
+            callback_group=self.callback_group,
+        )
+        self.point_two_exit_client = self.create_client(
+            StageTwoPointTwoExit,
+            STAGE_TWO_POINT_TWO_EXIT_SERVICE,
             callback_group=self.callback_group,
         )
         self.stage_two_service = self.create_service(
@@ -96,6 +107,7 @@ class StageTwoController(Node):
             'dependency_timeout_sec': 'dependency_timeout_sec',
             'stage_two_point_one_timeout_sec': 'point_one_timeout_sec',
             'stage_two_point_two_timeout_sec': 'point_two_timeout_sec',
+            'stage_two_point_two_exit_timeout_sec': 'point_two_exit_timeout_sec',
         }
         with self.config_lock:
             for name, value in converted.items():
@@ -108,6 +120,7 @@ class StageTwoController(Node):
                 self.dependency_timeout_sec,
                 self.point_one_timeout_sec,
                 self.point_two_timeout_sec,
+                self.point_two_exit_timeout_sec,
             )
 
     @staticmethod
@@ -205,7 +218,10 @@ class StageTwoController(Node):
         return tuple(route_cells)
 
     def wait_for_dependencies(self, timeout_sec, include_point_one=True):
-        dependencies = [(self.point_two_client, 'StageTwoPointTwo')]
+        dependencies = [
+            (self.point_two_client, 'StageTwoPointTwo'),
+            (self.point_two_exit_client, 'StageTwoPointTwoExit'),
+        ]
         if include_point_one:
             dependencies.insert(
                 0, (self.point_one_client, 'StageTwoPointOne'))
@@ -269,6 +285,18 @@ class StageTwoController(Node):
             raise RuntimeError(
                 f'StageTwoPointTwo failed: {response.message}')
 
+    def run_point_two_exit(self, team, timeout_sec):
+        request = StageTwoPointTwoExit.Request()
+        request.team = team
+        response = self.wait_for_future(
+            self.point_two_exit_client.call_async(request),
+            timeout_sec,
+            'StageTwoPointTwoExit',
+        )
+        if not response.success:
+            raise RuntimeError(
+                f'StageTwoPointTwoExit failed: {response.message}')
+
     def handle_stage_two(self, request, response):
         with self.service_lock:
             self.loaded_count = 0
@@ -287,6 +315,7 @@ class StageTwoController(Node):
                     dependency_timeout_sec,
                     point_one_timeout_sec,
                     point_two_timeout_sec,
+                    point_two_exit_timeout_sec,
                 ) = self.config_snapshot()
                 run_point_one = (
                     mode != StageTwo.Request.ROUTE or bool(point_one_route))
@@ -313,13 +342,21 @@ class StageTwoController(Node):
                     point_two_loads if mode == StageTwo.Request.ROUTE else (),
                     point_two_timeout_sec,
                 )
+                self.run_point_two_exit(
+                    request.team,
+                    point_two_exit_timeout_sec,
+                )
             except Exception as exc:
                 response.success = False
                 response.message = str(exc)
                 response.loaded_count = self.loaded_count
                 return response
 
-            stages = '2.1 -> 2.2' if run_point_one else '2.2 (2.1 skipped)'
+            stages = (
+                '2.1 -> 2.2 -> exit'
+                if run_point_one
+                else '2.2 -> exit (2.1 skipped)'
+            )
             response.success = True
             response.message = (
                 f'Stage two completed for {request.team} team: {stages}')
