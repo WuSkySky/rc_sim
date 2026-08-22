@@ -8,7 +8,7 @@ led_detect:
     # requests. Visualization can remain active independently of this switch.
     continuous_detection: false
     stable_match_frames: 5
-    service_timeout_sec: 30.0
+    service_timeout_sec: 180.0
 
     aruco_dictionary: DICT_4X4_50
     # Set to -1 to accept the detected marker with the largest image area.
