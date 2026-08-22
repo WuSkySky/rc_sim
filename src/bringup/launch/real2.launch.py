@@ -144,7 +144,7 @@ def generate_launch_description():
         ),
         front_yahboom_camera,
         tip_mipi_camera,
-        fused_kfs_detect,
+        # fused_kfs_detect,
         kfs_roi,
         yolo_target_detector,
     ])

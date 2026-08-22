@@ -7,7 +7,7 @@
       enabled: true
       rate_hz: 20.0
       pixel_tolerance: 20
-      stable_frames: 8
+      stable_frames: 3
       lost_timeout_sec: 0.3
 
       # PID input is horizontal error normalized by half the image width.
