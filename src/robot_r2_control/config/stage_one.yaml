@@ -3,7 +3,7 @@
     action_1_lift_height_m: 0.01
     action_2_left_m: 0.781
     action_2_backward_m: 0.575
-    action_3_lift_height_m: 0.14
+    action_3_lift_height_m: 0.155
     action_4_pixel_tolerance_px: 5.0
     action_5_weapon_rotate_rad: 1.4312
     action_5_weapon_grip_m: 0.028
