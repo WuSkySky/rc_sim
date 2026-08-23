@@ -9,7 +9,7 @@ from robot_r2_control.stage_one import (
     PARAMETER_DEFAULTS,
     StageOneController,
 )
-from robot_r2_interfaces.srv import DetectLed, MoveRelative, StageOne
+from robot_r2_interfaces.srv import MoveRelative, StageOne
 
 
 class FakeLogger:
@@ -69,8 +69,9 @@ def make_sequence_controller():
     controller.weapon_rotate_client = 'rotate_client'
     controller.weapon_grip_client = 'grip_client'
     controller.calls = []
-    controller.set_lift = lambda height, _config: controller.calls.append(
-        ('lift', height))
+    controller.set_lift = (
+        lambda height, _config, allow_timeout=False:
+        controller.calls.append(('lift', height)))
     controller.move_relative = (
         lambda forward, left, yaw, _config: controller.calls.append(
             ('move', forward, left, yaw)))
@@ -86,8 +87,8 @@ def make_sequence_controller():
         lambda client, _description, position, tolerance, _config:
         controller.calls.append(
             ('weapon_joint', client, position, tolerance)))
-    controller.detect_led = lambda config: controller.calls.append(
-        ('led_detect', config.led_target_states))
+    controller.wait_before_release = lambda config: controller.calls.append(
+        ('release_delay', config.final_release_delay_sec))
     return controller
 
 
@@ -111,6 +112,7 @@ def test_red_team_runs_all_numbered_actions_in_order():
         ('align',),
         ('move', -0.10, 0.0, 0.0),
         ('weapon_joint', 'grip_client', 0.0, 0.001),
+        ('move', 0.03, 0.0, 0.0),
         ('lift', 0.17),
         (
             'weapon_joint',
@@ -122,7 +124,7 @@ def test_red_team_runs_all_numbered_actions_in_order():
         ('lift', 0.01),
         ('move', 0.20, 0.0, 0.0),
         ('move', 0.0, 0.0, math.pi),
-        ('led_detect', (True,)),
+        ('release_delay', 25.0),
         ('weapon_joint', 'grip_client', 0.028, 0.001),
     ]
 
@@ -171,7 +173,7 @@ def test_alignment_timeout_continues_remaining_actions_and_records_warning():
     result = controller.execute_task(
         default_config(), StageOne.Request.RED, warnings)
 
-    assert len(controller.calls) == 14
+    assert len(controller.calls) == 15
     assert controller.calls[3] == ('align',)
     assert controller.calls[-1] == (
         'weapon_joint', 'grip_client', 0.028, 0.001)
@@ -180,6 +182,104 @@ def test_alignment_timeout_continues_remaining_actions_and_records_warning():
     assert 'Alignment timeout: no target detected' in warnings[0]
     assert 'remaining actions continued' in warnings[0]
     assert controller.logger.warnings == warnings
+
+
+def test_incremental_lift_timeout_continues_remaining_actions_with_warning():
+    controller = make_sequence_controller()
+
+    def time_out_incremental_lift(height, _config, allow_timeout=False):
+        controller.calls.append(('lift', height))
+        if allow_timeout:
+            return 'SetLift timeout'
+        return None
+
+    controller.set_lift = time_out_incremental_lift
+    warnings = []
+
+    result = controller.execute_task(
+        default_config(), StageOne.Request.RED, warnings)
+
+    assert len(controller.calls) == 15
+    assert controller.calls[7] == ('lift', 0.17)
+    assert controller.calls[8] == (
+        'weapon_joint', 'rotate_client', math.radians(142.0), 0.01)
+    assert controller.calls[-1] == (
+        'weapon_joint', 'grip_client', 0.028, 0.001)
+    assert result == tuple(warnings)
+    assert len(warnings) == 1
+    assert 'Action 8' in warnings[0]
+    assert 'SetLift timeout' in warnings[0]
+    assert 'remaining actions continued' in warnings[0]
+    assert controller.logger.warnings == warnings
+
+
+def test_incremental_lift_non_timeout_failure_still_stops_stage_one():
+    controller = make_sequence_controller()
+
+    def reject_incremental_lift(height, _config, allow_timeout=False):
+        controller.calls.append(('lift', height))
+        if allow_timeout:
+            raise RuntimeError('SetLift failed: invalid feedback')
+
+    controller.set_lift = reject_incremental_lift
+
+    with pytest.raises(
+        RuntimeError,
+        match=r'Action 8 .*SetLift failed: invalid feedback',
+    ):
+        controller.execute_task(default_config(), StageOne.Request.RED)
+
+    assert controller.calls[-1] == ('lift', 0.17)
+
+
+def test_set_lift_allows_only_explicit_service_timeout():
+    timeout_controller = StageOneController.__new__(StageOneController)
+    timeout_controller.lift_client = FakeClient(
+        'lift', [],
+        response=SimpleNamespace(
+            success=False,
+            message='SetLift timeout',
+        ),
+    )
+
+    warning = timeout_controller.set_lift(
+        0.17, default_config(), allow_timeout=True)
+
+    assert warning == 'SetLift timeout'
+    request = timeout_controller.lift_client.requests[0]
+    assert request.front_lift == pytest.approx(0.17)
+    assert request.rear_lift == pytest.approx(0.17)
+
+    strict_controller = StageOneController.__new__(StageOneController)
+    strict_controller.lift_client = FakeClient(
+        'lift', [],
+        response=SimpleNamespace(
+            success=False,
+            message='SetLift timeout',
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='SetLift failed: SetLift timeout',
+    ):
+        strict_controller.set_lift(0.14, default_config())
+
+    rejected_controller = StageOneController.__new__(StageOneController)
+    rejected_controller.lift_client = FakeClient(
+        'lift', [],
+        response=SimpleNamespace(
+            success=False,
+            message='invalid feedback',
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='SetLift failed: invalid feedback',
+    ):
+        rejected_controller.set_lift(
+            0.17, default_config(), allow_timeout=True)
 
 
 def test_align_tip_returns_timeout_message_instead_of_failing():
@@ -334,9 +434,10 @@ def test_initial_move_and_weapon_pair_dispatch_all_requests_together():
     [
         ('action_2_left_m', -0.1),
         ('action_4_pixel_tolerance_px', 0.0),
+        ('action_8_pre_lift_forward_m', -0.1),
         ('action_8_lift_increment_m', -0.1),
+        ('final_release_delay_sec', 0.0),
         ('weapon_timeout_sec', math.inf),
-        ('led_target_states', []),
     ],
 )
 def test_invalid_config_is_rejected(name, value):
@@ -366,19 +467,19 @@ def test_parameter_update_atomically_replaces_config_snapshot():
     assert updated.position_tolerance_m == pytest.approx(0.006)
 
 
-def test_parameter_update_accepts_led_targets_and_final_grip_position():
+def test_parameter_update_accepts_release_delay_and_final_grip_position():
     controller = StageOneController.__new__(StageOneController)
     controller.config_lock = threading.RLock()
     controller._config = default_config()
 
     result = controller.on_parameters_changed([
-        Parameter('led_target_states', value=[False, True]),
+        Parameter('final_release_delay_sec', value=30.0),
         Parameter('final_weapon_grip_m', value=0.025),
     ])
 
     assert result.successful
     updated = controller.config_snapshot()
-    assert updated.led_target_states == (False, True)
+    assert updated.final_release_delay_sec == pytest.approx(30.0)
     assert updated.final_weapon_grip_m == pytest.approx(0.025)
 
 
@@ -405,23 +506,20 @@ def test_unavailable_dependency_aborts_before_actions():
     controller.align_client = DependencyClient(False)
     controller.weapon_rotate_client = DependencyClient(True)
     controller.weapon_grip_client = DependencyClient(True)
-    controller.led_detect_client = DependencyClient(True)
 
     with pytest.raises(RuntimeError, match='AlignToTip service unavailable'):
         controller.wait_for_dependencies(0.1)
 
 
-def test_unavailable_led_dependency_aborts_before_actions():
+def test_wait_for_dependencies_does_not_require_led_service():
     controller = StageOneController.__new__(StageOneController)
     controller.move_client = DependencyClient(True)
     controller.lift_client = DependencyClient(True)
     controller.align_client = DependencyClient(True)
     controller.weapon_rotate_client = DependencyClient(True)
     controller.weapon_grip_client = DependencyClient(True)
-    controller.led_detect_client = DependencyClient(False)
 
-    with pytest.raises(RuntimeError, match='LedDetect service unavailable'):
-        controller.wait_for_dependencies(0.1)
+    controller.wait_for_dependencies(0.1)
 
 
 def test_blue_team_reverses_only_lateral_translation():
@@ -438,57 +536,44 @@ def test_blue_team_reverses_only_lateral_translation():
         0.028,
     )
     assert controller.calls[4] == ('move', -0.10, 0.0, 0.0)
-    assert controller.calls[8] == ('move', 0.05, 0.0, 0.0)
-    assert controller.calls[10] == ('move', 0.20, 0.0, 0.0)
-    assert controller.calls[11] == ('move', 0.0, 0.0, math.pi)
+    assert controller.calls[6] == ('move', 0.03, 0.0, 0.0)
+    assert controller.calls[9] == ('move', 0.05, 0.0, 0.0)
+    assert controller.calls[11] == ('move', 0.20, 0.0, 0.0)
+    assert controller.calls[12] == ('move', 0.0, 0.0, math.pi)
 
 
-def test_led_detection_request_uses_configured_target_states():
+def test_release_delay_waits_for_configured_duration():
     controller = StageOneController.__new__(StageOneController)
-    controller.led_detect_client = FakeClient('led_detect', [])
-    values = dict(PARAMETER_DEFAULTS)
-    values['led_target_states'] = [True, False, True]
+    waits = []
+    controller.wait_for_event_or_abort = (
+        lambda event, timeout: waits.append((event, timeout)) or False)
 
-    controller.detect_led(StageOneController.config_from_values(values))
+    controller.wait_before_release(default_config())
 
-    request = controller.led_detect_client.requests[0]
-    assert isinstance(request, DetectLed.Request)
-    assert request.target_states == [True, False, True]
-
-
-def test_led_detection_rejection_is_reported():
-    controller = StageOneController.__new__(StageOneController)
-    controller.led_detect_client = FakeClient(
-        'led_detect', [],
-        response=SimpleNamespace(
-            success=False,
-            message='target did not stabilize',
-        ),
-    )
-
-    with pytest.raises(
-        RuntimeError,
-        match='LedDetect failed: target did not stabilize',
-    ):
-        controller.detect_led(default_config())
+    assert len(waits) == 1
+    event, timeout = waits[0]
+    assert isinstance(event, threading.Event)
+    assert not event.is_set()
+    assert timeout == pytest.approx(25.0)
 
 
-def test_led_detection_failure_keeps_weapon_gripper_closed():
+def test_release_delay_abort_keeps_weapon_gripper_closed():
     controller = make_sequence_controller()
 
-    def fail_led_detection(config):
-        controller.calls.append(('led_detect', config.led_target_states))
-        raise RuntimeError('target not detected')
+    def abort_release_delay(config):
+        controller.calls.append(
+            ('release_delay', config.final_release_delay_sec))
+        raise RuntimeError('aborted by /r2/system/abort')
 
-    controller.detect_led = fail_led_detection
+    controller.wait_before_release = abort_release_delay
 
     with pytest.raises(
         RuntimeError,
-        match=r'Action 13 .*target not detected',
+        match=r'Action 14 .*aborted by /r2/system/abort',
     ):
         controller.execute_task(default_config(), StageOne.Request.RED)
 
-    assert controller.calls[-1] == ('led_detect', (True,))
+    assert controller.calls[-1] == ('release_delay', 25.0)
 
 
 @pytest.mark.parametrize('team', ['', 'RED', 'green'])

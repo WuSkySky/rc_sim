@@ -182,15 +182,18 @@ ros2 topic pub --once /r2/system/abort std_msgs/msg/Empty "{}"
 
 阶段一仅由 `real1.launch.py` 启动。请求中的 `team` 只接受 `red` 或 `blue`；当前
 动作参数按红方定义，蓝方执行时仅反转左右平移方向。服务会依次执行底盘升降、
-斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向。转向完成后调用
-`/r2/led_detection/detect`，只有 LED 状态连续稳定匹配请求目标并返回成功，才会
-松开武器夹爪；检测失败、服务不可用或等待超时时保持夹持并令 Step1 返回失败。
+斜向移动、端头视觉对齐、武器旋转与夹取，以及最终底盘转向。转向完成后等待
+`final_release_delay_sec`（默认 `25 s`），随后松开武器夹爪；该等待支持系统中止，
+不再依赖 LED 检测结果。
 端头视觉对齐如果返回 `Alignment timeout:` 超时结果，Step1 会记录警告并继续执行
 剩余动作；最终 `message` 会包含该超时信息。对齐服务不可用、被中止或其他非超时
 错误仍会令 Step1 失败。
 初始左右/前后位置伺服与端头旋转、夹爪张开同时执行，三者全部完成后才继续。
-夹爪闭合后，底盘会在当前工作高度基础上再向上抬升
-`action_8_lift_increment_m`（默认 `0.03 m`）并将武器旋转到最终角度，再使用
+夹爪闭合后，底盘先通过下位机相对位置伺服前进
+`action_8_pre_lift_forward_m`（默认 `0.03 m`），再在当前工作高度基础上向上抬升
+`action_8_lift_increment_m`（默认 `0.03 m`）并将武器旋转到最终角度。只有这一次
+额外抬升返回 `SetLift timeout` 时，Step1 会记录警告并继续后续动作；其他抬升失败
+仍会终止流程。随后使用
 下位机相对位置伺服前进
 `action_9_pre_lower_forward_m`（默认 `0.05 m`）。随后底盘降回 `0.01 m`，继续
 前移 `0.20 m`。
@@ -216,7 +219,7 @@ GUI 顶部的比赛队伍选择器由 Step1、Step2、Step3 共用；`Step1` 区
 ```bash
 ros2 param set /stage_one action_2_left_m 0.790
 ros2 param set /stage_one weapon_grip_tolerance_m 0.0015
-ros2 param set /stage_one led_target_states "[true]"
+ros2 param set /stage_one final_release_delay_sec 25.0
 ros2 param set /stage_one final_weapon_grip_m 0.028
 ```
 

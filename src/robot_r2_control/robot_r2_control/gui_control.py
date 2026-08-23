@@ -64,13 +64,14 @@ STAGE_ONE_PARAMETER_NAMES = {
     'action_5_weapon_grip_m',
     'action_6_backward_m',
     'action_7_weapon_grip_m',
+    'action_8_pre_lift_forward_m',
     'action_8_lift_increment_m',
     'action_8_weapon_rotate_rad',
     'action_9_pre_lower_forward_m',
     'action_9_lift_height_m',
     'action_10_forward_m',
     'action_11_yaw_delta_rad',
-    'led_target_states',
+    'final_release_delay_sec',
     'final_weapon_grip_m',
     'lift_tolerance_m',
     'position_tolerance_m',
@@ -82,7 +83,6 @@ STAGE_ONE_PARAMETER_NAMES = {
     'lift_timeout_sec',
     'alignment_timeout_sec',
     'weapon_timeout_sec',
-    'led_detection_timeout_sec',
 }
 STAGE_ONE_SOURCE_RELATIVE_PATH = Path(
     'src/robot_r2_control/config/stage_one.yaml')

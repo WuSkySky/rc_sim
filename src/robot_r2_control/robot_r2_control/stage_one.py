@@ -12,7 +12,6 @@ from rclpy.parameter import Parameter
 from robot_r2_common import AbortMonitor, AbortableMixin
 from robot_r2_interfaces.srv import (
     Align,
-    DetectLed,
     MoveRelative,
     SetJointPosition,
     SetLift,
@@ -26,8 +25,8 @@ SET_LIFT_SERVICE = '/r2/lift/set'
 ALIGN_TO_TIP_SERVICE = '/r2/align_to_tip'
 WEAPON_ROTATE_SERVICE = '/r2/weapon/set_rotate'
 WEAPON_GRIP_SERVICE = '/r2/weapon/set_grip'
-LED_DETECT_SERVICE = '/r2/led_detection/detect'
 ALIGNMENT_TIMEOUT_PREFIX = 'Alignment timeout:'
+LIFT_TIMEOUT_MESSAGE = 'SetLift timeout'
 
 
 @dataclass(frozen=True)
@@ -41,13 +40,14 @@ class StageOneConfig:
     action_5_weapon_grip_m: float
     action_6_backward_m: float
     action_7_weapon_grip_m: float
+    action_8_pre_lift_forward_m: float
     action_8_lift_increment_m: float
     action_8_weapon_rotate_rad: float
     action_9_pre_lower_forward_m: float
     action_9_lift_height_m: float
     action_10_forward_m: float
     action_11_yaw_delta_rad: float
-    led_target_states: tuple[bool, ...]
+    final_release_delay_sec: float
     final_weapon_grip_m: float
     lift_tolerance_m: float
     position_tolerance_m: float
@@ -59,7 +59,6 @@ class StageOneConfig:
     lift_timeout_sec: float
     alignment_timeout_sec: float
     weapon_timeout_sec: float
-    led_detection_timeout_sec: float
 
 
 PARAMETER_DEFAULTS = {
@@ -72,13 +71,14 @@ PARAMETER_DEFAULTS = {
     'action_5_weapon_grip_m': 0.028,
     'action_6_backward_m': 0.10,
     'action_7_weapon_grip_m': 0.0,
+    'action_8_pre_lift_forward_m': 0.03,
     'action_8_lift_increment_m': 0.03,
     'action_8_weapon_rotate_rad': math.radians(142.0),
     'action_9_pre_lower_forward_m': 0.05,
     'action_9_lift_height_m': 0.01,
     'action_10_forward_m': 0.20,
     'action_11_yaw_delta_rad': math.pi,
-    'led_target_states': [True],
+    'final_release_delay_sec': 25.0,
     'final_weapon_grip_m': 0.028,
     'lift_tolerance_m': 0.002,
     'position_tolerance_m': 0.005,
@@ -90,7 +90,6 @@ PARAMETER_DEFAULTS = {
     'lift_timeout_sec': 15.0,
     'alignment_timeout_sec': 15.0,
     'weapon_timeout_sec': 10.0,
-    'led_detection_timeout_sec': 182.0,
 }
 
 
@@ -132,11 +131,6 @@ class StageOneController(AbortableMixin, Node):
             WEAPON_GRIP_SERVICE,
             callback_group=self.callback_group,
         )
-        self.led_detect_client = self.create_client(
-            DetectLed,
-            LED_DETECT_SERVICE,
-            callback_group=self.callback_group,
-        )
         self.task_service = self.create_service(
             StageOne,
             STAGE_ONE_SERVICE,
@@ -149,16 +143,9 @@ class StageOneController(AbortableMixin, Node):
     @staticmethod
     def validate_config(config):
         for name in StageOneConfig.__dataclass_fields__:
-            if name == 'led_target_states':
-                continue
             value = getattr(config, name)
             if not math.isfinite(value):
                 raise ValueError(f'{name} must be finite')
-
-        if not config.led_target_states:
-            raise ValueError('led_target_states must not be empty')
-        if not all(type(state) is bool for state in config.led_target_states):
-            raise ValueError('led_target_states must contain only booleans')
 
         non_negative = (
             'action_1_lift_height_m',
@@ -169,6 +156,7 @@ class StageOneController(AbortableMixin, Node):
             'action_5_weapon_grip_m',
             'action_6_backward_m',
             'action_7_weapon_grip_m',
+            'action_8_pre_lift_forward_m',
             'action_8_lift_increment_m',
             'action_8_weapon_rotate_rad',
             'action_9_pre_lower_forward_m',
@@ -192,7 +180,7 @@ class StageOneController(AbortableMixin, Node):
             'lift_timeout_sec',
             'alignment_timeout_sec',
             'weapon_timeout_sec',
-            'led_detection_timeout_sec',
+            'final_release_delay_sec',
         )
         for name in positive:
             if getattr(config, name) <= 0.0:
@@ -200,22 +188,14 @@ class StageOneController(AbortableMixin, Node):
 
     @classmethod
     def config_from_values(cls, values):
-        normalized = dict(values)
-        normalized['led_target_states'] = tuple(
-            normalized['led_target_states'])
-        config = StageOneConfig(**normalized)
+        config = StageOneConfig(**values)
         cls.validate_config(config)
         return config
 
     def _read_config(self):
         values = {}
         for name in StageOneConfig.__dataclass_fields__:
-            value = self.get_parameter(name).value
-            values[name] = (
-                tuple(bool(state) for state in value)
-                if name == 'led_target_states'
-                else float(value)
-            )
+            values[name] = float(self.get_parameter(name).value)
         return self.config_from_values(values)
 
     def config_snapshot(self):
@@ -230,14 +210,6 @@ class StageOneController(AbortableMixin, Node):
             }
             for parameter in parameters:
                 if parameter.name not in values:
-                    continue
-                if parameter.name == 'led_target_states':
-                    if parameter.type_ != Parameter.Type.BOOL_ARRAY:
-                        return SetParametersResult(
-                            successful=False,
-                            reason='led_target_states must be a bool array',
-                        )
-                    values[parameter.name] = tuple(parameter.value)
                     continue
                 if parameter.type_ != Parameter.Type.DOUBLE:
                     return SetParametersResult(
@@ -260,7 +232,6 @@ class StageOneController(AbortableMixin, Node):
             (self.align_client, 'AlignToTip'),
             (self.weapon_rotate_client, 'WeaponRotate'),
             (self.weapon_grip_client, 'WeaponGrip'),
-            (self.led_detect_client, 'LedDetect'),
         )
         for client, name in dependencies:
             if not self.wait_for_service_or_abort(client, timeout_sec):
@@ -317,7 +288,7 @@ class StageOneController(AbortableMixin, Node):
         if errors:
             raise RuntimeError('; '.join(errors))
 
-    def set_lift(self, height, config):
+    def set_lift(self, height, config, allow_timeout=False):
         request = SetLift.Request()
         request.front_lift = height
         request.rear_lift = height
@@ -329,7 +300,10 @@ class StageOneController(AbortableMixin, Node):
             'SetLift',
         )
         if not response.success:
+            if allow_timeout and response.message == LIFT_TIMEOUT_MESSAGE:
+                return response.message
             raise RuntimeError(f'SetLift failed: {response.message}')
+        return None
 
     def move_relative(self, forward, left, yaw_delta, config):
         request = self.move_relative_request(
@@ -449,27 +423,20 @@ class StageOneController(AbortableMixin, Node):
         self.wait_for_parallel_futures(
             futures, max(config.move_timeout_sec, config.weapon_timeout_sec))
 
-    def detect_led(self, config):
-        request = DetectLed.Request()
-        request.target_states = list(config.led_target_states)
-        response = self.wait_for_future(
-            self.call_async_or_abort(self.led_detect_client, request),
-            config.led_detection_timeout_sec,
-            'LedDetect',
-        )
-        if not response.success:
-            raise RuntimeError(f'LedDetect failed: {response.message}')
+    def wait_before_release(self, config):
+        self.wait_for_event_or_abort(
+            threading.Event(), config.final_release_delay_sec)
 
     def run_action(self, number, description, operation):
         self.get_logger().info(
-            f'Step1 action {number}/14 started: {description}')
+            f'Step1 action {number}/15 started: {description}')
         try:
             result = operation()
         except Exception as exc:
             raise RuntimeError(
                 f'Action {number} ({description}) failed: {exc}') from exc
         self.get_logger().info(
-            f'Step1 action {number}/14 completed: {description}')
+            f'Step1 action {number}/15 completed: {description}')
         return result
 
     def execute_task(self, config, team, warnings=None):
@@ -527,15 +494,29 @@ class StageOneController(AbortableMixin, Node):
         )
         self.run_action(
             7,
+            'move forward before lifting chassis',
+            lambda: self.move_relative(
+                config.action_8_pre_lift_forward_m, 0.0, 0.0, config),
+        )
+        lift_timeout = self.run_action(
+            8,
             'lift chassis before final weapon rotate',
             lambda: self.set_lift(
                 config.action_3_lift_height_m
                 + config.action_8_lift_increment_m,
                 config,
+                allow_timeout=True,
             ),
         )
+        if lift_timeout is not None:
+            warning = (
+                'Action 8 (lift chassis before final weapon rotate) timed '
+                f'out; remaining actions continued: {lift_timeout}'
+            )
+            warnings.append(warning)
+            self.get_logger().warn(warning)
         self.run_action(
-            8,
+            9,
             'rotate weapon to final angle',
             lambda: self.set_weapon_joint(
                 self.weapon_rotate_client,
@@ -546,36 +527,36 @@ class StageOneController(AbortableMixin, Node):
             ),
         )
         self.run_action(
-            9,
+            10,
             'move forward before lowering chassis',
             lambda: self.move_relative(
                 config.action_9_pre_lower_forward_m, 0.0, 0.0, config),
         )
         self.run_action(
-            10,
+            11,
             'lower chassis to travel height',
             lambda: self.set_lift(config.action_9_lift_height_m, config),
         )
         self.run_action(
-            11,
+            12,
             'move forward',
             lambda: self.move_relative(
                 config.action_10_forward_m, 0.0, 0.0, config),
         )
         self.run_action(
-            12,
+            13,
             'rotate chassis by pi radians',
             lambda: self.move_relative(
                 0.0, 0.0, config.action_11_yaw_delta_rad, config),
         )
         self.run_action(
-            13,
-            'wait for target LED state',
-            lambda: self.detect_led(config),
+            14,
+            'wait before releasing weapon gripper',
+            lambda: self.wait_before_release(config),
         )
         self.run_action(
-            14,
-            'release weapon gripper after LED confirmation',
+            15,
+            'release weapon gripper after delay',
             lambda: self.set_weapon_joint(
                 self.weapon_grip_client,
                 'WeaponGrip',

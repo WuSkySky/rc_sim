@@ -9,7 +9,9 @@
     action_5_weapon_grip_m: 0.028
     action_6_backward_m: 0.43
     action_7_weapon_grip_m: 0.0
-    # 夹爪闭合后，在当前工作高度基础上再向上抬升 3 cm。
+    # 夹爪闭合后、底盘抬升前，使用下位机相对位置伺服前进 3 cm。
+    action_8_pre_lift_forward_m: 0.03
+    # 前进完成后，在当前工作高度基础上再向上抬升 3 cm。
     action_8_lift_increment_m: 0.03
     action_8_weapon_rotate_rad: 3.054
     # 底盘下降前使用下位机相对位置伺服前进 5 cm。
@@ -17,8 +19,8 @@
     action_9_lift_height_m: 0.01
     action_10_forward_m: 0.20
     action_11_yaw_delta_rad: 3.141592653589793
-    # 转身完成后等待单个 LED 持续稳定点亮，成功后才松开武器夹爪。
-    led_target_states: [true]
+    # 转身完成后等待 25 秒，再松开武器夹爪。
+    final_release_delay_sec: 25.0
     final_weapon_grip_m: 0.028
 
     lift_tolerance_m: 0.002
@@ -32,5 +34,3 @@
     lift_timeout_sec: 15.0
     alignment_timeout_sec: 15.0
     weapon_timeout_sec: 10.0
-    # LED 服务端默认 180 秒（3 分钟）返回；客户端额外预留通信余量。
-    led_detection_timeout_sec: 182.0
