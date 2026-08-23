@@ -73,7 +73,8 @@ def make_sequence_controller():
         lambda height, _config, allow_timeout=False:
         controller.calls.append(('lift', height)))
     controller.move_relative = (
-        lambda forward, left, yaw, _config: controller.calls.append(
+        lambda forward, left, yaw, _config, timeout_sec=None,
+        allow_timeout=False: controller.calls.append(
             ('move', forward, left, yaw)))
     controller.align_tip = lambda _config: controller.calls.append(('align',))
     controller.set_weapon_pair = (
@@ -182,6 +183,135 @@ def test_alignment_timeout_continues_remaining_actions_and_records_warning():
     assert 'Alignment timeout: no target detected' in warnings[0]
     assert 'remaining actions continued' in warnings[0]
     assert controller.logger.warnings == warnings
+
+
+def test_backward_timeout_uses_ten_seconds_and_continues():
+    controller = make_sequence_controller()
+    timeout_calls = []
+
+    def time_out_backward(
+        forward,
+        left,
+        yaw,
+        _config,
+        timeout_sec=None,
+        allow_timeout=False,
+    ):
+        controller.calls.append(('move', forward, left, yaw))
+        if allow_timeout and forward < 0.0:
+            timeout_calls.append(timeout_sec)
+            return 'MoveRelative timeout'
+        return None
+
+    controller.move_relative = time_out_backward
+    warnings = []
+
+    result = controller.execute_task(
+        default_config(), StageOne.Request.RED, warnings)
+
+    assert timeout_calls == [pytest.approx(10.0)]
+    assert len(controller.calls) == 15
+    assert controller.calls[4] == ('move', -0.10, 0.0, 0.0)
+    assert controller.calls[5] == (
+        'weapon_joint', 'grip_client', 0.0, 0.001)
+    assert controller.calls[-1] == (
+        'weapon_joint', 'grip_client', 0.028, 0.001)
+    assert result == tuple(warnings)
+    assert len(warnings) == 1
+    assert 'Action 5' in warnings[0]
+    assert 'MoveRelative timeout' in warnings[0]
+    assert 'remaining actions continued' in warnings[0]
+    assert controller.logger.warnings == warnings
+
+
+def test_backward_non_timeout_failure_still_stops_stage_one():
+    controller = make_sequence_controller()
+
+    def reject_backward(
+        forward,
+        left,
+        yaw,
+        _config,
+        timeout_sec=None,
+        allow_timeout=False,
+    ):
+        controller.calls.append(('move', forward, left, yaw))
+        if allow_timeout and forward < 0.0:
+            raise RuntimeError('MoveRelative failed: invalid pose')
+
+    controller.move_relative = reject_backward
+
+    with pytest.raises(
+        RuntimeError,
+        match=r'Action 5 .*MoveRelative failed: invalid pose',
+    ):
+        controller.execute_task(default_config(), StageOne.Request.RED)
+
+    assert controller.calls[-1] == ('move', -0.10, 0.0, 0.0)
+
+
+def test_pre_lift_move_timeout_uses_five_seconds_and_continues():
+    controller = make_sequence_controller()
+    timeout_calls = []
+
+    def time_out_pre_lift_move(
+        forward,
+        left,
+        yaw,
+        _config,
+        timeout_sec=None,
+        allow_timeout=False,
+    ):
+        controller.calls.append(('move', forward, left, yaw))
+        if allow_timeout and forward > 0.0:
+            timeout_calls.append(timeout_sec)
+            return 'MoveRelative timeout'
+        return None
+
+    controller.move_relative = time_out_pre_lift_move
+    warnings = []
+
+    result = controller.execute_task(
+        default_config(), StageOne.Request.RED, warnings)
+
+    assert timeout_calls == [pytest.approx(5.0)]
+    assert len(controller.calls) == 15
+    assert controller.calls[6] == ('move', 0.03, 0.0, 0.0)
+    assert controller.calls[7] == ('lift', 0.17)
+    assert controller.calls[-1] == (
+        'weapon_joint', 'grip_client', 0.028, 0.001)
+    assert result == tuple(warnings)
+    assert len(warnings) == 1
+    assert 'Action 7' in warnings[0]
+    assert 'MoveRelative timeout' in warnings[0]
+    assert 'remaining actions continued' in warnings[0]
+    assert controller.logger.warnings == warnings
+
+
+def test_pre_lift_move_non_timeout_failure_still_stops_stage_one():
+    controller = make_sequence_controller()
+
+    def reject_pre_lift_move(
+        forward,
+        left,
+        yaw,
+        _config,
+        timeout_sec=None,
+        allow_timeout=False,
+    ):
+        controller.calls.append(('move', forward, left, yaw))
+        if allow_timeout and forward > 0.0:
+            raise RuntimeError('MoveRelative failed: invalid pose')
+
+    controller.move_relative = reject_pre_lift_move
+
+    with pytest.raises(
+        RuntimeError,
+        match=r'Action 7 .*MoveRelative failed: invalid pose',
+    ):
+        controller.execute_task(default_config(), StageOne.Request.RED)
+
+    assert controller.calls[-1] == ('move', 0.03, 0.0, 0.0)
 
 
 def test_incremental_lift_timeout_continues_remaining_actions_with_warning():
@@ -434,7 +564,9 @@ def test_initial_move_and_weapon_pair_dispatch_all_requests_together():
     [
         ('action_2_left_m', -0.1),
         ('action_4_pixel_tolerance_px', 0.0),
+        ('action_6_backward_timeout_sec', 0.0),
         ('action_8_pre_lift_forward_m', -0.1),
+        ('action_8_pre_lift_forward_timeout_sec', 0.0),
         ('action_8_lift_increment_m', -0.1),
         ('final_release_delay_sec', 0.0),
         ('weapon_timeout_sec', math.inf),
@@ -497,6 +629,69 @@ def test_move_relative_uses_serial_source_and_forwards_request_values():
     assert request.position_tolerance == pytest.approx(0.005)
     assert request.yaw_tolerance == pytest.approx(0.01)
     assert request.timeout_sec == pytest.approx(35.0)
+
+
+def test_move_relative_allows_only_explicit_service_timeout():
+    timeout_controller = StageOneController.__new__(StageOneController)
+    timeout_controller.move_client = FakeClient(
+        'move', [],
+        response=SimpleNamespace(
+            success=False,
+            message='MoveRelative timeout',
+        ),
+    )
+
+    warning = timeout_controller.move_relative(
+        0.03,
+        0.0,
+        0.0,
+        default_config(),
+        timeout_sec=5.0,
+        allow_timeout=True,
+    )
+
+    assert warning == 'MoveRelative timeout'
+    request = timeout_controller.move_client.requests[0]
+    assert request.forward == pytest.approx(0.03)
+    assert request.timeout_sec == pytest.approx(5.0)
+
+    strict_controller = StageOneController.__new__(StageOneController)
+    strict_controller.move_client = FakeClient(
+        'move', [],
+        response=SimpleNamespace(
+            success=False,
+            message='MoveRelative timeout',
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='MoveRelative failed: MoveRelative timeout',
+    ):
+        strict_controller.move_relative(
+            0.03, 0.0, 0.0, default_config(), timeout_sec=5.0)
+
+    rejected_controller = StageOneController.__new__(StageOneController)
+    rejected_controller.move_client = FakeClient(
+        'move', [],
+        response=SimpleNamespace(
+            success=False,
+            message='invalid pose',
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match='MoveRelative failed: invalid pose',
+    ):
+        rejected_controller.move_relative(
+            0.03,
+            0.0,
+            0.0,
+            default_config(),
+            timeout_sec=5.0,
+            allow_timeout=True,
+        )
 
 
 def test_unavailable_dependency_aborts_before_actions():

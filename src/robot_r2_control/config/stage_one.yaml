@@ -8,9 +8,11 @@
     action_5_weapon_rotate_rad: 1.4312
     action_5_weapon_grip_m: 0.028
     action_6_backward_m: 0.43
+    action_6_backward_timeout_sec: 10.0
     action_7_weapon_grip_m: 0.0
     # 夹爪闭合后、底盘抬升前，使用下位机相对位置伺服前进 3 cm。
     action_8_pre_lift_forward_m: 0.03
+    action_8_pre_lift_forward_timeout_sec: 5.0
     # 前进完成后，在当前工作高度基础上再向上抬升 3 cm。
     action_8_lift_increment_m: 0.03
     action_8_weapon_rotate_rad: 3.054

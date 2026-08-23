@@ -189,8 +189,14 @@ ros2 topic pub --once /r2/system/abort std_msgs/msg/Empty "{}"
 剩余动作；最终 `message` 会包含该超时信息。对齐服务不可用、被中止或其他非超时
 错误仍会令 Step1 失败。
 初始左右/前后位置伺服与端头旋转、夹爪张开同时执行，三者全部完成后才继续。
+对齐后的后退距离使用 `action_6_backward_m`，单独超时为
+`action_6_backward_timeout_sec=10 s`；这次后退返回 `MoveRelative timeout` 时记录
+警告并继续关闭夹爪，其他失败仍会终止流程。
 夹爪闭合后，底盘先通过下位机相对位置伺服前进
-`action_8_pre_lift_forward_m`（默认 `0.03 m`），再在当前工作高度基础上向上抬升
+`action_8_pre_lift_forward_m`（默认 `0.03 m`，单独超时为
+`action_8_pre_lift_forward_timeout_sec=5 s`）。这次前进返回 `MoveRelative timeout`
+时，Step1 会记录警告并继续；其他移动仍使用 `move_timeout_sec=35 s`，且失败会终止
+流程。随后在当前工作高度基础上向上抬升
 `action_8_lift_increment_m`（默认 `0.03 m`）并将武器旋转到最终角度。只有这一次
 额外抬升返回 `SetLift timeout` 时，Step1 会记录警告并继续后续动作；其他抬升失败
 仍会终止流程。随后使用

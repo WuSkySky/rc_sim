@@ -27,6 +27,7 @@ WEAPON_ROTATE_SERVICE = '/r2/weapon/set_rotate'
 WEAPON_GRIP_SERVICE = '/r2/weapon/set_grip'
 ALIGNMENT_TIMEOUT_PREFIX = 'Alignment timeout:'
 LIFT_TIMEOUT_MESSAGE = 'SetLift timeout'
+MOVE_RELATIVE_TIMEOUT_MESSAGE = 'MoveRelative timeout'
 
 
 @dataclass(frozen=True)
@@ -39,8 +40,10 @@ class StageOneConfig:
     action_5_weapon_rotate_rad: float
     action_5_weapon_grip_m: float
     action_6_backward_m: float
+    action_6_backward_timeout_sec: float
     action_7_weapon_grip_m: float
     action_8_pre_lift_forward_m: float
+    action_8_pre_lift_forward_timeout_sec: float
     action_8_lift_increment_m: float
     action_8_weapon_rotate_rad: float
     action_9_pre_lower_forward_m: float
@@ -70,8 +73,10 @@ PARAMETER_DEFAULTS = {
     'action_5_weapon_rotate_rad': math.pi / 2.0,
     'action_5_weapon_grip_m': 0.028,
     'action_6_backward_m': 0.10,
+    'action_6_backward_timeout_sec': 10.0,
     'action_7_weapon_grip_m': 0.0,
     'action_8_pre_lift_forward_m': 0.03,
+    'action_8_pre_lift_forward_timeout_sec': 5.0,
     'action_8_lift_increment_m': 0.03,
     'action_8_weapon_rotate_rad': math.radians(142.0),
     'action_9_pre_lower_forward_m': 0.05,
@@ -181,6 +186,8 @@ class StageOneController(AbortableMixin, Node):
             'alignment_timeout_sec',
             'weapon_timeout_sec',
             'final_release_delay_sec',
+            'action_6_backward_timeout_sec',
+            'action_8_pre_lift_forward_timeout_sec',
         )
         for name in positive:
             if getattr(config, name) <= 0.0:
@@ -305,19 +312,42 @@ class StageOneController(AbortableMixin, Node):
             raise RuntimeError(f'SetLift failed: {response.message}')
         return None
 
-    def move_relative(self, forward, left, yaw_delta, config):
+    def move_relative(
+        self,
+        forward,
+        left,
+        yaw_delta,
+        config,
+        timeout_sec=None,
+        allow_timeout=False,
+    ):
+        effective_timeout_sec = (
+            config.move_timeout_sec if timeout_sec is None else timeout_sec)
         request = self.move_relative_request(
-            forward, left, yaw_delta, config)
+            forward,
+            left,
+            yaw_delta,
+            config,
+            timeout_sec=effective_timeout_sec,
+        )
         response = self.wait_for_future(
             self.call_async_or_abort(self.move_client, request),
-            config.move_timeout_sec,
+            effective_timeout_sec,
             'MoveRelative',
         )
         if not response.success:
+            if (
+                allow_timeout and
+                response.message == MOVE_RELATIVE_TIMEOUT_MESSAGE
+            ):
+                return response.message
             raise RuntimeError(f'MoveRelative failed: {response.message}')
+        return None
 
     @staticmethod
-    def move_relative_request(forward, left, yaw_delta, config):
+    def move_relative_request(
+        forward, left, yaw_delta, config, timeout_sec=None
+    ):
         request = MoveRelative.Request()
         request.pose_source = MoveRelative.Request.SERIAL
         request.forward = float(forward)
@@ -325,7 +355,8 @@ class StageOneController(AbortableMixin, Node):
         request.yaw_delta = float(yaw_delta)
         request.position_tolerance = config.position_tolerance_m
         request.yaw_tolerance = config.yaw_tolerance_rad
-        request.timeout_sec = config.move_timeout_sec
+        request.timeout_sec = (
+            config.move_timeout_sec if timeout_sec is None else timeout_sec)
         return request
 
     def align_tip(self, config):
@@ -475,12 +506,25 @@ class StageOneController(AbortableMixin, Node):
             )
             warnings.append(warning)
             self.get_logger().warn(warning)
-        self.run_action(
+        backward_timeout = self.run_action(
             5,
             'move backward',
             lambda: self.move_relative(
-                -config.action_6_backward_m, 0.0, 0.0, config),
+                -config.action_6_backward_m,
+                0.0,
+                0.0,
+                config,
+                timeout_sec=config.action_6_backward_timeout_sec,
+                allow_timeout=True,
+            ),
         )
+        if backward_timeout is not None:
+            warning = (
+                'Action 5 (move backward) timed out; remaining actions '
+                f'continued: {backward_timeout}'
+            )
+            warnings.append(warning)
+            self.get_logger().warn(warning)
         self.run_action(
             6,
             'close weapon gripper',
@@ -492,12 +536,25 @@ class StageOneController(AbortableMixin, Node):
                 config,
             ),
         )
-        self.run_action(
+        pre_lift_move_timeout = self.run_action(
             7,
             'move forward before lifting chassis',
             lambda: self.move_relative(
-                config.action_8_pre_lift_forward_m, 0.0, 0.0, config),
+                config.action_8_pre_lift_forward_m,
+                0.0,
+                0.0,
+                config,
+                timeout_sec=config.action_8_pre_lift_forward_timeout_sec,
+                allow_timeout=True,
+            ),
         )
+        if pre_lift_move_timeout is not None:
+            warning = (
+                'Action 7 (move forward before lifting chassis) timed out; '
+                f'remaining actions continued: {pre_lift_move_timeout}'
+            )
+            warnings.append(warning)
+            self.get_logger().warn(warning)
         lift_timeout = self.run_action(
             8,
             'lift chassis before final weapon rotate',
