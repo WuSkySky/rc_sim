@@ -72,12 +72,12 @@ def valid_route():
 def default_config():
     return AllStepConfig(
         selected_stage=ConfigureAllStep.Request.STAGE_ONE,
-        team=StageOne.Request.RED,
+        team=AllStepControl.DEFAULT_TEAM,
         stage_two_move_cells=(),
         stage_two_kfs_cells=(),
         stage_three_loaded_count=3,
         ready=True,
-        message='已准备红方 Step1',
+        message=AllStepControl.DEFAULT_MESSAGE,
     )
 
 
@@ -119,7 +119,7 @@ def configure_request(stage, team=StageOne.Request.RED):
     return request
 
 
-def test_headless_default_button_starts_red_stage_one(monkeypatch):
+def test_headless_default_button_starts_blue_stage_one(monkeypatch):
     node = make_control()
     clock = FakeClock()
     monkeypatch.setattr(all_step_module.time, 'monotonic', clock.monotonic)
@@ -130,7 +130,7 @@ def test_headless_default_button_starts_red_stage_one(monkeypatch):
     assert len(node.set_base_pose_client.requests) == 1
     assert not node.stage_one_client.requests
     complete_relocalization(node.set_base_pose_client)
-    assert node.stage_one_client.requests[0].team == StageOne.Request.RED
+    assert node.stage_one_client.requests[0].team == StageOne.Request.BLUE
 
 
 def test_button_ignores_five_seconds_then_recovers_without_release(

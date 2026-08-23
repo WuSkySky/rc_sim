@@ -129,6 +129,7 @@ class CompetitionGuiNode(JointControlNodeMixin, Node):
 
 class CompetitionGuiApp(JointControlGuiMixin):
     CONFIG_RETRY_SEC = 1.0
+    DEFAULT_TEAM = StageOne.Request.BLUE
 
     def __init__(self, node):
         self.node = node
@@ -137,7 +138,7 @@ class CompetitionGuiApp(JointControlGuiMixin):
         self.root.resizable(False, False)
         self.root.protocol('WM_DELETE_WINDOW', self.close)
 
-        self.team_value = tk.StringVar(value=StageOne.Request.RED)
+        self.team_value = tk.StringVar(value=self.DEFAULT_TEAM)
         self.selected_stage = tk.IntVar(
             value=ConfigureAllStep.Request.STAGE_ONE)
         self.stage_three_count = tk.IntVar(value=3)

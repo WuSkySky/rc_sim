@@ -34,6 +34,8 @@ class AllStepConfig:
 
 
 class AllStepControl(Node):
+    DEFAULT_TEAM = StageOne.Request.BLUE
+    DEFAULT_MESSAGE = '已准备蓝方 Step1'
     BUTTON_TOPIC = '/r2/serial/button'
     CONFIGURE_SERVICE = '/r2/all_step/configure'
     STATUS_TOPIC = '/r2/all_step/status'
@@ -78,12 +80,12 @@ class AllStepControl(Node):
 
         self.config = AllStepConfig(
             selected_stage=ConfigureAllStep.Request.STAGE_ONE,
-            team=StageOne.Request.RED,
+            team=self.DEFAULT_TEAM,
             stage_two_move_cells=(),
             stage_two_kfs_cells=(),
             stage_three_loaded_count=3,
             ready=True,
-            message='已准备红方 Step1',
+            message=self.DEFAULT_MESSAGE,
         )
 
         status_qos = QoSProfile(

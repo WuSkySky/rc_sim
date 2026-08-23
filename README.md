@@ -41,7 +41,7 @@ ros2 run robot_r2_control competition_gui
 正式 GUI 左栏使用 Step1、Step2、Step3 三选一选择待执行阶段，并选择红/蓝方、
 配置任务。选择本身不会执行阶段；`real1.launch.py` 常驻的 `all_step_control`
 收到 `/r2/serial/button` 的物理按钮按下状态后才启动当前阶段。未运行 GUI 时，
-总控默认准备红方 Step1。Step2 固定使用路线模式：两个 4 行×3 列
+总控默认准备蓝方 Step1；正式 GUI 的队伍选择也默认蓝方。Step2 固定使用路线模式：两个 4 行×3 列
 矩阵分别表示移动路线和需要 Load 的 KFS。矩阵上方明确标注出口、下方明确标注
 入口，不显示服务内部的格子坐标或索引；路线格按点击顺序显示“第 N 步”，KFS
 格只显示“KFS”。每个矩阵均可独立清空。Step2 成功返回 `loaded_count=1..3` 时
@@ -352,7 +352,8 @@ ros2 service call /r2/stage_two_point_two_exit \
 可通过 `stage_two_point_two.yaml` 中的 `exit_cell_0_0_pose`、`exit_x_offset`
 动态修改。
 
-GUI 使用 Step1、Step2、Step3 共用的红/蓝方选择器，默认红方。调试 GUI 提供与
+GUI 使用 Step1、Step2、Step3 共用的红/蓝方选择器；调试 GUI 默认红方，正式 GUI
+默认蓝方。调试 GUI 提供与
 正式 GUI 相同的完整 Step2 双矩阵路线测试：矩阵上方为出口、下方为入口，不显示
 内部格子坐标；启动后以 ROUTE 模式调用 `/r2/stage_two`。执行前先重定位到 `(5,2)`
 格心，蓝方为 `(3.4,-3.0,π)`、红方为 `(3.4,3.0,π)`，两方均朝世界 `-X` 的

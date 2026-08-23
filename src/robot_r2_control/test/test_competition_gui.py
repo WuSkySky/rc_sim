@@ -91,6 +91,10 @@ def make_app():
     return app
 
 
+def test_formal_gui_default_team_is_blue():
+    assert CompetitionGuiApp.DEFAULT_TEAM == StageOne.Request.BLUE
+
+
 def test_grid_layout_has_expected_coordinate_set():
     assert len(GRID_CELLS) == 12
     assert set(GRID_CELLS) == {
